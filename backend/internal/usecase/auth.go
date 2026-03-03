@@ -3,6 +3,7 @@ package usecase
 import (
 	"errors"
 	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -83,6 +84,7 @@ func NewRegister(repo repository.UserRepository, hasher PasswordHasher) *Registe
 }
 
 func (uc *Register) Register(in RegisterInput) (*domain.User, error) {
+	in.Email = strings.TrimSpace(strings.ToLower(in.Email))
 	if in.Email == "" || in.FirstName == "" || in.LastName == "" || in.BirthDate == "" {
 		return nil, ErrValidation
 	}
@@ -138,7 +140,11 @@ func NewLogin(repo repository.UserRepository, hasher PasswordHasher, issuer Toke
 }
 
 func (uc *Login) Login(in LoginInput) (*domain.User, string, error) {
-	user, err := uc.repo.ByEmail(in.Email)
+	email := strings.TrimSpace(strings.ToLower(in.Email))
+	if email == "" {
+		return nil, "", ErrInvalidCredentials
+	}
+	user, err := uc.repo.ByEmail(email)
 	if err != nil {
 		return nil, "", err
 	}

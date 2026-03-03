@@ -56,7 +56,7 @@ func main() {
 	createAssignmentUC := usecase.NewCreateAssignment(memberRepo, assignmentRepo)
 	getAssignmentUC := usecase.NewGetAssignment(memberRepo, assignmentRepo)
 	getCourseFeedUC := usecase.NewGetCourseFeed(memberRepo, postRepo, materialRepo, assignmentRepo)
-	createSubmissionUC := usecase.NewCreateSubmission(memberRepo, submissionRepo)
+	createSubmissionUC := usecase.NewCreateSubmission(memberRepo, assignmentRepo, submissionRepo)
 	listSubmissionsUC := usecase.NewListSubmissions(memberRepo, assignmentRepo, submissionRepo)
 	gradeSubmissionUC := usecase.NewGradeSubmission(memberRepo, assignmentRepo, submissionRepo)
 	getStudentGradesUC := usecase.NewGetStudentGrades(memberRepo, assignmentRepo, submissionRepo)

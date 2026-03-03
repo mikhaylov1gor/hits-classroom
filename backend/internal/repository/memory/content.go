@@ -31,6 +31,9 @@ func (r *PostRepository) Create(p *domain.Post) error {
 func (r *PostRepository) ListByCourse(courseID string) ([]*domain.Post, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.byCid[courseID] == nil {
+		return []*domain.Post{}, nil
+	}
 	return r.byCid[courseID], nil
 }
 
@@ -60,6 +63,9 @@ func (r *MaterialRepository) Create(m *domain.Material) error {
 func (r *MaterialRepository) ListByCourse(courseID string) ([]*domain.Material, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.byCid[courseID] == nil {
+		return []*domain.Material{}, nil
+	}
 	return r.byCid[courseID], nil
 }
 
@@ -95,6 +101,9 @@ func (r *AssignmentRepository) GetByID(id string) (*domain.Assignment, error) {
 func (r *AssignmentRepository) ListByCourse(courseID string) ([]*domain.Assignment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.byCid[courseID] == nil {
+		return []*domain.Assignment{}, nil
+	}
 	return r.byCid[courseID], nil
 }
 
@@ -141,6 +150,9 @@ func (r *SubmissionRepository) GetByAssignmentAndUser(assignmentID, userID strin
 func (r *SubmissionRepository) ListByAssignment(assignmentID string) ([]*domain.Submission, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.byAssign[assignmentID] == nil {
+		return []*domain.Submission{}, nil
+	}
 	return r.byAssign[assignmentID], nil
 }
 
@@ -181,6 +193,9 @@ func (r *CommentRepository) Create(c *domain.Comment) error {
 func (r *CommentRepository) ListByAssignment(assignmentID string) ([]*domain.Comment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.byAssign[assignmentID] == nil {
+		return []*domain.Comment{}, nil
+	}
 	return r.byAssign[assignmentID], nil
 }
 
