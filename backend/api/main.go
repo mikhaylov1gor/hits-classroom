@@ -26,8 +26,10 @@ func main() {
 
 	courseRepo := memory.NewCourseRepository()
 	memberRepo := memory.NewCourseMemberRepository()
-	createCourseUC := usecase.NewCreateCourse(courseRepo, memberRepo)
 	authMiddleware := &httphandler.AuthMiddleware{Secret: jwtSecret}
+	createCourseUC := usecase.NewCreateCourse(courseRepo, memberRepo)
+	joinCourseUC := usecase.NewJoinCourse(courseRepo, memberRepo)
+	mux.Handle("/api/v1/courses/join", authMiddleware.Handler(httphandler.NewJoinCourseHandler(joinCourseUC)))
 	mux.Handle("/api/v1/courses", authMiddleware.Handler(httphandler.NewCreateCourseHandler(createCourseUC)))
 
 	log.Println("server starting on :8080")
