@@ -1,25 +1,30 @@
 import { useEffect, useState } from 'react'
 import {
+  Avatar,
   Box,
   Card,
   CardContent,
   CircularProgress,
+  IconButton,
   Typography,
 } from '@mui/material'
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
+import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { useNavigate } from 'react-router-dom'
-import { listCourses } from '../../api/coursesApi'
+import { listCourses, listCourseMembers } from '../../api/coursesApi'
 import { useCourses } from '../../model/CoursesContext'
-import type { CourseWithRole } from '../../model/types'
+import type { CourseWithRole, Member } from '../../model/types'
 
 const COURSE_GRADIENTS: [string, string][] = [
-  ['#667eea', '#764ba2'],
-  ['#11998e', '#38ef7d'],
-  ['#4facfe', '#00f2fe'],
-  ['#f093fb', '#f5576c'],
-  ['#ee9ca7', '#ffdde1'],
-  ['#a18cd1', '#fbc2eb'],
-  ['#ff6b6b', '#feca57'],
-  ['#48c6ef', '#6f86d6'],
+  ['#7eb8a8', '#a8ddc4'],
+  ['#7eb8d4', '#b3dff0'],
+  ['#a8a0c0', '#c9c4dc'],
+  ['#8ec9a0', '#b8e0c8'],
+  ['#7eb0d8', '#a8d4f0'],
+  ['#e8a898', '#f0c8c0'],
+  ['#e8c890', '#f0dcb8'],
+  ['#b8a8d8', '#d4c8e8'],
 ]
 
 function getCourseGradient(id: string): [string, string] {
@@ -30,6 +35,12 @@ function getCourseGradient(id: string): [string, string] {
   return COURSE_GRADIENTS[Math.abs(hash) % COURSE_GRADIENTS.length]
 }
 
+function getInitials(m: Member): string {
+  const first = (m.first_name?.[0] ?? '').toUpperCase()
+  const last = (m.last_name?.[0] ?? '').toUpperCase()
+  return (first + last) || m.email[0]?.toUpperCase() || '?'
+}
+
 type CoursesTabProps = {
   onCoursesLoaded?: (courses: CourseWithRole[]) => void
 }
@@ -37,6 +48,7 @@ type CoursesTabProps = {
 export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [owners, setOwners] = useState<Record<string, Member>>({})
   const navigate = useNavigate()
   const ctx = useCourses()
   const [localCourses, setLocalCourses] = useState<CourseWithRole[]>([])
@@ -70,8 +82,33 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!courses?.length) return
+    let cancelled = false
+    const loadOwners = async () => {
+      const results = await Promise.allSettled(
+        courses.map((c) => listCourseMembers(c.id)),
+      )
+      if (cancelled) return
+      const next: Record<string, Member> = {}
+      results.forEach((result, i) => {
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+          const owner = result.value.find((m) => m.role === 'owner')
+          const teacher = result.value.find((m) => m.role === 'teacher')
+          const first = owner ?? teacher ?? result.value[0]
+          next[courses[i].id] = first
+        }
+      })
+      setOwners((prev) => ({ ...prev, ...next }))
+    }
+    loadOwners()
+    return () => {
+      cancelled = true
+    }
+  }, [courses])
+
   return (
-    <Box className="mt-4 space-y-4">
+    <Box className="mt-4 space-y-4 pb-24 md:pb-0">
       {loading && !error && (
         <Box className="flex justify-center py-10">
           <CircularProgress />
@@ -90,7 +127,7 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
 
       {courses && courses.length > 0 && (
         <Box
-          className="grid gap-4 max-h-[70vh] overflow-auto"
+          className="grid gap-3 sm:gap-4 max-h-none md:max-h-[70vh] overflow-auto"
           sx={{
             gridTemplateColumns: {
               xs: 'repeat(1, 1fr)',
@@ -101,6 +138,10 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
           }}
         >
           {courses.map((course) => {
+            const owner = owners[course.id]
+            const ownerName = owner
+              ? `${owner.first_name} ${owner.last_name}`.trim() || owner.email
+              : '—'
             const roleLabel =
               course.role === 'owner'
                 ? 'Роль: владелец'
@@ -112,45 +153,83 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
                 key={course.id}
                 component="button"
                 elevation={0}
-                className="overflow-hidden cursor-pointer border border-slate-200 rounded-2xl transition-all duration-200 hover:shadow-md hover:border-slate-300 text-left w-full"
+                className="overflow-visible cursor-pointer border border-slate-200 rounded-2xl transition-all duration-200 hover:shadow-lg hover:border-slate-300 text-left w-full"
                 onClick={() => navigate(`/course/${course.id}`)}
                 sx={{
                   '&:hover': {
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
                   },
                 }}
               >
-                <Box
-                  className="h-24 flex items-end p-4 relative overflow-hidden"
-                  sx={{
-                    background: (() => {
-                      const [from, to] = getCourseGradient(course.id)
-                      return `linear-gradient(135deg, ${from} 0%, ${to} 100%)`
-                    })(),
-                    '&::before': {
-                      content: '""',
-                      position: 'absolute',
-                      inset: 0,
-                      background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.15) 100%)',
-                      pointerEvents: 'none',
-                    },
-                  }}
-                >
-                  <Typography
-                    variant="h6"
-                    className="font-medium text-white line-clamp-2 relative z-10"
+                <Box className="relative">
+                  <Box
+                    className="h-28 sm:h-32 flex flex-col justify-end p-3 sm:p-4 pb-5 sm:pb-6 relative overflow-hidden"
                     sx={{
-                      textShadow: '0 1px 3px rgba(0,0,0,0.3), 0 2px 6px rgba(0,0,0,0.2)',
-                      fontSize: { xs: '1rem', sm: '1.1rem' },
+                      background: (() => {
+                        const [from, to] = getCourseGradient(course.id)
+                        return `linear-gradient(135deg, ${from} 0%, ${to} 100%)`
+                      })(),
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        inset: 0,
+                        background:
+                          'linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.06) 100%)',
+                        pointerEvents: 'none',
+                      },
                     }}
                   >
-                    {course.title}
-                  </Typography>
+                    <Typography
+                      variant="h6"
+                      className="font-medium text-slate-800 line-clamp-2 relative z-10"
+                      sx={{
+                        textShadow: '0 1px 2px rgba(255,255,255,0.5)',
+                        fontSize: { xs: '1rem', sm: '1.05rem' },
+                      }}
+                    >
+                      {course.title}
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      className="text-slate-700 relative z-10 mt-0.5"
+                      sx={{ textShadow: '0 1px 2px rgba(255,255,255,0.5)' }}
+                    >
+                      {ownerName}
+                    </Typography>
+                  </Box>
+                  <Avatar
+                    sx={{
+                      position: 'absolute',
+                      right: { xs: 10, sm: 12 },
+                      bottom: -18,
+                      width: { xs: 36, sm: 40 },
+                      height: { xs: 36, sm: 40 },
+                      fontSize: { xs: '0.875rem', sm: '1rem' },
+                      bgcolor: 'primary.main',
+                      fontSize: '1rem',
+                      border: '3px solid white',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                      zIndex: 2,
+                    }}
+                  >
+                    {owner ? getInitials(owner) : '?'}
+                  </Avatar>
                 </Box>
-                <CardContent className="py-3 px-4">
-                  <Typography variant="body2" className="text-slate-500">
+                <CardContent className="py-3 px-3 sm:py-4 sm:px-4 pt-5 sm:pt-6">
+                  <Typography variant="body2" className="text-slate-500 mb-3">
                     {roleLabel}
                   </Typography>
+                  <Box className="flex justify-end gap-0.5">
+                    <IconButton size="small" className="text-slate-400" disabled>
+                      <ImageOutlinedIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton size="small" className="text-slate-400" disabled>
+                      <FolderOutlinedIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton size="small" className="text-slate-400" disabled>
+                      <MoreVertIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
                 </CardContent>
               </Card>
             )

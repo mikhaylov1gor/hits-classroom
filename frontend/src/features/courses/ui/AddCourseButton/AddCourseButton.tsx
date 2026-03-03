@@ -82,20 +82,28 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
         }}
         anchorOrigin={
           variant === 'fab'
-            ? { vertical: 'top', horizontal: 'right' }
+            ? { vertical: 'top', horizontal: 'center' }
             : { vertical: 'bottom', horizontal: 'left' }
         }
         transformOrigin={
           variant === 'fab'
-            ? { vertical: 'bottom', horizontal: 'right' }
+            ? { vertical: 'bottom', horizontal: 'center' }
             : { vertical: 'top', horizontal: 'left' }
         }
+        slotProps={{
+          paper: {
+            sx:
+              variant === 'fab'
+                ? { width: 'min(320px, calc(100vw - 32px))', maxWidth: 'calc(100vw - 32px)' }
+                : undefined,
+          },
+        }}
       >
         <Box
           component="form"
           noValidate
           onSubmit={handleJoin}
-          className="flex flex-col gap-3 p-4 min-w-[280px]"
+          className="flex flex-col gap-3 p-4 min-w-[280px] max-w-full"
         >
           <TextField
             label="Код курса"

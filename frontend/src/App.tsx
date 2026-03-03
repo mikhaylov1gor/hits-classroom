@@ -19,6 +19,7 @@ import LoginPage from './pages/login/ui/LoginPage'
 import RegisterPage from './pages/register/ui/RegisterPage'
 import HomePage from './pages/home/ui/HomePage'
 import CoursesTab from './features/courses/ui/CoursesTab/CoursesTab'
+import CoursePage from './pages/course/ui/CoursePage'
 import ProfileTab from './features/profile/ui/ProfileTab/ProfileTab'
 import { AddCourseButton } from './features/courses/ui/AddCourseButton/AddCourseButton'
 import { CoursesProvider, useCourses } from './features/courses/model/CoursesContext'
@@ -81,12 +82,12 @@ function AppShellContent() {
     <Box className="min-h-screen flex flex-col">
         {!isAuthPage && (
           <AppBar position="static" color="transparent" elevation={0}>
-            <Toolbar className="flex justify-between items-center h-16 md:h-20 border-b border-slate-100 bg-white/95 backdrop-blur-sm">
+            <Toolbar className="flex justify-between items-center h-14 min-h-[56px] md:h-20 border-b border-slate-100 bg-white/95 backdrop-blur-sm px-3 md:px-4">
               <Typography
                 variant="h6"
                 component={RouterLink}
                 to="/"
-                className="font-semibold tracking-tight text-primary-800 no-underline"
+                className="font-semibold tracking-tight text-primary-800 no-underline truncate max-w-[60vw]"
               >
                 hits-classroom
               </Typography>
@@ -165,6 +166,7 @@ function AppShellContent() {
             position: 'fixed',
             bottom: 16,
             right: 16,
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             zIndex: 1000,
           }}
         >
@@ -255,8 +257,10 @@ function AppShellContent() {
         )}
 
         <Box
-          className="flex-1 flex flex-col"
-          style={{ marginLeft: !isAuthPage && isDesktop ? 80 : 0 }}
+          className="flex-1 flex flex-col transition-[margin-left] duration-200 ease-in-out min-w-0 overflow-x-hidden"
+          style={{
+            marginLeft: !isAuthPage && isDesktop ? (isSidebarExpanded ? 240 : 80) : 0,
+          }}
         >
           <Routes>
             <Route
@@ -281,7 +285,7 @@ function AppShellContent() {
               path="/course/:courseId"
               element={
                 <RequireAuth>
-                  <CoursesTab />
+                  <CoursePage />
                 </RequireAuth>
               }
             />
