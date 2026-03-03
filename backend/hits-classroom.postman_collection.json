@@ -1,0 +1,446 @@
+{
+	"info": {
+		"_postman_id": "hits-classroom-api",
+		"name": "hits-classroom API",
+		"description": "LMS API: курсы, посты, материалы, задания, ответы, оценки, комментарии.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{ "key": "baseUrl", "value": "http://localhost:8080" },
+		{ "key": "token", "value": "" },
+		{ "key": "courseId", "value": "" },
+		{ "key": "assignmentId", "value": "" },
+		{ "key": "submissionId", "value": "" },
+		{ "key": "userId", "value": "" },
+		{ "key": "inviteCode", "value": "" }
+	],
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": "{{baseUrl}}/health",
+						"description": "Проверка доступности сервиса."
+					}
+				}
+			]
+		},
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Register",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const body = pm.response.json();",
+									"    if (body.id) pm.collectionVariables.set('userId', body.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [ { "key": "Content-Type", "value": "application/json" } ],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"teacher@test.com\",\n  \"password\": \"password12\",\n  \"first_name\": \"Teacher\",\n  \"last_name\": \"One\",\n  \"birth_date\": \"1990-01-15\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/auth/register",
+						"description": "Регистрация (F-16). После 201 в коллекцию сохраняется userId."
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const body = pm.response.json();",
+									"    if (body.token) pm.collectionVariables.set('token', body.token);",
+									"    if (body.user && body.user.id) pm.collectionVariables.set('userId', body.user.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [ { "key": "Content-Type", "value": "application/json" } ],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"teacher@test.com\",\n  \"password\": \"password12\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/auth/login",
+						"description": "Авторизация (F-17). Токен сохраняется в переменную token."
+					}
+				}
+			]
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "Get me (profile)",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/users/me",
+						"description": "Текущий пользователь."
+					}
+				},
+				{
+					"name": "Update me (profile)",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"Teacher\",\n  \"last_name\": \"Updated\",\n  \"birth_date\": \"1990-01-20\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/users/me",
+						"description": "Редактирование профиля (F-20)."
+					}
+				}
+			]
+		},
+		{
+			"name": "Courses",
+			"item": [
+				{
+					"name": "List courses",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses",
+						"description": "Список курсов текущего пользователя."
+					}
+				},
+				{
+					"name": "Create course",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const body = pm.response.json();",
+									"    if (body.id) pm.collectionVariables.set('courseId', body.id);",
+									"    if (body.invite_code) pm.collectionVariables.set('inviteCode', body.invite_code);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Математика 101\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses",
+						"description": "Создание курса (F-01). courseId и invite_code сохраняются в переменные."
+					}
+				},
+				{
+					"name": "Join course",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"{{inviteCode}}\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/join",
+						"description": "Присоединение по коду (F-02). Использует переменную inviteCode (или вставь 8 символов)."
+					}
+				},
+				{
+					"name": "Get course",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+						"description": "Получение курса по ID."
+					}
+				},
+				{
+					"name": "Update course",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Математика 101 (обновлено)\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+						"description": "Переименование курса (F-06), owner/teacher."
+					}
+				},
+				{
+					"name": "Get invite code",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/invite-code",
+						"description": "Код приглашения (F-04), owner/teacher."
+					}
+				},
+				{
+					"name": "List course members",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/members",
+						"description": "Участники курса. userId из ответа можно подставить в members/{userId}/grades."
+					}
+				},
+				{
+					"name": "Assign teacher",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{userId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/members",
+						"description": "Назначить преподавателя (F-07), только owner. user_id — участник курса."
+					}
+				},
+				{
+					"name": "Get course feed",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/feed",
+						"description": "Лента: посты, материалы, задания."
+					}
+				},
+				{
+					"name": "Delete course",
+					"request": {
+						"method": "DELETE",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+						"description": "Удаление курса (F-05), только owner."
+					}
+				}
+			]
+		},
+		{
+			"name": "Posts",
+			"item": [
+				{
+					"name": "Create post",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Добро пожаловать на курс\",\n  \"body\": \"Начинаем в понедельник.\",\n  \"file_ids\": []\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/posts",
+						"description": "Создание поста (F-09), owner/teacher."
+					}
+				}
+			]
+		},
+		{
+			"name": "Materials",
+			"item": [
+				{
+					"name": "Create material",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Лекция 1. Введение\",\n  \"body\": \"Текст лекции...\",\n  \"file_ids\": []\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/materials",
+						"description": "Создание материала (F-10), owner/teacher."
+					}
+				}
+			]
+		},
+		{
+			"name": "Assignments",
+			"item": [
+				{
+					"name": "Create assignment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const body = pm.response.json();",
+									"    if (body.id) pm.collectionVariables.set('assignmentId', body.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Домашняя работа 1\",\n  \"body\": \"Решить задачи 1–5 из учебника.\",\n  \"file_ids\": [],\n  \"deadline\": \"2025-12-31T23:59:59Z\"\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments",
+						"description": "Создание задания (F-08, F-18). assignmentId сохраняется в переменную."
+					}
+				},
+				{
+					"name": "Get assignment",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}",
+						"description": "Получение задания."
+					}
+				}
+			]
+		},
+		{
+			"name": "Submissions",
+			"item": [
+				{
+					"name": "Create submission",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const body = pm.response.json();",
+									"    if (body.id) pm.collectionVariables.set('submissionId', body.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"body\": \"Решение приложено.\",\n  \"file_ids\": []\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions",
+						"description": "Ответ на задание (F-11). Один раз на задание (F-12). submissionId сохраняется."
+					}
+				},
+				{
+					"name": "List submissions",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions",
+						"description": "Все ответы по заданию (F-13), teacher."
+					}
+				},
+				{
+					"name": "Grade submission",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"grade\": 85\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/{{submissionId}}/grade",
+						"description": "Оценка 0–100 (F-14), teacher."
+					}
+				},
+				{
+					"name": "Get student grades",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/members/{{userId}}/grades",
+						"description": "Оценки студента в курсе (F-15). userId — участник курса (свой или чужой для учителя)."
+					}
+				}
+			]
+		},
+		{
+			"name": "Comments",
+			"item": [
+				{
+					"name": "List comments",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}" } ],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments",
+						"description": "Комментарии к заданию (F-19)."
+					}
+				},
+				{
+					"name": "Create comment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"body\": \"Вопрос по условию задачи 3.\",\n  \"file_ids\": []\n}"
+						},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments",
+						"description": "Добавить комментарий к заданию."
+					}
+				}
+			]
+		}
+	]
+}
