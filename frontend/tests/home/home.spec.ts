@@ -51,11 +51,10 @@ test.describe('Главный экран и профиль', () => {
 
     await expect(page).toHaveURL(/\/$/)
 
-    await expect(page.getByRole('tab', { name: /список курсов/i })).toBeVisible()
-    await expect(page.getByRole('tab', { name: /профиль/i })).toBeVisible()
+    await expect(page.getByText(/у вас пока нет курсов/i)).toBeVisible()
   })
 
-  test('переключение на вкладку Профиль и отображение данных пользователя', async ({ page }) => {
+  test('переход в профиль и отображение данных пользователя', async ({ page }) => {
     await page.route('**/api/v1/users/me', async (route) => {
       await route.fulfill({
         status: 200,
@@ -81,7 +80,7 @@ test.describe('Главный экран и профиль', () => {
 
     await page.goto('/')
 
-    await page.getByRole('tab', { name: /профиль/i }).click()
+    await page.getByRole('menuitem', { name: /профиль/i }).click()
 
     await expect(page.getByLabel('ФИО')).toHaveValue('Иван Иванов')
     await expect(page.getByLabel('Email')).toHaveValue('student@example.com')
@@ -135,14 +134,14 @@ test.describe('Главный экран и профиль', () => {
 
     await page.goto('/')
 
-    await page.getByRole('tab', { name: /профиль/i }).click()
+    await page.getByRole('menuitem', { name: /профиль/i }).click()
 
-    await page.getByLabel('ФИО').fill('Пётр Петров')
+    await page.getByRole('button', { name: /редактировать/i }).click()
+
     await page.getByLabel('Дата рождения').fill('1999-12-31')
 
     await page.getByRole('button', { name: /сохранить/i }).click()
 
-    await expect(page.getByLabel('ФИО')).toHaveValue('Пётр Петров')
     await expect(page.getByLabel('Дата рождения')).toHaveValue('1999-12-31')
   })
 
@@ -172,7 +171,7 @@ test.describe('Главный экран и профиль', () => {
 
     await page.goto('/')
 
-    await page.getByRole('tab', { name: /профиль/i }).click()
+    await page.getByRole('menuitem', { name: /профиль/i }).click()
 
     await page.getByRole('button', { name: /выйти/i }).click()
 
@@ -250,8 +249,6 @@ test.describe('Главный экран и профиль', () => {
     })
 
     await page.goto('/')
-
-    await page.getByRole('tab', { name: /список курсов/i }).click()
 
     await expect(page.getByText(/у вас пока нет курсов/i)).toBeVisible()
   })
