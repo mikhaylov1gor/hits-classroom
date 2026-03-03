@@ -26,8 +26,7 @@ export async function loginApi(form: LoginForm): Promise<LoginResponse> {
   })
 
   if (response.status === 401) {
-    const error = new Error('INVALID_CREDENTIALS')
-    throw error
+    throw new Error('INVALID_CREDENTIALS')
   }
 
   if (!response.ok) {
@@ -59,8 +58,7 @@ export async function registerApi(form: RegisterForm): Promise<User> {
   })
 
   if (response.status === 409) {
-    const error = new Error('EMAIL_EXISTS')
-    throw error
+    throw new Error('EMAIL_EXISTS')
   }
 
   if (!response.ok) {

@@ -16,6 +16,11 @@ type AuthState = {
 
 type AuthContextValue = AuthState & {
   applyLogin: (response: LoginResponse) => void
+  /**
+   * Hydrate user from a trusted server response (например, /api/v1/users/me),
+   * когда у нас уже есть сессия на сервере (cookie), но нет данных в localStorage.
+   */
+  setUserFromServer: (user: User) => void
   logout: () => void
 }
 
@@ -60,6 +65,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     })
   }, [])
 
+  const setUserFromServer = useCallback((user: User) => {
+    setState((prev) => ({
+      user,
+      // если токена нет, оставляем null — сервер может жить на cookies
+      token: prev.token ?? null,
+    }))
+  }, [])
+
   const logout = useCallback(() => {
     setState({ user: null, token: null })
   }, [])
@@ -69,9 +82,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user: state.user,
       token: state.token,
       applyLogin,
+      setUserFromServer,
       logout,
     }),
-    [state.user, state.token, applyLogin, logout],
+    [state.user, state.token, applyLogin, setUserFromServer, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -84,5 +98,4 @@ export function useAuth() {
   }
   return ctx
 }
-
 
