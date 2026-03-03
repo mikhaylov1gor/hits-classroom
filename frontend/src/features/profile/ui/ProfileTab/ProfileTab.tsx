@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Box, Button, Card, CardContent, TextField, Typography } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
 import type { User } from '../../../auth/model/types'
-import { fetchCurrentUser, updateCurrentUser } from '../../api/profileApi'
 import { useAuth } from '../../../auth/model/AuthContext'
+import { useCurrentUserQuery, useUpdateProfileMutation } from '../../model/profileQueries'
 
 type ProfileErrors = {
   fullName?: string
@@ -21,32 +21,22 @@ export function ProfileTab() {
   const [errors, setErrors] = useState<ProfileErrors>({})
   const { logout } = useAuth()
   const navigate = useNavigate()
+  const { data, isLoading, isError } = useCurrentUserQuery(true)
+  const updateProfileMutation = useUpdateProfileMutation()
 
   useEffect(() => {
-    let cancelled = false
-
-    fetchCurrentUser()
-      .then((data) => {
-        if (cancelled) return
-        setUser(data)
-        setFullName(`${data.first_name} ${data.last_name}`.trim())
-        setBirthDate(data.birth_date)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setErrors({ general: 'Не удалось загрузить профиль' })
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
+    if (data) {
+      setUser(data)
+      setFullName(`${data.first_name} ${data.last_name}`.trim())
+      setBirthDate(data.birth_date)
+      setLoading(false)
+    } else if (!isLoading) {
+      setLoading(false)
+      if (isError) {
+        setErrors({ general: 'Не удалось загрузить профиль' })
+      }
     }
-  }, [])
+  }, [data, isLoading, isError])
 
   const handleSave = async () => {
     const nextErrors: ProfileErrors = {}
@@ -64,7 +54,7 @@ export function ProfileTab() {
 
     setSaving(true)
     try {
-      const updated = await updateCurrentUser({
+      const updated = await updateProfileMutation.mutateAsync({
         fullName,
         birthDate,
       })

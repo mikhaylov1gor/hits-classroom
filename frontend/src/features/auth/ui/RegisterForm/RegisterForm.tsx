@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Alert, Box, Button, Card, CardContent, Link, TextField, Typography } from '@mui/material'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
-import { registerApi } from '../../api/authApi'
-import type { LoginResponse, RegisterForm as RegisterFormValues } from '../../model/types'
+import { loginApi, registerApi } from '../../api/authApi'
+import type { RegisterForm as RegisterFormValues } from '../../model/types'
 import { useAuth } from '../../model/AuthContext'
 
 type RegisterErrors = {
@@ -68,12 +68,12 @@ export function RegisterForm() {
 
     setSubmitting(true)
     try {
-      const registeredUser = await registerApi(form)
+      await registerApi(form)
 
-      const loginResponse: LoginResponse = {
-        token: 'registered-user-token',
-        user: registeredUser,
-      }
+      const loginResponse = await loginApi({
+        email: form.email,
+        password: form.password,
+      })
 
       applyLogin(loginResponse)
       navigate('/', { replace: true })

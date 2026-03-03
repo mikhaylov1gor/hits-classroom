@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../features/auth/model/AuthContext'
-import { fetchCurrentUser } from '../features/profile/api/profileApi'
+import { useCurrentUserQuery } from '../features/profile/model/profileQueries'
 
 type RequireAuthProps = {
   children: ReactElement
@@ -11,29 +11,20 @@ export function RequireAuth({ children }: RequireAuthProps) {
   const { user, setUserFromServer } = useAuth()
   const location = useLocation()
   const [hasCheckedServer, setHasCheckedServer] = useState(false)
+  const { data: serverUser, isLoading } = useCurrentUserQuery(!user && !hasCheckedServer)
 
   useEffect(() => {
-    let cancelled = false
-
     if (user || hasCheckedServer) {
       return
     }
 
-    fetchCurrentUser()
-      .then((serverUser) => {
-        if (cancelled) return
-        setUserFromServer(serverUser)
-        setHasCheckedServer(true)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setHasCheckedServer(true)
-      })
-
-    return () => {
-      cancelled = true
+    if (serverUser) {
+      setUserFromServer(serverUser)
+      setHasCheckedServer(true)
+    } else if (!isLoading) {
+      setHasCheckedServer(true)
     }
-  }, [user, hasCheckedServer, setUserFromServer])
+  }, [user, hasCheckedServer, serverUser, isLoading, setUserFromServer])
 
   // Пока разбираемся, есть ли сессия на сервере — ничего не рендерим,
   // чтобы не мигать редиректом на /login.
