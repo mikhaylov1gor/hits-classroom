@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Avatar,
   Box,
@@ -14,17 +14,18 @@ import {
   List,
   ListItem,
   ListItemText,
+  Menu,
+  MenuItem,
   Tab,
   Tabs,
+  TextField,
   Typography,
 } from '@mui/material'
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
+import PersonRemoveOutlinedIcon from '@mui/icons-material/PersonRemoveOutlined'
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
-import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined'
-import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined'
-import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
-import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined'
-import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   getCourse,
@@ -32,17 +33,29 @@ import {
   getCourseFeed,
   listCourseMembers,
   deleteCourse,
+  removeMember,
+  updateMemberRole,
+  updateCourse,
 } from '../../api/coursesApi'
+import { useAuth } from '../../../auth/model/AuthContext'
 import { useCourses } from '../../model/CoursesContext'
-import { CourseHeader } from '../CourseHeader/CourseHeader'
+import { CourseBanner } from '../CourseHeader/CourseBanner'
+import { AnnouncementCard } from './AnnouncementCard'
+import { UserProfileDialog } from './UserProfileDialog'
 import type { CourseTabId, CourseWithRole, FeedItem, Member } from '../../model/types'
+
+const ROLE_LABELS: Record<string, string> = {
+  owner: 'владелец',
+  teacher: 'преподаватель',
+  student: 'студент',
+}
 
 const TAB_LABELS: Record<CourseTabId, string> = {
   assignments: 'Задания',
   posts: 'Посты',
   materials: 'Материалы',
   users: 'Пользователи',
-  settings: 'Настройки',
+  settings: 'Настройки класса',
 }
 
 function TabPanel({
@@ -61,6 +74,17 @@ function TabPanel({
   )
 }
 
+function getUpcomingAssignments(assignments: FeedItem[]): FeedItem[] {
+  const now = new Date()
+  const nextWeek = new Date(now)
+  nextWeek.setDate(nextWeek.getDate() + 7)
+  return assignments.filter((a) => {
+    if (!a.deadline) return false
+    const d = new Date(a.deadline)
+    return d >= now && d <= nextWeek
+  })
+}
+
 export function CoursePage() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
@@ -75,8 +99,23 @@ export function CoursePage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [copySnackbar, setCopySnackbar] = useState(false)
+  const [profileMember, setProfileMember] = useState<Member | null>(null)
+  const [excludeMember, setExcludeMember] = useState<Member | null>(null)
+  const [excludeLoading, setExcludeLoading] = useState(false)
+  const [roleMenuAnchor, setRoleMenuAnchor] = useState<{
+    el: HTMLElement
+    member: Member
+    position: { top: number; left: number }
+  } | null>(null)
+  const [isEditingRename, setIsEditingRename] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [renameLoading, setRenameLoading] = useState(false)
+  const renameFormRef = useRef<HTMLDivElement>(null)
+  const saveClickedRef = useRef(false)
 
+  const { user: authUser } = useAuth()
   const isTeacher = course?.role === 'teacher' || course?.role === 'owner'
+  const isOwner = course?.role === 'owner'
   const showSettingsTab = isTeacher
 
   const tabIds: CourseTabId[] = ['assignments', 'posts', 'materials', 'users']
@@ -141,9 +180,10 @@ export function CoursePage() {
     }
   }, [courseId, currentTabId])
 
-  const handleCourseUpdated = (updated: CourseWithRole) => {
-    setCourse(updated)
-    ctx?.addCourse(updated)
+  const handleCourseUpdated = (updated: Partial<CourseWithRole>) => {
+    const merged = course ? { ...course, ...updated } : (updated as CourseWithRole)
+    setCourse(merged)
+    ctx?.addCourse(merged)
   }
 
   const handleCourseDeleted = () => {
@@ -172,6 +212,83 @@ export function CoursePage() {
     }
   }
 
+  const refreshMembers = () => {
+    if (courseId) {
+      listCourseMembers(courseId).then(setMembers).catch(() => setMembers([]))
+    }
+  }
+
+  const canExclude = (m: Member): boolean => {
+    if (m.user_id === authUser?.id) return false
+    if (isOwner) return true
+    if (isTeacher && m.role === 'student') return true
+    return false
+  }
+
+  const canChangeRole = (m: Member): boolean => {
+    return isOwner && m.user_id !== authUser?.id && m.role !== 'owner'
+  }
+
+  const handleExcludeConfirm = async () => {
+    if (!courseId || !excludeMember) return
+    setExcludeLoading(true)
+    try {
+      await removeMember(courseId, excludeMember.user_id)
+      setExcludeMember(null)
+      refreshMembers()
+      setProfileMember((prev) => (prev?.user_id === excludeMember.user_id ? null : prev))
+    } finally {
+      setExcludeLoading(false)
+    }
+  }
+
+  const handleRoleChange = async (member: Member, newRole: 'teacher' | 'owner') => {
+    if (!courseId) return
+    setRoleMenuAnchor(null)
+    try {
+      await updateMemberRole(courseId, member.user_id, newRole)
+      refreshMembers()
+      setProfileMember((prev) =>
+        prev?.user_id === member.user_id ? { ...prev, role: newRole } : prev,
+      )
+    } catch {
+      // TODO: show error
+    }
+  }
+
+  const handleAssignmentClick = () => {
+    setProfileMember(null)
+    setTabValue(tabIds.indexOf('assignments'))
+  }
+
+  const handleStartRename = () => {
+    setEditTitle(course.title)
+    setIsEditingRename(true)
+  }
+
+  const handleSaveRename = async () => {
+    const trimmed = editTitle.trim()
+    if (!trimmed || trimmed === course.title || !courseId) {
+      setIsEditingRename(false)
+      return
+    }
+    setRenameLoading(true)
+    try {
+      const updated = await updateCourse(courseId, { title: trimmed })
+      handleCourseUpdated(updated)
+      setIsEditingRename(false)
+    } catch {
+      // TODO: show error
+    } finally {
+      setRenameLoading(false)
+    }
+  }
+
+  const handleCancelRename = () => {
+    setEditTitle(course.title)
+    setIsEditingRename(false)
+  }
+
   if (loading || !course) {
     return (
       <Box className="flex justify-center items-center py-20">
@@ -182,7 +299,7 @@ export function CoursePage() {
 
   if (error) {
     return (
-      <Box className="py-8">
+      <Box className="py-8 px-4">
         <Typography color="error">{error}</Typography>
       </Box>
     )
@@ -191,6 +308,7 @@ export function CoursePage() {
   const assignments = feed.filter((f) => f.type === 'assignment')
   const posts = feed.filter((f) => f.type === 'post')
   const materials = feed.filter((f) => f.type === 'material')
+  const upcomingAssignments = getUpcomingAssignments(assignments)
 
   const teachers = members.filter((m) => m.role === 'owner' || m.role === 'teacher')
   const students = members.filter((m) => m.role === 'student')
@@ -201,30 +319,95 @@ export function CoursePage() {
     return (first + last) || m.email[0]?.toUpperCase() || '?'
   }
 
+  function getAuthorForPost(post: FeedItem): { name: string; initial: string } {
+    if (post.author) {
+      const name = `${post.author.first_name} ${post.author.last_name}`.trim()
+      const initial = (post.author.first_name?.[0] ?? post.author.last_name?.[0] ?? 'А').toUpperCase()
+      return { name: name || 'Автор', initial }
+    }
+    const firstTeacher = teachers[0]
+    if (firstTeacher) {
+      const name = `${firstTeacher.first_name} ${firstTeacher.last_name}`.trim() || firstTeacher.email
+      return { name, initial: getInitials(firstTeacher) }
+    }
+    return { name: 'Преподаватель', initial: 'П' }
+  }
+
   function MemberRow({ member }: { member: Member }) {
     const name = `${member.first_name} ${member.last_name}`.trim() || member.email
+    const showActions = canExclude(member) || canChangeRole(member)
     return (
-      <Box className="flex items-center gap-3 py-3">
-        <Avatar
-          sx={{
-            bgcolor: 'primary.main',
-            width: 40,
-            height: 40,
-            fontSize: '1rem',
+      <Box className="flex items-center justify-between gap-3 py-3 group">
+        <Box
+          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+          onClick={() => setProfileMember(member)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setProfileMember(member)
+            }
           }}
+          aria-label={`Открыть профиль ${name}`}
         >
-          {getInitials(member)}
-        </Avatar>
-        <Typography variant="body1" className="text-slate-800 font-medium">
-          {name}
-        </Typography>
+          <Avatar
+            sx={{
+              bgcolor: 'primary.main',
+              width: 40,
+              height: 40,
+              fontSize: '1rem',
+            }}
+          >
+            {getInitials(member)}
+          </Avatar>
+          <Box className="min-w-0 flex-1">
+            <Typography variant="body1" className="text-slate-800 font-medium">
+              {name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Роль: {ROLE_LABELS[member.role] ?? member.role}
+            </Typography>
+          </Box>
+        </Box>
+        {showActions && (
+          <Box className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+            {canChangeRole(member) && (
+              <IconButton
+                size="small"
+                aria-label="Изменить роль"
+                onClick={(e) => {
+                  const el = e.currentTarget
+                  const rect = el.getBoundingClientRect()
+                  setRoleMenuAnchor({
+                    el,
+                    member,
+                    position: { top: rect.bottom, left: rect.left },
+                  })
+                }}
+              >
+                <EditOutlinedIcon fontSize="small" />
+              </IconButton>
+            )}
+            {canExclude(member) && (
+              <IconButton
+                size="small"
+                aria-label="Исключить из курса"
+                color="error"
+                onClick={() => setExcludeMember(member)}
+              >
+                <PersonRemoveOutlinedIcon fontSize="small" />
+              </IconButton>
+            )}
+          </Box>
+        )}
       </Box>
     )
   }
 
   return (
     <Box className="flex flex-col h-full pb-24 md:pb-0 min-w-0 overflow-x-hidden">
-      <CourseHeader course={course} onCourseUpdated={handleCourseUpdated} />
+      <CourseBanner course={course} />
 
       <Tabs
         value={tabValue}
@@ -232,24 +415,23 @@ export function CoursePage() {
         variant="scrollable"
         scrollButtons="auto"
         allowScrollButtonsMobile
-        className="border-b border-slate-200 mt-4"
+        className="border-b border-slate-200 mt-2 px-3 sm:px-4 md:px-6"
         sx={{
           minHeight: 48,
           minWidth: 0,
-          '& .MuiTab-root': { minHeight: 48, py: 1 },
+          '& .MuiTab-root': { minHeight: 48, py: 1, textTransform: 'none', fontSize: '1rem' },
+          '& .MuiTabs-indicator': { height: 3, borderRadius: '3px 3px 0 0' },
           '& .MuiTabs-scroller': { overflow: 'auto !important' },
         }}
       >
-        <Tab label={TAB_LABELS.assignments} icon={<AssignmentOutlinedIcon />} iconPosition="start" />
-        <Tab label={TAB_LABELS.posts} icon={<ArticleOutlinedIcon />} iconPosition="start" />
-        <Tab label={TAB_LABELS.materials} icon={<FolderOutlinedIcon />} iconPosition="start" />
-        <Tab label={TAB_LABELS.users} icon={<PeopleOutlinedIcon />} iconPosition="start" />
-        {showSettingsTab && (
-          <Tab label={TAB_LABELS.settings} icon={<SettingsOutlinedIcon />} iconPosition="start" />
-        )}
+        <Tab label={TAB_LABELS.assignments} />
+        <Tab label={TAB_LABELS.posts} />
+        <Tab label={TAB_LABELS.materials} />
+        <Tab label={TAB_LABELS.users} />
+        {showSettingsTab && <Tab label={TAB_LABELS.settings} />}
       </Tabs>
 
-      <Box className="flex-1 overflow-auto min-w-0">
+      <Box className="flex-1 overflow-auto min-w-0 px-3 sm:px-4 md:px-6">
         <TabPanel value={tabValue} index={0}>
           <List className="flex flex-col gap-1 min-w-0">
             {assignments.length === 0 ? (
@@ -267,23 +449,73 @@ export function CoursePage() {
             )}
           </List>
         </TabPanel>
+
         <TabPanel value={tabValue} index={1}>
-          <List className="flex flex-col gap-1 min-w-0">
-            {posts.length === 0 ? (
-              <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
-                <Typography variant="body2" className="text-slate-500 text-center md:text-left">
-                  Нет постов
+          <Box className="flex flex-col lg:flex-row gap-6 py-4">
+            <Box className="lg:w-64 shrink-0">
+              <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-2">
+                  Предстоящие
+                </Typography>
+                {upcomingAssignments.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" className="mb-3">
+                    У вас нет заданий, которые нужно сдать на следующей неделе.
+                  </Typography>
+                ) : (
+                  <Box className="flex flex-col gap-2 mb-3">
+                    {upcomingAssignments.slice(0, 3).map((a) => (
+                      <Typography key={a.id} variant="body2" className="text-slate-700">
+                        {a.title}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                <Typography
+                  component="button"
+                  variant="body2"
+                  className="text-primary-600 hover:text-primary-700 font-medium cursor-pointer border-0 bg-transparent p-0"
+                  onClick={() => setTabValue(tabIds.indexOf('assignments'))}
+                >
+                  Посмотреть всё
                 </Typography>
               </Box>
-            ) : (
-              posts.map((item) => (
-                <ListItem key={item.id} className="border border-slate-200 rounded-lg min-w-0">
-                  <ListItemText primary={item.title} />
-                </ListItem>
-              ))
-            )}
-          </List>
+            </Box>
+            <Box className="flex-1 min-w-0">
+              {isTeacher && (
+                <Button
+                  variant="contained"
+                  startIcon={<SendOutlinedIcon />}
+                  className="mb-4"
+                  sx={{ textTransform: 'none' }}
+                >
+                  Новое объявление
+                </Button>
+              )}
+              <Box className="flex flex-col gap-4">
+                {posts.length === 0 ? (
+                  <Box className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+                    <Typography variant="body2" color="text.secondary">
+                      Нет объявлений
+                    </Typography>
+                  </Box>
+                ) : (
+                  posts.map((item) => {
+                    const author = getAuthorForPost(item)
+                    return (
+                      <AnnouncementCard
+                        key={item.id}
+                        item={item}
+                        authorName={author.name}
+                        authorInitial={author.initial}
+                      />
+                    )
+                  })
+                )}
+              </Box>
+            </Box>
+          </Box>
         </TabPanel>
+
         <TabPanel value={tabValue} index={2}>
           <List className="flex flex-col gap-1 min-w-0">
             {materials.length === 0 ? (
@@ -301,6 +533,7 @@ export function CoursePage() {
             )}
           </List>
         </TabPanel>
+
         <TabPanel value={tabValue} index={3}>
           <Box className="flex flex-col">
             {members.length === 0 ? (
@@ -353,77 +586,201 @@ export function CoursePage() {
           </Box>
         </TabPanel>
         {showSettingsTab && (
-          <TabPanel value={tabValue} index={4}>
-            <Box className="flex flex-col gap-4">
-              {inviteCode && (
-                <Box className="flex items-center gap-2 p-4 bg-slate-50 rounded-xl">
-                  <Box className="flex-1 min-w-0">
+          <>
+            <TabPanel value={tabValue} index={4}>
+              <Box className="flex flex-col gap-4">
+                {course.role === 'owner' && (
+                  <Box className="flex flex-col gap-2 p-4 bg-slate-50 rounded-xl">
                     <Typography variant="subtitle2" className="text-slate-600 mb-1">
-                      Код приглашения
+                      Название курса
                     </Typography>
-                    <Typography variant="body1" className="font-mono font-semibold">
-                      {inviteCode}
-                    </Typography>
+                    {isEditingRename ? (
+                      <Box ref={renameFormRef} className="flex flex-col sm:flex-row gap-2">
+                        <TextField
+                          size="small"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          onBlur={() => {
+                            if (saveClickedRef.current) {
+                              saveClickedRef.current = false
+                              return
+                            }
+                            const active = document.activeElement
+                            if (active && renameFormRef.current?.contains(active)) return
+                            handleCancelRename()
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename()
+                            if (e.key === 'Escape') handleCancelRename()
+                          }}
+                          autoFocus
+                          disabled={renameLoading}
+                          className="flex-1"
+                          inputProps={{ 'aria-label': 'Название курса' }}
+                        />
+                        <Box className="flex gap-2">
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onMouseDown={() => { saveClickedRef.current = true }}
+                            onClick={handleSaveRename}
+                            disabled={renameLoading || !editTitle.trim()}
+                          >
+                            Сохранить
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={handleCancelRename}
+                            disabled={renameLoading}
+                          >
+                            Отмена
+                          </Button>
+                        </Box>
+                      </Box>
+                    ) : (
+                      <Box className="flex items-center gap-2">
+                        <Typography variant="body1" className="text-slate-800 font-medium">
+                          {course.title}
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          aria-label="Переименовать курс"
+                          onClick={handleStartRename}
+                        >
+                          <EditOutlinedIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    )}
                   </Box>
-                  <IconButton
-                    size="small"
-                    aria-label="Копировать код"
-                    onClick={handleCopyCode}
-                  >
-                    <ContentCopyOutlinedIcon fontSize="small" />
-                  </IconButton>
-                  {copySnackbar && (
-                    <Typography variant="caption" className="text-green-600">
-                      Скопировано
-                    </Typography>
-                  )}
-                </Box>
-              )}
-              {course.role === 'owner' && (
-                <Box className="flex flex-col gap-2">
-                  <Typography variant="body2" className="text-slate-500">
-                    Переименование доступно в шапке курса.
-                  </Typography>
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    startIcon={<DeleteOutlinedIcon />}
-                    onClick={() => setDeleteDialogOpen(true)}
-                    aria-label="Удалить курс"
-                  >
-                    Удалить курс
+                )}
+                {inviteCode && (
+                  <Box className="flex items-center gap-2 p-4 bg-slate-50 rounded-xl">
+                    <Box className="flex-1 min-w-0">
+                      <Typography variant="subtitle2" className="text-slate-600 mb-1">
+                        Код приглашения
+                      </Typography>
+                      <Typography variant="body1" className="font-mono font-semibold">
+                        {inviteCode}
+                      </Typography>
+                    </Box>
+                    <IconButton
+                      size="small"
+                      aria-label="Копировать код"
+                      onClick={handleCopyCode}
+                    >
+                      <ContentCopyOutlinedIcon fontSize="small" />
+                    </IconButton>
+                    {copySnackbar && (
+                      <Typography variant="caption" className="text-green-600">
+                        Скопировано
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                {course.role === 'owner' && (
+                  <Box className="flex flex-col gap-2">
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      startIcon={<DeleteOutlinedIcon />}
+                      onClick={() => setDeleteDialogOpen(true)}
+                      aria-label="Удалить курс"
+                    >
+                      Удалить курс
+                    </Button>
+                  </Box>
+                )}
+              </Box>
+              <Dialog
+                open={deleteDialogOpen}
+                onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
+                aria-labelledby="delete-dialog-title"
+                aria-describedby="delete-dialog-description"
+              >
+                <DialogTitle id="delete-dialog-title">Удалить курс?</DialogTitle>
+                <DialogContent>
+                  <DialogContentText id="delete-dialog-description">
+                    Курс «{course.title}» будет удалён безвозвратно. Это действие нельзя отменить.
+                  </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+                    Отмена
                   </Button>
-                </Box>
-              )}
-            </Box>
-            <Dialog
-              open={deleteDialogOpen}
-              onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
-              aria-labelledby="delete-dialog-title"
-              aria-describedby="delete-dialog-description"
-            >
-              <DialogTitle id="delete-dialog-title">Удалить курс?</DialogTitle>
-              <DialogContent>
-                <DialogContentText id="delete-dialog-description">
-                  Курс «{course.title}» будет удалён безвозвратно. Это действие нельзя отменить.
-                </DialogContentText>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
-                  Отмена
-                </Button>
-                <Button
-                  onClick={handleDeleteConfirm}
-                  color="error"
-                  variant="contained"
-                  disabled={deleteLoading}
-                >
-                  {deleteLoading ? 'Удаление…' : 'Удалить'}
-                </Button>
-              </DialogActions>
-            </Dialog>
-          </TabPanel>
+                  <Button
+                    onClick={handleDeleteConfirm}
+                    color="error"
+                    variant="contained"
+                    disabled={deleteLoading}
+                  >
+                    {deleteLoading ? 'Удаление…' : 'Удалить'}
+                  </Button>
+                </DialogActions>
+              </Dialog>
+            </TabPanel>
+          </>
         )}
+
+        <UserProfileDialog
+          open={Boolean(profileMember)}
+          onClose={() => setProfileMember(null)}
+          member={profileMember}
+          courseId={courseId ?? ''}
+          onAssignmentClick={handleAssignmentClick}
+        />
+
+        <Dialog
+          open={Boolean(excludeMember)}
+          onClose={() => !excludeLoading && setExcludeMember(null)}
+          aria-labelledby="exclude-dialog-title"
+          aria-describedby="exclude-dialog-description"
+        >
+          <DialogTitle id="exclude-dialog-title">Исключить из курса?</DialogTitle>
+          <DialogContent>
+            <DialogContentText id="exclude-dialog-description">
+              {excludeMember &&
+                `Пользователь ${`${excludeMember.first_name} ${excludeMember.last_name}`.trim() || excludeMember.email} будет исключён из курса.`}
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setExcludeMember(null)} disabled={excludeLoading}>
+              Отмена
+            </Button>
+            <Button
+              onClick={handleExcludeConfirm}
+              color="error"
+              variant="contained"
+              disabled={excludeLoading}
+            >
+              {excludeLoading ? 'Исключение…' : 'Исключить'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Menu
+          anchorReference="anchorPosition"
+          anchorPosition={
+            roleMenuAnchor
+              ? { top: roleMenuAnchor.position.top, left: roleMenuAnchor.position.left }
+              : undefined
+          }
+          open={Boolean(roleMenuAnchor)}
+          onClose={() => setRoleMenuAnchor(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        >
+          {roleMenuAnchor?.member.role !== 'teacher' && (
+            <MenuItem onClick={() => handleRoleChange(roleMenuAnchor!.member, 'teacher')}>
+              Назначить преподавателем
+            </MenuItem>
+          )}
+          {roleMenuAnchor?.member.role !== 'owner' && (
+            <MenuItem onClick={() => handleRoleChange(roleMenuAnchor!.member, 'owner')}>
+              Назначить владельцем
+            </MenuItem>
+          )}
+        </Menu>
       </Box>
     </Box>
   )
