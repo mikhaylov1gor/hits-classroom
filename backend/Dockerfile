@@ -1,12 +1,15 @@
 FROM golang:1.25-alpine AS build
 
+ENV GO111MODULE=on
+ENV CGO_ENABLED=0
+
 WORKDIR /app
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /server ./api
+RUN go build -o /server ./api
 
 FROM alpine:3.19
 
