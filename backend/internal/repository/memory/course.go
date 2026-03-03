@@ -40,6 +40,16 @@ func (r *CourseRepository) GetByInviteCode(code string) (*domain.Course, error) 
 	return r.byInvite[code], nil
 }
 
+func (r *CourseRepository) Delete(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.byID[id]; ok {
+		delete(r.byInvite, c.InviteCode)
+	}
+	delete(r.byID, id)
+	return nil
+}
+
 var _ repository.CourseRepository = (*CourseRepository)(nil)
 
 type CourseMemberRepository struct {
@@ -91,6 +101,19 @@ func (r *CourseMemberRepository) ListByUser(userID string) ([]*domain.CourseMemb
 		}
 	}
 	return out, nil
+}
+
+func (r *CourseMemberRepository) DeleteByCourse(courseID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*domain.CourseMember
+	for _, m := range r.members {
+		if m.CourseID != courseID {
+			out = append(out, m)
+		}
+	}
+	r.members = out
+	return nil
 }
 
 var _ repository.CourseMemberRepository = (*CourseMemberRepository)(nil)
