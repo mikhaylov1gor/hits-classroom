@@ -40,7 +40,10 @@ import {
 import { useAuth } from '../../../auth/model/AuthContext'
 import { useCourses } from '../../model/CoursesContext'
 import { CourseBanner } from '../CourseHeader/CourseBanner'
-import { AnnouncementCard } from './AnnouncementCard'
+import { CreateAssignmentDialog } from './CreateAssignmentDialog/CreateAssignmentDialog'
+import { CreateMaterialDialog } from './CreateMaterialDialog/CreateMaterialDialog'
+import { CreatePostDialog } from './CreatePostDialog/CreatePostDialog'
+import { PostCard } from './PostCard/PostCard'
 import { UserProfileDialog } from './UserProfileDialog'
 import type { CourseTabId, CourseWithRole, FeedItem, Member } from '../../model/types'
 
@@ -95,7 +98,7 @@ export function CoursePage() {
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tabValue, setTabValue] = useState(0)
+  const [tabValue, setTabValue] = useState(1)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [copySnackbar, setCopySnackbar] = useState(false)
@@ -112,6 +115,9 @@ export function CoursePage() {
   const [renameLoading, setRenameLoading] = useState(false)
   const renameFormRef = useRef<HTMLDivElement>(null)
   const saveClickedRef = useRef(false)
+  const [createPostOpen, setCreatePostOpen] = useState(false)
+  const [createAssignmentOpen, setCreateAssignmentOpen] = useState(false)
+  const [createMaterialOpen, setCreateMaterialOpen] = useState(false)
 
   const { user: authUser } = useAuth()
   const isTeacher = course?.role === 'teacher' || course?.role === 'owner'
@@ -166,6 +172,12 @@ export function CoursePage() {
         .catch(() => setInviteCode(null))
     }
   }, [course, courseId])
+
+  const refreshFeed = () => {
+    if (courseId && currentTabId !== 'settings' && currentTabId !== 'users') {
+      getCourseFeed(courseId).then(setFeed).catch(() => setFeed([]))
+    }
+  }
 
   useEffect(() => {
     if (!courseId || currentTabId === 'settings') return
@@ -433,6 +445,18 @@ export function CoursePage() {
 
       <Box className="flex-1 overflow-auto min-w-0 px-3 sm:px-4 md:px-6">
         <TabPanel value={tabValue} index={0}>
+          {isTeacher && (
+            <Button
+              variant="contained"
+              startIcon={<SendOutlinedIcon />}
+              className="mb-4"
+              sx={{ textTransform: 'none' }}
+              onClick={() => setCreateAssignmentOpen(true)}
+              aria-label="Создать задание"
+            >
+              Новое задание
+            </Button>
+          )}
           <List className="flex flex-col gap-1 min-w-0">
             {assignments.length === 0 ? (
               <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
@@ -480,15 +504,16 @@ export function CoursePage() {
                 </Typography>
               </Box>
             </Box>
-            <Box className="flex-1 min-w-0">
+            <Box className="flex-1 min-w-0 flex flex-col" sx={{ gap: '1.5rem' }}>
               {isTeacher && (
                 <Button
                   variant="contained"
                   startIcon={<SendOutlinedIcon />}
-                  className="mb-4"
-                  sx={{ textTransform: 'none' }}
+                  sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                  onClick={() => setCreatePostOpen(true)}
+                  aria-label="Создать пост"
                 >
-                  Новое объявление
+                  Новый пост
                 </Button>
               )}
               <Box className="flex flex-col gap-4">
@@ -502,9 +527,10 @@ export function CoursePage() {
                   posts.map((item) => {
                     const author = getAuthorForPost(item)
                     return (
-                      <AnnouncementCard
+                      <PostCard
                         key={item.id}
                         item={item}
+                        courseId={courseId ?? ''}
                         authorName={author.name}
                         authorInitial={author.initial}
                       />
@@ -517,6 +543,18 @@ export function CoursePage() {
         </TabPanel>
 
         <TabPanel value={tabValue} index={2}>
+          {isTeacher && (
+            <Button
+              variant="contained"
+              startIcon={<SendOutlinedIcon />}
+              className="mb-4"
+              sx={{ textTransform: 'none' }}
+              onClick={() => setCreateMaterialOpen(true)}
+              aria-label="Создать материал"
+            >
+              Новый материал
+            </Button>
+          )}
           <List className="flex flex-col gap-1 min-w-0">
             {materials.length === 0 ? (
               <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
@@ -589,11 +627,12 @@ export function CoursePage() {
           <>
             <TabPanel value={tabValue} index={4}>
               <Box className="flex flex-col gap-4">
-                {course.role === 'owner' && (
-                  <Box className="flex flex-col gap-2 p-4 bg-slate-50 rounded-xl">
-                    <Typography variant="subtitle2" className="text-slate-600 mb-1">
-                      Название курса
-                    </Typography>
+                <Box className="flex flex-col md:flex-row md:items-stretch gap-4">
+                  {course.role === 'owner' && (
+                    <Box className="flex flex-col gap-2 p-4 bg-slate-50 rounded-xl md:flex-[3] min-w-0">
+                      <Typography variant="subtitle2" className="text-slate-600 mb-1">
+                        Название курса
+                      </Typography>
                     {isEditingRename ? (
                       <Box ref={renameFormRef} className="flex flex-col sm:flex-row gap-2">
                         <TextField
@@ -653,9 +692,9 @@ export function CoursePage() {
                       </Box>
                     )}
                   </Box>
-                )}
-                {inviteCode && (
-                  <Box className="flex items-center gap-2 p-4 bg-slate-50 rounded-xl">
+                  )}
+                  {inviteCode && (
+                    <Box className="flex items-center gap-2 p-4 bg-slate-50 rounded-xl md:flex-[1] min-w-0">
                     <Box className="flex-1 min-w-0">
                       <Typography variant="subtitle2" className="text-slate-600 mb-1">
                         Код приглашения
@@ -676,8 +715,9 @@ export function CoursePage() {
                         Скопировано
                       </Typography>
                     )}
-                  </Box>
-                )}
+                    </Box>
+                  )}
+                </Box>
                 {course.role === 'owner' && (
                   <Box className="flex flex-col gap-2">
                     <Button
@@ -722,6 +762,12 @@ export function CoursePage() {
           </>
         )}
 
+        <CreatePostDialog
+          open={createPostOpen}
+          onClose={() => setCreatePostOpen(false)}
+          courseId={courseId ?? ''}
+          onCreated={refreshFeed}
+        />
         <UserProfileDialog
           open={Boolean(profileMember)}
           onClose={() => setProfileMember(null)}

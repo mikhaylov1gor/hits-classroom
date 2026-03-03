@@ -86,6 +86,45 @@ function mockMemberGrades(
   )
 }
 
+/** Мок комментариев — endpoint assignments/{id}/comments используется и для постов (id = postId) */
+function mockComments(
+  page: import('@playwright/test').Page,
+  courseId: string,
+  entityId: string,
+  comments: object[] = [],
+) {
+  return page.route(
+    `**/api/v1/courses/${courseId}/assignments/${entityId}/comments`,
+    async (route) => {
+      const req = route.request()
+      if (req.method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(comments),
+        })
+      } else if (req.method() === 'POST') {
+        const body = JSON.parse((await req.postData()) ?? '{}')
+        const created = {
+          id: `comment-${Date.now()}`,
+          assignment_id: entityId,
+          user_id: 'user-1',
+          body: body.body ?? '',
+          created_at: new Date().toISOString(),
+          author: { first_name: 'Иван', last_name: 'Иванов' },
+        }
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify(created),
+        })
+      } else {
+        await route.fulfill({ status: 404 })
+      }
+    },
+  )
+}
+
 test.describe('Экран курса', () => {
   test.beforeEach(async ({ page }) => {
     await mockAuth(page)
@@ -184,7 +223,7 @@ test.describe('Экран курса', () => {
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /посты/i }).click()
 
-      await expect(page.getByText('Пост 1')).toBeVisible()
+      await expect(page.getByRole('button', { name: /пост 1/i })).toBeVisible()
     })
 
     test('таб Материалы показывает список материалов', async ({ page }) => {
@@ -504,6 +543,218 @@ test.describe('Экран курса', () => {
 
       await expect(page).toHaveURL(/\/course\/course-redirect$/)
       await expect(page.getByRole('heading', { name: 'Курс для редиректа' })).toBeVisible()
+    })
+  })
+
+  test.describe('Вкладка Посты', () => {
+    test('Тест 1: Список постов — загрузка, клик для просмотра', async ({ page }) => {
+      await mockCourseList(page, [{ id: 'c-posts', title: 'Курс', role: 'student' }])
+      await mockCourse(page, 'c-posts', { id: 'c-posts', title: 'Курс', role: 'student' })
+      await mockFeed(page, 'c-posts', [
+        {
+          type: 'post',
+          id: 'post-1',
+          title: 'Важное объявление',
+          body: 'Содержание поста для студентов.',
+          created_at: '2024-03-01T10:00:00Z',
+        },
+      ])
+      await mockMembers(page, 'c-posts', [
+        { user_id: 'u1', email: 't@x.com', first_name: 'Анна', last_name: 'Петрова', role: 'teacher' },
+      ])
+      await mockComments(page, 'c-posts', 'post-1', [])
+
+      await page.goto('/')
+      await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
+      await page.getByRole('tab', { name: /посты/i }).click()
+
+      await expect(page.getByText('Содержание поста для студентов.')).toBeVisible()
+
+      await page.getByRole('button', { name: /важное объявление/i }).click()
+
+      await expect(page.getByText('Содержание поста для студентов.')).toBeVisible()
+      await expect(page.getByText('Добавить комментарий')).toBeVisible()
+    })
+
+    test('Тест 2: Создание поста — заполнение формы, прикрепление файлов, отправка', async ({
+      page,
+    }) => {
+      let feedItems: object[] = [
+        { type: 'post', id: 'p0', title: 'Старый пост', body: 'Текст', created_at: '2024-01-01T00:00:00Z' },
+      ]
+      await mockCourseList(page, [{ id: 'c-create', title: 'Курс', role: 'teacher' }])
+      await mockCourse(page, 'c-create', { id: 'c-create', title: 'Курс', role: 'teacher' })
+      await mockInviteCode(page, 'c-create', 'CODE1234')
+
+      await page.route('**/api/v1/courses/c-create/feed', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(feedItems),
+        }),
+      )
+      await page.route('**/api/v1/courses/c-create/posts', async (route) => {
+        if (route.request().method() === 'POST') {
+          const body = JSON.parse((await route.request().postData()) ?? '{}')
+          const newPost = {
+            id: 'post-new',
+            course_id: 'c-create',
+            title: body.title ?? 'Новый пост',
+            body: body.body ?? '',
+            created_at: new Date().toISOString(),
+          }
+          feedItems = [...feedItems, { ...newPost, type: 'post' }]
+          await route.fulfill({
+            status: 201,
+            contentType: 'application/json',
+            body: JSON.stringify(newPost),
+          })
+        } else {
+          await route.fulfill({ status: 404 })
+        }
+      })
+
+      await page.goto('/')
+      await page.getByRole('button', { name: /Курс.*роль: преподаватель/i }).click()
+      await page.getByRole('tab', { name: /посты/i }).click()
+
+      await page.getByRole('button', { name: /новое объявление|создать пост/i }).click()
+
+      const dialog = page.getByRole('dialog', { name: /новый пост/i })
+      await expect(dialog).toBeVisible()
+
+      await dialog.getByLabel('Заголовок поста').fill('Новый пост для класса')
+      await dialog.getByLabel('Содержание поста').fill('Содержание нового поста')
+      await dialog.getByLabel('Ссылки').fill('https://example.com')
+
+      await dialog.getByRole('button', { name: /прикрепить файлы/i }).click()
+      await page.getByLabel('Прикрепить файлы').setInputFiles({
+        name: 'document.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('test content'),
+      })
+
+      await expect(dialog.getByText('document.pdf')).toBeVisible()
+
+      await dialog.getByRole('button', { name: 'Создать' }).click()
+
+      await expect(dialog).not.toBeVisible()
+      await expect(page.getByText('Новый пост для класса')).toBeVisible()
+    })
+
+    test('Тест 3: Просмотр поста — содержимое, файлы', async ({ page }) => {
+      await mockCourseList(page, [{ id: 'c-view', title: 'Курс', role: 'student' }])
+      await mockCourse(page, 'c-view', { id: 'c-view', title: 'Курс', role: 'student' })
+      await mockFeed(page, 'c-view', [
+        {
+          type: 'post',
+          id: 'post-with-files',
+          title: 'Пост с вложениями',
+          body: 'Текст поста с файлами.',
+          created_at: '2024-03-01T10:00:00Z',
+          attachments: [
+            { id: 'att-1', name: 'lecture.pdf', type: 'application/pdf' },
+            { id: 'att-2', name: 'image.png', type: 'image/png' },
+          ],
+        },
+      ])
+      await mockMembers(page, 'c-view', [])
+      await mockComments(page, 'c-view', 'post-with-files', [])
+
+      await page.goto('/')
+      await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
+      await page.getByRole('tab', { name: /посты/i }).click()
+
+      await page.getByRole('button', { name: /пост с вложениями/i }).click()
+
+      await expect(page.getByText('Текст поста с файлами.')).toBeVisible()
+      await expect(page.getByText('lecture.pdf')).toBeVisible()
+      await expect(page.getByText('image.png')).toBeVisible()
+    })
+
+    test('Тест 4: Добавление комментария — текст + файл, отправка', async ({ page }) => {
+      await mockCourseList(page, [{ id: 'c-comment', title: 'Курс', role: 'student' }])
+      await mockCourse(page, 'c-comment', { id: 'c-comment', title: 'Курс', role: 'student' })
+      await mockFeed(page, 'c-comment', [
+        {
+          type: 'post',
+          id: 'post-comment',
+          title: 'Пост для комментария',
+          body: 'Текст.',
+          created_at: '2024-03-01T10:00:00Z',
+        },
+      ])
+      await mockMembers(page, 'c-comment', [])
+      await mockComments(page, 'c-comment', 'post-comment', [])
+
+      await page.goto('/')
+      await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
+      await page.getByRole('tab', { name: /посты/i }).click()
+
+      await page.getByRole('button', { name: /пост для комментария/i }).click()
+      await page.getByText('Добавить комментарий').click()
+
+      await page.getByLabel('Текст комментария').fill('Мой комментарий к посту')
+      await page.getByRole('button', { name: 'Файл' }).click()
+      await page.getByLabel('Прикрепить файл к комментарию').setInputFiles({
+        name: 'comment-file.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('comment content'),
+      })
+
+      await expect(page.getByText('comment-file.txt')).toBeVisible()
+
+      await page.getByRole('button', { name: 'Отправить' }).click()
+
+      await expect(page.getByText('Комментарии (1)')).toBeVisible()
+      await page.getByText('Комментарии (1)').click()
+      await expect(page.getByRole('dialog').getByText('Мой комментарий к посту')).toBeVisible()
+    })
+
+    test('Тест 5: Роли — студент не видит кнопку создания', async ({ page }) => {
+      await mockCourseList(page, [{ id: 'c-student', title: 'Курс студента', role: 'student' }])
+      await mockCourse(page, 'c-student', { id: 'c-student', title: 'Курс студента', role: 'student' })
+      await mockFeed(page, 'c-student', [
+        { type: 'post', id: 'p1', title: 'Пост 1', body: 'Текст', created_at: '2024-01-01T00:00:00Z' },
+      ])
+      await mockMembers(page, 'c-student', [])
+
+      await page.goto('/')
+      await page.getByRole('button', { name: /курс студента.*роль: студент/i }).click()
+      await page.getByRole('tab', { name: /посты/i }).click()
+
+      await expect(page.getByText('Пост 1')).toBeVisible()
+      await expect(page.getByRole('button', { name: /новое объявление|создать пост/i })).not.toBeVisible()
+    })
+
+    test('Тест 6: Attachments handling — отображение вложений', async ({ page }) => {
+      await mockCourseList(page, [{ id: 'c-att', title: 'Курс', role: 'student' }])
+      await mockCourse(page, 'c-att', { id: 'c-att', title: 'Курс', role: 'student' })
+      await mockFeed(page, 'c-att', [
+        {
+          type: 'post',
+          id: 'post-att',
+          title: 'Пост с вложениями',
+          body: 'Текст поста.',
+          created_at: '2024-03-01T10:00:00Z',
+          attachments: [
+            { id: 'a1', name: 'document.pdf', type: 'application/pdf', url: 'https://example.com/doc.pdf' },
+          ],
+        },
+      ])
+      await mockMembers(page, 'c-att', [])
+      await mockComments(page, 'c-att', 'post-att', [])
+
+      await page.goto('/')
+      await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
+      await page.getByRole('tab', { name: /посты/i }).click()
+
+      await expect(page.getByText('document.pdf')).toBeVisible()
+
+      await page.getByRole('button', { name: /пост с вложениями/i }).click()
+
+      await expect(page.getByRole('heading', { name: 'Вложения', exact: true })).toBeVisible()
+      await expect(page.getByText('document.pdf')).toBeVisible()
     })
   })
 })
