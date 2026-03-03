@@ -29,8 +29,13 @@ func main() {
 	authMiddleware := &httphandler.AuthMiddleware{Secret: jwtSecret}
 	createCourseUC := usecase.NewCreateCourse(courseRepo, memberRepo)
 	joinCourseUC := usecase.NewJoinCourse(courseRepo, memberRepo)
+	listCoursesUC := usecase.NewListCourses(courseRepo, memberRepo)
+	coursesHandler := httphandler.NewCoursesHandler(
+		httphandler.NewListCoursesHandler(listCoursesUC),
+		httphandler.NewCreateCourseHandler(createCourseUC),
+	)
 	mux.Handle("/api/v1/courses/join", authMiddleware.Handler(httphandler.NewJoinCourseHandler(joinCourseUC)))
-	mux.Handle("/api/v1/courses", authMiddleware.Handler(httphandler.NewCreateCourseHandler(createCourseUC)))
+	mux.Handle("/api/v1/courses", authMiddleware.Handler(coursesHandler))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
