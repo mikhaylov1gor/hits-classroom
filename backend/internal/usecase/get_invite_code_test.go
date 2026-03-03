@@ -93,6 +93,7 @@ func (s *stubInviteCourseRepo) GetByID(id string) (*domain.Course, error) {
 func (s *stubInviteCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	return nil, nil
 }
+func (s *stubInviteCourseRepo) Delete(id string) error { return nil }
 
 type stubInviteMemberRepo struct {
 	role domain.CourseRole
@@ -108,3 +109,4 @@ func (s *stubInviteMemberRepo) ListByUser(userID string) ([]*domain.CourseMember
 func (s *stubInviteMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
 	return s.role, nil
 }
+func (s *stubInviteMemberRepo) DeleteByCourse(courseID string) error { return nil }
