@@ -115,7 +115,7 @@ test.describe('Авторизация и регистрация', () => {
     await page.goto('/register')
 
     await page.getByLabel('Email').fill('new.user@example.com')
-    await page.getByLabel('Пароль').fill('password123')
+    await page.getByLabel('Пароль', { exact: true }).fill('password123')
     await page.getByLabel('Подтвердите пароль').fill('password123')
     await page.getByLabel('ФИО').fill('Иван Иванов')
     await page.getByLabel('Дата рождения').fill('2000-01-01')
@@ -129,7 +129,7 @@ test.describe('Авторизация и регистрация', () => {
     await page.goto('/register')
 
     await page.getByLabel('Email').fill('existing@example.com')
-    await page.getByLabel('Пароль').fill('password123')
+    await page.getByLabel('Пароль', { exact: true }).fill('password123')
     await page.getByLabel('Подтвердите пароль').fill('different-password')
     await page.getByLabel('ФИО').fill('Иван Иванов')
     await page.getByLabel('Дата рождения').fill('2000-01-01')
@@ -153,7 +153,7 @@ test.describe('Авторизация и регистрация', () => {
     await page.goto('/register')
 
     await page.getByLabel('Email').fill('existing@example.com')
-    await page.getByLabel('Пароль').fill('password123')
+    await page.getByLabel('Пароль', { exact: true }).fill('password123')
     await page.getByLabel('Подтвердите пароль').fill('password123')
     await page.getByLabel('ФИО').fill('Иван Иванов')
     await page.getByLabel('Дата рождения').fill('2000-01-01')
