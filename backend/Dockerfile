@@ -9,7 +9,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /server ./api
+RUN go build -o /server hits-classroom/api
 
 FROM alpine:3.19
 
