@@ -63,6 +63,14 @@ module.exports = {
     hot: true,
     port: 5173,
     open: true,
+    proxy: [
+      {
+        context: ['/api'],
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+      },
+    ],
   },
 }
 

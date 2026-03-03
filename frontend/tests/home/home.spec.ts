@@ -181,6 +181,7 @@ test.describe('Главный экран и профиль', () => {
   test('бургер-меню показывает ФИО и последние курсы и ведёт в курс при клике', async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 375, height: 667 })
     await page.route('**/api/v1/users/me', async (route) => {
       await route.fulfill({
         status: 200,

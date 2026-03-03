@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AppBar,
   Box,
@@ -20,13 +20,15 @@ import RegisterPage from './pages/register/ui/RegisterPage'
 import HomePage from './pages/home/ui/HomePage'
 import CoursesTab from './features/courses/ui/CoursesTab/CoursesTab'
 import ProfileTab from './features/profile/ui/ProfileTab/ProfileTab'
+import { AddCourseButton } from './features/courses/ui/AddCourseButton/AddCourseButton'
+import { CoursesProvider, useCourses } from './features/courses/model/CoursesContext'
 import { useAuth } from './features/auth/model/AuthContext'
-import { fetchCurrentUser } from './features/profile/api/profileApi'
+import { useCurrentUserQuery } from './features/profile/model/profileQueries'
 import type { User } from './features/auth/model/types'
 import type { CourseWithRole } from './features/courses/model/types'
 import { RequireAuth } from './app/RequireAuth'
 
-function AppShell() {
+function AppShellContent() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
@@ -35,30 +37,14 @@ function AppShell() {
   const [isSidebarExpanded, setSidebarExpanded] = useState(false)
 
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null)
-  const [allCourses, setAllCourses] = useState<CourseWithRole[]>([])
   const [profileUser, setProfileUser] = useState<User | null>(null)
+  const { courses: allCourses } = useCourses()!
 
-  const headerUser = user ?? profileUser
+  const { data: currentUser } = useCurrentUserQuery(!user)
+
+  const headerUser = user ?? currentUser ?? profileUser
 
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register'
-
-  useEffect(() => {
-    let cancelled = false
-
-    fetchCurrentUser()
-      .then((data) => {
-        if (!cancelled) {
-          setProfileUser(data)
-        }
-      })
-      .catch(() => {
-        // ignore header load errors
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   const recentCourses = useMemo(() => {
     if (!allCourses.length) {
@@ -93,35 +79,40 @@ function AppShell() {
 
   return (
     <Box className="min-h-screen flex flex-col">
-      {!isAuthPage && (
-        <AppBar position="static" color="transparent" elevation={0}>
-          <Toolbar className="flex justify-between h-16 md:h-20 border-b border-slate-100 bg-white/95 backdrop-blur-sm">
-            <Typography
-              variant="h6"
-              component={RouterLink}
-              to="/"
-              className="font-semibold tracking-tight text-primary-800 no-underline"
-            >
-              hits-classroom
-            </Typography>
+        {!isAuthPage && (
+          <AppBar position="static" color="transparent" elevation={0}>
+            <Toolbar className="flex justify-between items-center h-16 md:h-20 border-b border-slate-100 bg-white/95 backdrop-blur-sm">
+              <Typography
+                variant="h6"
+                component={RouterLink}
+                to="/"
+                className="font-semibold tracking-tight text-primary-800 no-underline"
+              >
+                hits-classroom
+              </Typography>
 
-            <Box className="flex gap-2 items-center">
-              <>
-                <IconButton
-                  color="inherit"
-                  aria-label="Открыть меню"
-                  onClick={handleMenuOpen}
-                  size="large"
-                >
-                  <MenuIcon fontSize="large" />
-                </IconButton>
-                <Menu
-                  anchorEl={menuAnchor}
-                  open={Boolean(menuAnchor)}
-                  onClose={handleMenuClose}
-                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                >
+              <Box className="flex items-center gap-1">
+                <Box sx={{ display: { xs: 'none', md: 'inline-flex' } }}>
+                  <AddCourseButton />
+                </Box>
+                <Box sx={{ display: { xs: 'inline-flex', md: 'none' } }}>
+                  <IconButton
+                    color="inherit"
+                    aria-label="Открыть меню"
+                    onClick={handleMenuOpen}
+                    size="large"
+                  >
+                    <MenuIcon fontSize="large" />
+                  </IconButton>
+                </Box>
+              </Box>
+              <Menu
+                anchorEl={menuAnchor}
+                open={Boolean(menuAnchor)}
+                onClose={handleMenuClose}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+              >
                   {headerUser && (
                     <MenuItem disabled>
                       <Typography variant="subtitle2">
@@ -162,15 +153,26 @@ function AppShell() {
                       </Box>
                     </MenuItem>
                   ))}
-                </Menu>
-              </>
-            </Box>
-          </Toolbar>
-        </AppBar>
+              </Menu>
+            </Toolbar>
+          </AppBar>
+        )}
+
+      {!isAuthPage && (
+        <Box
+          sx={{
+            display: { xs: 'block', md: 'none' },
+            position: 'fixed',
+            bottom: 16,
+            right: 16,
+            zIndex: 1000,
+          }}
+        >
+          <AddCourseButton variant="fab" />
+        </Box>
       )}
 
       <Box className="flex-1 flex items-stretch relative">
-        {/* Левый нав-бар на десктопе, как в Google Classroom: иконки + подписи, расширение по hover */}
         {!isAuthPage && isDesktop && (
           <Box
             className="hidden md:flex flex-col bg-slate-50 text-slate-800 border-r border-slate-200 transition-all duration-200"
@@ -261,7 +263,7 @@ function AppShell() {
               path="/"
               element={
                 <RequireAuth>
-                  <HomePage onCoursesLoaded={setAllCourses} />
+                  <HomePage />
                 </RequireAuth>
               }
             />
@@ -287,6 +289,14 @@ function AppShell() {
         </Box>
       </Box>
     </Box>
+  )
+}
+
+function AppShell() {
+  return (
+    <CoursesProvider>
+      <AppShellContent />
+    </CoursesProvider>
   )
 }
 

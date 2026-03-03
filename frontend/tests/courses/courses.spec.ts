@@ -89,6 +89,7 @@ test.describe('Список курсов и добавление по коду',
 
     await expect(page.getByRole('button', { name: /Математика.*роль: студент/i })).toBeVisible()
 
+    await page.getByRole('button', { name: /добавить курс/i }).click()
     await page.getByLabel(/код курса/i).fill('ABC12345')
     await page.getByRole('button', { name: /присоединиться/i }).click()
 
@@ -116,6 +117,7 @@ test.describe('Список курсов и добавление по коду',
 
     await page.goto('/')
 
+    await page.getByRole('button', { name: /добавить курс/i }).click()
     await page.getByLabel(/код курса/i).fill('WRONG123')
     await page.getByRole('button', { name: /присоединиться/i }).click()
 
@@ -138,13 +140,13 @@ test.describe('Список курсов и добавление по коду',
     await page.goto('/')
 
     await expect(
-      page.getByText(/курс студента/i).locator('..').getByText(/роль: студент/i),
+      page.getByRole('button', { name: /курс студента.*роль: студент/i }),
     ).toBeVisible()
     await expect(
-      page.getByText(/курс преподавателя/i).locator('..').getByText(/роль: преподаватель/i),
+      page.getByRole('button', { name: /курс преподавателя.*роль: преподаватель/i }),
     ).toBeVisible()
     await expect(
-      page.getByText(/курс владельца/i).locator('..').getByText(/роль: владелец/i),
+      page.getByRole('button', { name: /курс владельца.*роль: владелец/i }),
     ).toBeVisible()
   })
 
