@@ -18,6 +18,7 @@ var (
 
 type PasswordHasher interface {
 	Hash(password string) (string, error)
+	Compare(hash, plain string) error
 }
 
 type RegisterInput struct {
@@ -45,6 +46,10 @@ func (BcryptHasher) Hash(password string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+func (BcryptHasher) Compare(hash, plain string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain))
 }
 
 func (uc *Register) Register(in RegisterInput) (*domain.User, error) {
