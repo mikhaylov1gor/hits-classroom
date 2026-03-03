@@ -31,10 +31,12 @@ func main() {
 	joinCourseUC := usecase.NewJoinCourse(courseRepo, memberRepo)
 	listCoursesUC := usecase.NewListCourses(courseRepo, memberRepo)
 	getCourseUC := usecase.NewGetCourse(courseRepo, memberRepo)
+	getInviteCodeUC := usecase.NewGetInviteCode(courseRepo, memberRepo)
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
 		httphandler.NewCreateCourseHandler(createCourseUC),
 	)
+	mux.Handle("GET /api/v1/courses/{courseId}/invite-code", authMiddleware.Handler(httphandler.NewGetInviteCodeHandler(getInviteCodeUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}", authMiddleware.Handler(httphandler.NewGetCourseHandler(getCourseUC)))
 	mux.Handle("/api/v1/courses/join", authMiddleware.Handler(httphandler.NewJoinCourseHandler(joinCourseUC)))
 	mux.Handle("/api/v1/courses", authMiddleware.Handler(coursesHandler))
