@@ -30,10 +30,12 @@ func main() {
 	createCourseUC := usecase.NewCreateCourse(courseRepo, memberRepo)
 	joinCourseUC := usecase.NewJoinCourse(courseRepo, memberRepo)
 	listCoursesUC := usecase.NewListCourses(courseRepo, memberRepo)
+	getCourseUC := usecase.NewGetCourse(courseRepo, memberRepo)
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
 		httphandler.NewCreateCourseHandler(createCourseUC),
 	)
+	mux.Handle("GET /api/v1/courses/{courseId}", authMiddleware.Handler(httphandler.NewGetCourseHandler(getCourseUC)))
 	mux.Handle("/api/v1/courses/join", authMiddleware.Handler(httphandler.NewJoinCourseHandler(joinCourseUC)))
 	mux.Handle("/api/v1/courses", authMiddleware.Handler(coursesHandler))
 
