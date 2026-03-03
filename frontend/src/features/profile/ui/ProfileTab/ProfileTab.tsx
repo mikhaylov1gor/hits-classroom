@@ -79,7 +79,7 @@ export function ProfileTab() {
   }
 
   return (
-    <Box className="mt-8 md:mt-10 max-w-xl w-full mx-auto px-4 pb-10">
+    <Box className="mt-4 sm:mt-8 md:mt-10 max-w-xl w-full mx-auto px-3 sm:px-4 pb-24 md:pb-10">
       <Card>
         <CardContent className="space-y-4">
           {errors.general && (

@@ -89,9 +89,9 @@ export function RegisterForm() {
   }
 
   return (
-    <Box className="min-h-[calc(100vh-64px)] flex items-center justify-center py-10">
+    <Box className="min-h-[calc(100vh-56px)] md:min-h-[calc(100vh-64px)] flex items-center justify-center py-6 px-4 sm:py-10">
       <Card className="w-full max-w-md shadow-xl border border-slate-100">
-        <CardContent className="p-6 md:p-8 space-y-4">
+        <CardContent className="p-4 sm:p-6 md:p-8 space-y-4">
           <Typography variant="h5" className="font-semibold text-slate-900">
             Регистрация в hits-classroom
           </Typography>

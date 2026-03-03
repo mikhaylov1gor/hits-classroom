@@ -8,7 +8,7 @@ type HomePageProps = {
 
 export function HomePage({ onCoursesLoaded }: HomePageProps) {
   return (
-    <Container maxWidth="lg" className="flex-1 flex flex-col py-8">
+    <Container maxWidth="lg" className="flex-1 flex flex-col py-4 px-3 sm:py-6 sm:px-4 md:py-8 md:px-6">
       <CoursesTab onCoursesLoaded={onCoursesLoaded} />
     </Container>
   )
