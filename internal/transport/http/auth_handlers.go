@@ -103,9 +103,6 @@ func (h *LoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func userResponse(u *domain.User) map[string]interface{} {
-	if u == nil {
-		return nil
-	}
 	return map[string]interface{}{
 		"id":         u.ID,
 		"email":      u.Email,
@@ -114,82 +111,4 @@ func userResponse(u *domain.User) map[string]interface{} {
 		"birth_date": u.BirthDate.Format("2006-01-02"),
 		"created_at": u.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-}
-
-type GetMeHandler struct {
-	getMe *usecase.GetMe
-}
-
-func NewGetMeHandler(getMe *usecase.GetMe) *GetMeHandler {
-	return &GetMeHandler{getMe: getMe}
-}
-
-func (h *GetMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	userID := UserIDFromContext(r.Context())
-	if userID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	user, err := h.getMe.GetMe(userID)
-	if err != nil || user == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(userResponse(user))
-}
-
-type UpdateMeHandler struct {
-	updateMe *usecase.UpdateMe
-}
-
-func NewUpdateMeHandler(updateMe *usecase.UpdateMe) *UpdateMeHandler {
-	return &UpdateMeHandler{updateMe: updateMe}
-}
-
-func (h *UpdateMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	userID := UserIDFromContext(r.Context())
-	if userID == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
-	var req struct {
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		BirthDate string `json:"birth_date"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
-		return
-	}
-	user, err := h.updateMe.UpdateMe(usecase.UpdateProfileInput{
-		UserID:    userID,
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		BirthDate: req.BirthDate,
-	})
-	if err != nil {
-		if errors.Is(err, usecase.ErrValidation) {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(userResponse(user))
 }
