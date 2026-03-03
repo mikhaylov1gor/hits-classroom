@@ -70,8 +70,7 @@ export function ProfileTab() {
   }
 
   const handleLogout = () => {
-    logout()
-    navigate('/login', { replace: true })
+    logout(() => navigate('/login', { replace: true }))
   }
 
   if (loading && !user) {

@@ -14,7 +14,14 @@ import MenuIcon from '@mui/icons-material/Menu'
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import ClassOutlinedIcon from '@mui/icons-material/ClassOutlined'
 import AccountCircleOutlinedIcon from '@mui/icons-material/AccountCircleOutlined'
-import { Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import {
+  Link as RouterLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom'
 import LoginPage from './pages/login/ui/LoginPage'
 import RegisterPage from './pages/register/ui/RegisterPage'
 import HomePage from './pages/home/ui/HomePage'
@@ -28,6 +35,7 @@ import { useAuth } from './features/auth/model/AuthContext'
 import { useCurrentUserQuery } from './features/profile/model/profileQueries'
 import type { User } from './features/auth/model/types'
 import type { CourseWithRole } from './features/courses/model/types'
+import { RedirectIfAuthenticated } from './app/RedirectIfAuthenticated'
 import { RequireAuth } from './app/RequireAuth'
 
 function AppShellContent() {
@@ -276,8 +284,22 @@ function AppShellContent() {
                 </RequireAuth>
               }
             />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+            <Route
+              path="/login"
+              element={
+                <RedirectIfAuthenticated>
+                  <LoginPage />
+                </RedirectIfAuthenticated>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <RedirectIfAuthenticated>
+                  <RegisterPage />
+                </RedirectIfAuthenticated>
+              }
+            />
             <Route
               path="/profile"
               element={
@@ -291,6 +313,14 @@ function AppShellContent() {
               element={
                 <RequireAuth>
                   <CoursePage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="*"
+              element={
+                <RequireAuth>
+                  <Navigate to="/" replace />
                 </RequireAuth>
               }
             />

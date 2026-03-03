@@ -7,6 +7,8 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { queryClient } from '../../../app/queryClient'
+import { currentUserQueryKey } from '../../profile/model/profileQueries'
 import type { LoginResponse, User } from './types'
 
 type AuthState = {
@@ -21,7 +23,7 @@ type AuthContextValue = AuthState & {
    * когда у нас уже есть сессия на сервере (cookie), но нет данных в localStorage.
    */
   setUserFromServer: (user: User) => void
-  logout: () => void
+  logout: (onRedirect?: () => void) => void
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -73,8 +75,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }))
   }, [])
 
-  const logout = useCallback(() => {
+  const logout = useCallback((onRedirect?: () => void) => {
     setState({ user: null, token: null })
+    queryClient.removeQueries({ queryKey: currentUserQueryKey })
+    onRedirect?.()
   }, [])
 
   const value = useMemo<AuthContextValue>(

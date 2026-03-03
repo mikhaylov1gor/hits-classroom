@@ -19,7 +19,25 @@ export type FeedItem = {
   created_at?: string
   deadline?: string | null
   author?: { first_name: string; last_name: string } | null
-  attachments?: { id: string; name: string; type?: string }[] | null
+  attachments?: { id: string; name: string; type?: string; url?: string }[] | null
+}
+
+export type Post = {
+  id: string
+  course_id: string
+  title: string
+  body?: string | null
+  created_at?: string
+  attachments?: { id: string; name: string; type?: string; url?: string }[] | null
+}
+
+export type Comment = {
+  id: string
+  assignment_id?: string
+  user_id: string
+  body?: string | null
+  created_at?: string
+  author?: { first_name: string; last_name: string } | null
 }
 
 export type Member = {
