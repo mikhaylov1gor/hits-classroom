@@ -22,6 +22,7 @@ import CoursesTab from './features/courses/ui/CoursesTab/CoursesTab'
 import CoursePage from './pages/course/ui/CoursePage'
 import ProfileTab from './features/profile/ui/ProfileTab/ProfileTab'
 import { AddCourseButton } from './features/courses/ui/AddCourseButton/AddCourseButton'
+import { CoursesLoader } from './features/courses/ui/CoursesLoader/CoursesLoader'
 import { CoursesProvider, useCourses } from './features/courses/model/CoursesContext'
 import { useAuth } from './features/auth/model/AuthContext'
 import { useCurrentUserQuery } from './features/profile/model/profileQueries'
@@ -46,6 +47,7 @@ function AppShellContent() {
   const headerUser = user ?? currentUser ?? profileUser
 
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register'
+  const isHomePage = location.pathname === '/'
 
   const recentCourses = useMemo(() => {
     if (!allCourses.length) {
@@ -80,6 +82,7 @@ function AppShellContent() {
 
   return (
     <Box className="min-h-screen flex flex-col">
+        {!isAuthPage && <CoursesLoader />}
         {!isAuthPage && (
           <AppBar position="static" color="transparent" elevation={0}>
             <Toolbar className="flex justify-between items-center h-14 min-h-[56px] md:h-20 border-b border-slate-100 bg-white/95 backdrop-blur-sm px-3 md:px-4">
@@ -93,9 +96,11 @@ function AppShellContent() {
               </Typography>
 
               <Box className="flex items-center gap-1">
-                <Box sx={{ display: { xs: 'none', md: 'inline-flex' } }}>
-                  <AddCourseButton />
-                </Box>
+                {isHomePage && (
+                  <Box sx={{ display: { xs: 'none', md: 'inline-flex' } }}>
+                    <AddCourseButton />
+                  </Box>
+                )}
                 <Box sx={{ display: { xs: 'inline-flex', md: 'none' } }}>
                   <IconButton
                     color="inherit"
@@ -159,7 +164,7 @@ function AppShellContent() {
           </AppBar>
         )}
 
-      {!isAuthPage && (
+      {!isAuthPage && isHomePage && (
         <Box
           sx={{
             display: { xs: 'block', md: 'none' },

@@ -3,6 +3,7 @@ import type {
   FeedItem,
   InviteCode,
   Member,
+  SubmissionWithAssignment,
 } from '../model/types'
 
 // Use relative base URL so that webpack devServer proxy can forward to backend on port 8080
@@ -166,5 +167,68 @@ export async function listCourseMembers(courseId: string): Promise<Member[]> {
   if (!response.ok) throw new Error('FETCH_MEMBERS_FAILED')
 
   return (await response.json()) as Member[]
+}
+
+export async function getMemberGrades(
+  courseId: string,
+  userId: string,
+): Promise<SubmissionWithAssignment[]> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/members/${userId}/grades`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_GRADES_FAILED')
+
+  return (await response.json()) as SubmissionWithAssignment[]
+}
+
+export async function removeMember(
+  courseId: string,
+  userId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/members/${userId}`,
+    {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (!response.ok) throw new Error('REMOVE_MEMBER_FAILED')
+}
+
+export async function updateMemberRole(
+  courseId: string,
+  userId: string,
+  role: 'teacher' | 'owner',
+): Promise<Member> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/members/${userId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ role }),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (!response.ok) throw new Error('UPDATE_MEMBER_ROLE_FAILED')
+
+  return (await response.json()) as Member
 }
 
