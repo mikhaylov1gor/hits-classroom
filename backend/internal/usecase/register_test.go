@@ -36,6 +36,10 @@ func (stubHasher) Hash(password string) (string, error) {
 	return "hashed_" + password, nil
 }
 
+func (stubHasher) Compare(hash, plain string) error {
+	return nil
+}
+
 func TestRegister_Success(t *testing.T) {
 	repo := &stubUserRepo{byEmail: make(map[string]*domain.User)}
 	uc := NewRegister(repo, stubHasher{})
