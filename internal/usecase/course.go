@@ -236,3 +236,112 @@ func (uc *DeleteCourse) DeleteCourse(courseID, userID string) error {
 	}
 	return uc.courseRepo.Delete(courseID)
 }
+
+type UpdateCourseInput struct {
+	CourseID string
+	UserID   string
+	Title    string
+}
+
+type UpdateCourse struct {
+	courseRepo repository.CourseRepository
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewUpdateCourse(courseRepo repository.CourseRepository, memberRepo repository.CourseMemberRepository) *UpdateCourse {
+	return &UpdateCourse{courseRepo: courseRepo, memberRepo: memberRepo}
+}
+
+func (uc *UpdateCourse) UpdateCourse(in UpdateCourseInput) (*domain.Course, error) {
+	course, err := uc.courseRepo.GetByID(in.CourseID)
+	if err != nil || course == nil {
+		return nil, ErrCourseNotFound
+	}
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return nil, ErrForbidden
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return nil, ErrValidation
+	}
+	course.Title = title
+	if err := uc.courseRepo.Update(course); err != nil {
+		return nil, err
+	}
+	return course, nil
+}
+
+type MemberWithUser struct {
+	UserID    string
+	Email     string
+	FirstName string
+	LastName  string
+	Role      domain.CourseRole
+}
+
+type ListCourseMembers struct {
+	memberRepo repository.CourseMemberRepository
+	userRepo   repository.UserRepository
+}
+
+func NewListCourseMembers(memberRepo repository.CourseMemberRepository, userRepo repository.UserRepository) *ListCourseMembers {
+	return &ListCourseMembers{memberRepo: memberRepo, userRepo: userRepo}
+}
+
+func (uc *ListCourseMembers) ListCourseMembers(courseID, userID string) ([]MemberWithUser, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	members, err := uc.memberRepo.ListByCourse(courseID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MemberWithUser, 0, len(members))
+	for _, m := range members {
+		u, _ := uc.userRepo.GetByID(m.UserID)
+		email, firstName, lastName := "", "", ""
+		if u != nil {
+			email, firstName, lastName = u.Email, u.FirstName, u.LastName
+		}
+		out = append(out, MemberWithUser{
+			UserID:    m.UserID,
+			Email:     email,
+			FirstName: firstName,
+			LastName:  lastName,
+			Role:      m.Role,
+		})
+	}
+	return out, nil
+}
+
+type AssignTeacherInput struct {
+	CourseID     string
+	UserID       string
+	TargetUserID string
+}
+
+type AssignTeacher struct {
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewAssignTeacher(memberRepo repository.CourseMemberRepository) *AssignTeacher {
+	return &AssignTeacher{memberRepo: memberRepo}
+}
+
+func (uc *AssignTeacher) AssignTeacher(in AssignTeacherInput) error {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role != domain.RoleOwner {
+		return ErrForbidden
+	}
+	member, err := uc.memberRepo.Get(in.CourseID, in.TargetUserID)
+	if err != nil || member == nil {
+		return ErrCourseNotFound
+	}
+	member.Role = domain.RoleTeacher
+	return uc.memberRepo.Update(member)
+}

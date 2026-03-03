@@ -154,3 +154,54 @@ func (uc *Login) Login(in LoginInput) (*domain.User, string, error) {
 	}
 	return user, token, nil
 }
+
+type GetMe struct {
+	repo repository.UserRepository
+}
+
+func NewGetMe(repo repository.UserRepository) *GetMe {
+	return &GetMe{repo: repo}
+}
+
+func (uc *GetMe) GetMe(userID string) (*domain.User, error) {
+	return uc.repo.GetByID(userID)
+}
+
+type UpdateProfileInput struct {
+	UserID    string
+	FirstName string
+	LastName  string
+	BirthDate string
+}
+
+type UpdateMe struct {
+	repo repository.UserRepository
+}
+
+func NewUpdateMe(repo repository.UserRepository) *UpdateMe {
+	return &UpdateMe{repo: repo}
+}
+
+func (uc *UpdateMe) UpdateMe(in UpdateProfileInput) (*domain.User, error) {
+	user, err := uc.repo.GetByID(in.UserID)
+	if err != nil || user == nil {
+		return nil, ErrValidation
+	}
+	if in.FirstName != "" {
+		user.FirstName = in.FirstName
+	}
+	if in.LastName != "" {
+		user.LastName = in.LastName
+	}
+	if in.BirthDate != "" {
+		birth, err := time.Parse("2006-01-02", in.BirthDate)
+		if err != nil {
+			return nil, ErrValidation
+		}
+		user.BirthDate = birth
+	}
+	if err := uc.repo.Update(user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}

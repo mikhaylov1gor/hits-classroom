@@ -6,12 +6,15 @@ type CourseRepository interface {
 	Create(course *domain.Course) error
 	GetByID(id string) (*domain.Course, error)
 	GetByInviteCode(code string) (*domain.Course, error)
+	Update(course *domain.Course) error
 	Delete(id string) error
 }
 
 type CourseMemberRepository interface {
 	Create(member *domain.CourseMember) error
 	GetUserRole(courseID, userID string) (domain.CourseRole, error)
+	Get(courseID, userID string) (*domain.CourseMember, error)
+	Update(member *domain.CourseMember) error
 	ListByCourse(courseID string) ([]*domain.CourseMember, error)
 	ListByUser(userID string) ([]*domain.CourseMember, error)
 	DeleteByCourse(courseID string) error

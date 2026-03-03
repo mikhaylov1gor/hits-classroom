@@ -371,6 +371,12 @@ func (s *stubCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	}
 	return nil, nil
 }
+func (s *stubCourseRepo) Update(c *domain.Course) error {
+	if s.courses != nil {
+		s.courses[c.ID] = c
+	}
+	return nil
+}
 func (s *stubCourseRepo) Delete(id string) error { return nil }
 
 type stubCourseMemberRepo struct {
@@ -388,6 +394,23 @@ func (s *stubCourseMemberRepo) GetUserRole(courseID, userID string) (domain.Cour
 		}
 	}
 	return "", nil
+}
+func (s *stubCourseMemberRepo) Get(courseID, userID string) (*domain.CourseMember, error) {
+	for _, m := range s.members {
+		if m.CourseID == courseID && m.UserID == userID {
+			return m, nil
+		}
+	}
+	return nil, nil
+}
+func (s *stubCourseMemberRepo) Update(m *domain.CourseMember) error {
+	for i, x := range s.members {
+		if x.CourseID == m.CourseID && x.UserID == m.UserID {
+			s.members[i] = m
+			return nil
+		}
+	}
+	return nil
 }
 func (s *stubCourseMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
@@ -413,7 +436,8 @@ func (s *stubJoinCourseRepo) GetByID(id string) (*domain.Course, error) {
 func (s *stubJoinCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	return s.courses[code], nil
 }
-func (s *stubJoinCourseRepo) Delete(id string) error { return nil }
+func (s *stubJoinCourseRepo) Update(c *domain.Course) error { return nil }
+func (s *stubJoinCourseRepo) Delete(id string) error        { return nil }
 
 type stubJoinMemberRepo struct {
 	members []*domain.CourseMember
@@ -435,6 +459,15 @@ func (s *stubJoinMemberRepo) GetUserRole(courseID, userID string) (domain.Course
 	}
 	return "", nil
 }
+func (s *stubJoinMemberRepo) Get(courseID, userID string) (*domain.CourseMember, error) {
+	for _, m := range s.members {
+		if m.CourseID == courseID && m.UserID == userID {
+			return m, nil
+		}
+	}
+	return nil, nil
+}
+func (s *stubJoinMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubJoinMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
@@ -454,7 +487,8 @@ func (s *stubListCourseRepo) GetByID(id string) (*domain.Course, error) {
 func (s *stubListCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	return nil, nil
 }
-func (s *stubListCourseRepo) Delete(id string) error { return nil }
+func (s *stubListCourseRepo) Update(c *domain.Course) error { return nil }
+func (s *stubListCourseRepo) Delete(id string) error        { return nil }
 
 type stubListMemberRepo struct {
 	members []*domain.CourseMember
@@ -464,6 +498,10 @@ func (s *stubListMemberRepo) Create(m *domain.CourseMember) error { return nil }
 func (s *stubListMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
 	return "", nil
 }
+func (s *stubListMemberRepo) Get(courseID, userID string) (*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubListMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubListMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
@@ -483,21 +521,26 @@ func (s *stubGetCourseRepo) GetByID(id string) (*domain.Course, error) {
 func (s *stubGetCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	return nil, nil
 }
-func (s *stubGetCourseRepo) Delete(id string) error { return nil }
+func (s *stubGetCourseRepo) Update(c *domain.Course) error { return nil }
+func (s *stubGetCourseRepo) Delete(id string) error        { return nil }
 
 type stubGetCourseMemberRepo struct {
 	role domain.CourseRole
 }
 
 func (s *stubGetCourseMemberRepo) Create(m *domain.CourseMember) error { return nil }
+func (s *stubGetCourseMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
+	return s.role, nil
+}
+func (s *stubGetCourseMemberRepo) Get(courseID, userID string) (*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubGetCourseMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubGetCourseMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
 func (s *stubGetCourseMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
 	return nil, nil
-}
-func (s *stubGetCourseMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
-	return s.role, nil
 }
 func (s *stubGetCourseMemberRepo) DeleteByCourse(courseID string) error { return nil }
 
@@ -512,21 +555,26 @@ func (s *stubInviteCourseRepo) GetByID(id string) (*domain.Course, error) {
 func (s *stubInviteCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	return nil, nil
 }
-func (s *stubInviteCourseRepo) Delete(id string) error { return nil }
+func (s *stubInviteCourseRepo) Update(c *domain.Course) error { return nil }
+func (s *stubInviteCourseRepo) Delete(id string) error        { return nil }
 
 type stubInviteMemberRepo struct {
 	role domain.CourseRole
 }
 
 func (s *stubInviteMemberRepo) Create(m *domain.CourseMember) error { return nil }
+func (s *stubInviteMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
+	return s.role, nil
+}
+func (s *stubInviteMemberRepo) Get(courseID, userID string) (*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubInviteMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubInviteMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
 func (s *stubInviteMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
 	return nil, nil
-}
-func (s *stubInviteMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
-	return s.role, nil
 }
 func (s *stubInviteMemberRepo) DeleteByCourse(courseID string) error { return nil }
 
@@ -541,6 +589,7 @@ func (s *stubDeleteCourseRepo) GetByID(id string) (*domain.Course, error) {
 func (s *stubDeleteCourseRepo) GetByInviteCode(code string) (*domain.Course, error) {
 	return nil, nil
 }
+func (s *stubDeleteCourseRepo) Update(c *domain.Course) error { return nil }
 func (s *stubDeleteCourseRepo) Delete(id string) error {
 	delete(s.courses, id)
 	return nil
@@ -552,14 +601,18 @@ type stubDeleteMemberRepo struct {
 }
 
 func (s *stubDeleteMemberRepo) Create(m *domain.CourseMember) error { return nil }
+func (s *stubDeleteMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
+	return s.role, nil
+}
+func (s *stubDeleteMemberRepo) Get(courseID, userID string) (*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubDeleteMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubDeleteMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
 func (s *stubDeleteMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
 	return nil, nil
-}
-func (s *stubDeleteMemberRepo) GetUserRole(courseID, userID string) (domain.CourseRole, error) {
-	return s.role, nil
 }
 func (s *stubDeleteMemberRepo) DeleteByCourse(courseID string) error {
 	s.deletedCourses = append(s.deletedCourses, courseID)

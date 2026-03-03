@@ -10,6 +10,7 @@ import (
 type stubUserRepo struct {
 	createErr error
 	byEmail   map[string]*domain.User
+	byID      map[string]*domain.User
 }
 
 func (s *stubUserRepo) Create(u *domain.User) error {
@@ -19,7 +20,11 @@ func (s *stubUserRepo) Create(u *domain.User) error {
 	if s.byEmail == nil {
 		s.byEmail = make(map[string]*domain.User)
 	}
+	if s.byID == nil {
+		s.byID = make(map[string]*domain.User)
+	}
 	s.byEmail[u.Email] = u
+	s.byID[u.ID] = u
 	return nil
 }
 
@@ -28,6 +33,23 @@ func (s *stubUserRepo) ByEmail(email string) (*domain.User, error) {
 		return u, nil
 	}
 	return nil, nil
+}
+
+func (s *stubUserRepo) GetByID(id string) (*domain.User, error) {
+	if s.byID != nil {
+		return s.byID[id], nil
+	}
+	return nil, nil
+}
+
+func (s *stubUserRepo) Update(u *domain.User) error {
+	if s.byEmail != nil {
+		s.byEmail[u.Email] = u
+	}
+	if s.byID != nil {
+		s.byID[u.ID] = u
+	}
+	return nil
 }
 
 type stubHasher struct{}
@@ -52,6 +74,17 @@ func (s *stubLoginRepo) ByEmail(email string) (*domain.User, error) {
 	}
 	return s.byEmail[email], nil
 }
+
+func (s *stubLoginRepo) GetByID(id string) (*domain.User, error) {
+	for _, u := range s.byEmail {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *stubLoginRepo) Update(u *domain.User) error { return nil }
 
 type stubTokenIssuer struct {
 	token string
