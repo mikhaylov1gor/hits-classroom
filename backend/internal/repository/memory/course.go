@@ -40,6 +40,17 @@ func (r *CourseRepository) GetByInviteCode(code string) (*domain.Course, error) 
 	return r.byInvite[code], nil
 }
 
+func (r *CourseRepository) Update(c *domain.Course) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if old, ok := r.byID[c.ID]; ok {
+		delete(r.byInvite, old.InviteCode)
+	}
+	r.byID[c.ID] = c
+	r.byInvite[c.InviteCode] = c
+	return nil
+}
+
 func (r *CourseRepository) Delete(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -77,6 +88,29 @@ func (r *CourseMemberRepository) GetUserRole(courseID, userID string) (domain.Co
 		}
 	}
 	return "", nil
+}
+
+func (r *CourseMemberRepository) Get(courseID, userID string) (*domain.CourseMember, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, m := range r.members {
+		if m.CourseID == courseID && m.UserID == userID {
+			return m, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *CourseMemberRepository) Update(member *domain.CourseMember) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, m := range r.members {
+		if m.CourseID == member.CourseID && m.UserID == member.UserID {
+			r.members[i] = member
+			return nil
+		}
+	}
+	return nil
 }
 
 func (r *CourseMemberRepository) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
