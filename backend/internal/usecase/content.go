@@ -221,17 +221,22 @@ type CreateSubmissionInput struct {
 
 type CreateSubmission struct {
 	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
 	submissionRepo repository.SubmissionRepository
 }
 
-func NewCreateSubmission(memberRepo repository.CourseMemberRepository, submissionRepo repository.SubmissionRepository) *CreateSubmission {
-	return &CreateSubmission{memberRepo: memberRepo, submissionRepo: submissionRepo}
+func NewCreateSubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *CreateSubmission {
+	return &CreateSubmission{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
 }
 
 func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.Submission, error) {
 	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
 	if err != nil || role == "" {
 		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
 	}
 	existing, _ := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.UserID)
 	if existing != nil {
