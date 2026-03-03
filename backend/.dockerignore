@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.md
+Dockerfile
+docker-compose*.yml
+.dockerignore
+.idea
+*.test
+*_test.go
