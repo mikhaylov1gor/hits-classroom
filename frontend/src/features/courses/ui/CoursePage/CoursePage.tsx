@@ -833,6 +833,8 @@ export function CoursePage() {
           onClose={() => setProfileMember(null)}
           member={profileMember}
           courseId={courseId ?? ''}
+          authUserId={authUser?.id}
+          isTeacher={isTeacher}
           onAssignmentClick={handleAssignmentClick}
         />
 

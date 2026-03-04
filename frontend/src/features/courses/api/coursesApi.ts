@@ -42,6 +42,28 @@ function getAuthHeaders(): HeadersInit {
   return headers
 }
 
+export async function createCourse(payload: { title: string }): Promise<CourseWithRole> {
+  const response = await fetch(`${API_BASE}/courses`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (response.status === 401) {
+    throw new Error('UNAUTHORIZED')
+  }
+
+  if (!response.ok) {
+    throw new Error('CREATE_COURSE_FAILED')
+  }
+
+  const data = (await response.json()) as { id: string; title: string; invite_code?: string }
+  return { ...data, role: 'owner' as const }
+}
+
 export async function listCourses(): Promise<CourseWithRole[]> {
   const response = await fetch(`${API_BASE}/courses`, {
     method: 'GET',
