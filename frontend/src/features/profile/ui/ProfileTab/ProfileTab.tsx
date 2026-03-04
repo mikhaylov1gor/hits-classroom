@@ -3,6 +3,7 @@ import { Box, Button, Card, CardContent, TextField, Typography } from '@mui/mate
 import { useNavigate } from 'react-router-dom'
 import type { User } from '../../../auth/model/types'
 import { useAuth } from '../../../auth/model/AuthContext'
+import { useCourses } from '../../../courses/model/CoursesContext'
 import { useCurrentUserQuery, useUpdateProfileMutation } from '../../model/profileQueries'
 
 type ProfileErrors = {
@@ -20,6 +21,7 @@ export function ProfileTab() {
   const [isEditing, setIsEditing] = useState(false)
   const [errors, setErrors] = useState<ProfileErrors>({})
   const { logout } = useAuth()
+  const coursesCtx = useCourses()
   const navigate = useNavigate()
   const { data, isLoading, isError } = useCurrentUserQuery(true)
   const updateProfileMutation = useUpdateProfileMutation()
@@ -70,6 +72,7 @@ export function ProfileTab() {
   }
 
   const handleLogout = () => {
+    coursesCtx?.setCourses([])
     logout(() => navigate('/login', { replace: true }))
   }
 

@@ -55,8 +55,13 @@ export function CreateAssignmentDialog({
     setError(null)
 
     const trimmedTitle = title.trim()
+    const trimmedContent = content.trim()
     if (!trimmedTitle) {
       setError('Введите название задания')
+      return
+    }
+    if (!trimmedContent) {
+      setError('Введите описание задания')
       return
     }
 
@@ -64,7 +69,7 @@ export function CreateAssignmentDialog({
     try {
       await createAssignment(courseId, {
         title: trimmedTitle,
-        body: content.trim() || undefined,
+        body: trimmedContent,
         deadline: deadline.trim() || undefined,
         file_ids: [],
       })
@@ -99,7 +104,7 @@ export function CreateAssignmentDialog({
       aria-labelledby="create-assignment-dialog-title"
     >
       <DialogTitle id="create-assignment-dialog-title">Новое задание</DialogTitle>
-      <Box component="form" onSubmit={handleSubmit}>
+      <Box component="form" onSubmit={handleSubmit} noValidate>
         <DialogContent className="flex flex-col gap-4">
           <TextField
             label="Название"
@@ -113,6 +118,7 @@ export function CreateAssignmentDialog({
           />
           <TextField
             label="Описание"
+            required
             fullWidth
             multiline
             minRows={4}

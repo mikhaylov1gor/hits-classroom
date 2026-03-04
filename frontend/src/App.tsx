@@ -27,6 +27,7 @@ import RegisterPage from './pages/register/ui/RegisterPage'
 import HomePage from './pages/home/ui/HomePage'
 import CoursesTab from './features/courses/ui/CoursesTab/CoursesTab'
 import CoursePage from './pages/course/ui/CoursePage'
+import { AssignmentPage } from './pages/course/ui/AssignmentPage'
 import ProfileTab from './features/profile/ui/ProfileTab/ProfileTab'
 import { AddCourseButton } from './features/courses/ui/AddCourseButton/AddCourseButton'
 import { CoursesLoader } from './features/courses/ui/CoursesLoader/CoursesLoader'
@@ -313,6 +314,14 @@ function AppShellContent() {
               element={
                 <RequireAuth>
                   <CoursePage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/course/:courseId/assignment/:assignmentId"
+              element={
+                <RequireAuth>
+                  <AssignmentPage />
                 </RequireAuth>
               }
             />

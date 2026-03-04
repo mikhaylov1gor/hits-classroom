@@ -2,14 +2,19 @@ import { useState } from 'react'
 import {
   Box,
   Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Fab,
   IconButton,
-  Popover,
   Snackbar,
+  Tab,
+  Tabs,
   TextField,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import { joinCourse } from '../../api/coursesApi'
+import { createCourse, joinCourse } from '../../api/coursesApi'
 import { useCourses } from '../../model/CoursesContext'
 import type { CourseWithRole } from '../../model/types'
 
@@ -18,18 +23,65 @@ type AddCourseButtonProps = {
   variant?: 'icon' | 'fab'
 }
 
+type TabId = 'create' | 'join'
+
 export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseButtonProps) {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<TabId>('create')
+
+  const [createTitle, setCreateTitle] = useState('')
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [createLoading, setCreateLoading] = useState(false)
+
   const [joinCode, setJoinCode] = useState('')
   const [joinError, setJoinError] = useState<string | null>(null)
   const [joinLoading, setJoinLoading] = useState(false)
-  const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null)
+
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const { addCourse } = useCourses() ?? { addCourse: () => {} }
 
-  const isPopoverOpen = Boolean(popoverAnchor)
+  const resetForm = () => {
+    setCreateTitle('')
+    setCreateError(null)
+    setJoinCode('')
+    setJoinError(null)
+  }
 
-  const handleJoin = async (event: React.FormEvent) => {
-    event.preventDefault()
+  const handleClose = () => {
+    if (!createLoading && !joinLoading) {
+      resetForm()
+      setDialogOpen(false)
+      setActiveTab('create')
+    }
+  }
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setCreateError(null)
+
+    const trimmed = createTitle.trim()
+    if (!trimmed) {
+      setCreateError('Введите название курса')
+      return
+    }
+
+    setCreateLoading(true)
+    try {
+      const created = await createCourse({ title: trimmed })
+      resetForm()
+      setDialogOpen(false)
+      addCourse(created)
+      onCourseAdded?.(created)
+      setSuccessMessage(`Курс «${created.title}» создан`)
+    } catch {
+      setCreateError('Не удалось создать курс')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  const handleJoin = async (e: React.FormEvent) => {
+    e.preventDefault()
     setJoinError(null)
 
     const trimmed = joinCode.trim()
@@ -42,7 +94,7 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
     try {
       const joined = await joinCourse(trimmed)
       setJoinCode('')
-      setPopoverAnchor(null)
+      setDialogOpen(false)
       addCourse(joined)
       onCourseAdded?.(joined)
       setSuccessMessage(`Курс «${joined.title}» добавлен`)
@@ -58,9 +110,11 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
   }
 
   const triggerProps = {
-    onClick: (e: React.MouseEvent<HTMLElement>) => setPopoverAnchor(e.currentTarget),
+    onClick: () => setDialogOpen(true),
     'aria-label': 'Добавить курс',
   }
+
+  const isLoading = createLoading || joinLoading
 
   return (
     <>
@@ -73,61 +127,89 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
           <AddIcon />
         </IconButton>
       )}
-      <Popover
-        open={isPopoverOpen}
-        anchorEl={popoverAnchor}
-        onClose={() => {
-          setPopoverAnchor(null)
-          setJoinError(null)
-        }}
-        anchorOrigin={
-          variant === 'fab'
-            ? { vertical: 'top', horizontal: 'center' }
-            : { vertical: 'bottom', horizontal: 'left' }
-        }
-        transformOrigin={
-          variant === 'fab'
-            ? { vertical: 'bottom', horizontal: 'center' }
-            : { vertical: 'top', horizontal: 'left' }
-        }
-        slotProps={{
-          paper: {
-            sx:
-              variant === 'fab'
-                ? { width: 'min(320px, calc(100vw - 32px))', maxWidth: 'calc(100vw - 32px)' }
-                : undefined,
-          },
-        }}
+      <Dialog
+        open={dialogOpen}
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+        aria-labelledby="add-course-dialog-title"
       >
         <Box
           component="form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (activeTab === 'create') handleCreate(e)
+            else handleJoin(e)
+          }}
           noValidate
-          onSubmit={handleJoin}
-          className="flex flex-col gap-3 p-4 min-w-[280px] max-w-full"
         >
-          <TextField
-            label="Код курса"
-            fullWidth
-            size="small"
-            value={joinCode}
-            onChange={(event) => {
-              setJoinCode(event.target.value)
-              setJoinError(null)
-            }}
-            error={Boolean(joinError)}
-            helperText={joinError}
-            autoFocus
-          />
-          <Button
-            type="submit"
-            variant="contained"
-            color="primary"
-            disabled={joinLoading}
+          <DialogTitle id="add-course-dialog-title">Добавить курс</DialogTitle>
+          <Tabs
+            value={activeTab}
+            onChange={(_, v: TabId) => setActiveTab(v)}
+            sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}
           >
-            Присоединиться
-          </Button>
+            <Tab label="Создать курс" value="create" />
+            <Tab label="Присоединиться по коду" value="join" />
+          </Tabs>
+          <DialogContent className="flex flex-col gap-4 pt-4">
+            {activeTab === 'create' && (
+              <TextField
+                label="Название курса"
+                fullWidth
+                size="small"
+                value={createTitle}
+                onChange={(e) => {
+                  setCreateTitle(e.target.value)
+                  setCreateError(null)
+                }}
+                error={Boolean(createError)}
+                helperText={createError}
+                autoFocus
+              />
+            )}
+            {activeTab === 'join' && (
+              <TextField
+                label="Код курса"
+                fullWidth
+                size="small"
+                value={joinCode}
+                onChange={(e) => {
+                  setJoinCode(e.target.value)
+                  setJoinError(null)
+                }}
+                error={Boolean(joinError)}
+                helperText={joinError}
+                autoFocus
+              />
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button type="button" onClick={handleClose} disabled={isLoading}>
+              Отмена
+            </Button>
+            {activeTab === 'create' ? (
+              <Button
+                type="submit"
+                variant="contained"
+                color="primary"
+                disabled={createLoading || !createTitle.trim()}
+              >
+                {createLoading ? 'Создание…' : 'Создать'}
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                variant="contained"
+                color="primary"
+                disabled={joinLoading || !joinCode.trim()}
+              >
+                {joinLoading ? 'Присоединение…' : 'Присоединиться'}
+              </Button>
+            )}
+          </DialogActions>
         </Box>
-      </Popover>
+      </Dialog>
       <Snackbar
         open={Boolean(successMessage)}
         autoHideDuration={4000}

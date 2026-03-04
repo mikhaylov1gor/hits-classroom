@@ -37,6 +37,8 @@ type UserProfileDialogProps = {
   onClose: () => void
   member: Member | null
   courseId: string
+  authUserId?: string
+  isTeacher?: boolean
   onAssignmentClick?: (assignmentId: string) => void
 }
 
@@ -45,13 +47,19 @@ export function UserProfileDialog({
   onClose,
   member,
   courseId,
+  authUserId,
+  isTeacher,
   onAssignmentClick,
 }: UserProfileDialogProps) {
   const [grades, setGrades] = useState<SubmissionWithAssignment[]>([])
   const [loading, setLoading] = useState(false)
 
+  const showGrades =
+    Boolean(member) &&
+    (Boolean(isTeacher) || (Boolean(authUserId) && member!.user_id === authUserId))
+
   useEffect(() => {
-    if (!open || !member || !courseId) {
+    if (!open || !member || !courseId || !showGrades) {
       setGrades([])
       return
     }
@@ -60,7 +68,7 @@ export function UserProfileDialog({
       .then(setGrades)
       .catch(() => setGrades([]))
       .finally(() => setLoading(false))
-  }, [open, member, courseId])
+  }, [open, member, courseId, showGrades])
 
   if (!member) return null
 
@@ -123,20 +131,21 @@ export function UserProfileDialog({
             </Typography>
           </Box>
 
-          <Box>
-            <Typography variant="subtitle2" className="font-semibold mb-2">
-              Последние задания с оценками
-            </Typography>
-            {loading ? (
-              <Box className="flex justify-center py-6">
-                <CircularProgress size={32} />
-              </Box>
-            ) : grades.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                Нет заданий с оценками
+          {showGrades && (
+            <Box>
+              <Typography variant="subtitle2" className="font-semibold mb-2">
+                Последние задания с оценками
               </Typography>
-            ) : (
-              <List dense disablePadding>
+              {loading ? (
+                <Box className="flex justify-center py-6">
+                  <CircularProgress size={32} />
+                </Box>
+              ) : grades.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  Нет заданий с оценками
+                </Typography>
+              ) : (
+                <List dense disablePadding>
                 {grades.map(({ submission, assignment }) => (
                   <ListItem
                     key={submission.id}
@@ -154,9 +163,10 @@ export function UserProfileDialog({
                     />
                   </ListItem>
                 ))}
-              </List>
-            )}
-          </Box>
+                </List>
+              )}
+            </Box>
+          )}
         </Box>
       </DialogContent>
     </Dialog>
