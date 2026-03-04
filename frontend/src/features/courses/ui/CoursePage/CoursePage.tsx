@@ -43,6 +43,7 @@ import { CourseBanner } from '../CourseHeader/CourseBanner'
 import { CreateAssignmentDialog } from './CreateAssignmentDialog/CreateAssignmentDialog'
 import { CreateMaterialDialog } from './CreateMaterialDialog/CreateMaterialDialog'
 import { CreatePostDialog } from './CreatePostDialog/CreatePostDialog'
+import { AssignmentCard } from './AssignmentCard/AssignmentCard'
 import { PostCard } from './PostCard/PostCard'
 import { UserProfileDialog } from './UserProfileDialog'
 import type { CourseTabId, CourseWithRole, FeedItem, Member } from '../../model/types'
@@ -98,7 +99,7 @@ export function CoursePage() {
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tabValue, setTabValue] = useState(1)
+  const [tabValue, setTabValue] = useState(0)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [copySnackbar, setCopySnackbar] = useState(false)
@@ -268,9 +269,9 @@ export function CoursePage() {
     }
   }
 
-  const handleAssignmentClick = () => {
+  const handleAssignmentClick = (assignmentId: string) => {
     setProfileMember(null)
-    setTabValue(tabIds.indexOf('assignments'))
+    if (courseId) navigate(`/course/${courseId}/assignment/${assignmentId}`)
   }
 
   const handleStartRename = () => {
@@ -343,6 +344,17 @@ export function CoursePage() {
       return { name, initial: getInitials(firstTeacher) }
     }
     return { name: 'Преподаватель', initial: 'П' }
+  }
+
+  function getAuthorForAssignment(item: FeedItem): string {
+    if (item.author) {
+      return `${item.author.first_name} ${item.author.last_name}`.trim() || 'Автор'
+    }
+    const firstTeacher = teachers[0]
+    if (firstTeacher) {
+      return `${firstTeacher.first_name} ${firstTeacher.last_name}`.trim() || firstTeacher.email
+    }
+    return 'Преподаватель'
   }
 
   function MemberRow({ member }: { member: Member }) {
@@ -445,33 +457,75 @@ export function CoursePage() {
 
       <Box className="flex-1 overflow-auto min-w-0 px-3 sm:px-4 md:px-6">
         <TabPanel value={tabValue} index={0}>
-          {isTeacher && (
-            <Button
-              variant="contained"
-              startIcon={<SendOutlinedIcon />}
-              className="mb-4"
-              sx={{ textTransform: 'none' }}
-              onClick={() => setCreateAssignmentOpen(true)}
-              aria-label="Создать задание"
-            >
-              Новое задание
-            </Button>
-          )}
-          <List className="flex flex-col gap-1 min-w-0">
-            {assignments.length === 0 ? (
-              <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
-                <Typography variant="body2" className="text-slate-500 text-center md:text-left">
-                  Нет заданий
+          <Box className="flex flex-col lg:flex-row gap-6 py-4">
+            <Box className="lg:w-64 shrink-0">
+              <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-2">
+                  Предстоящие
+                </Typography>
+                {upcomingAssignments.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" className="mb-3">
+                    У вас нет заданий, которые нужно сдать на следующей неделе.
+                  </Typography>
+                ) : (
+                  <Box className="flex flex-col gap-2 mb-3">
+                    {upcomingAssignments.slice(0, 3).map((a) => (
+                      <Typography
+                        key={a.id}
+                        variant="body2"
+                        className="text-slate-700 cursor-pointer hover:text-primary-600"
+                        onClick={() => courseId && navigate(`/course/${courseId}/assignment/${a.id}`)}
+                      >
+                        {a.title}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                <Typography
+                  component="button"
+                  variant="body2"
+                  className="text-primary-600 hover:text-primary-700 font-medium cursor-pointer border-0 bg-transparent p-0"
+                  onClick={() => setTabValue(tabIds.indexOf('assignments'))}
+                >
+                  Посмотреть всё
                 </Typography>
               </Box>
-            ) : (
-              assignments.map((item) => (
-                <ListItem key={item.id} className="border border-slate-200 rounded-lg min-w-0">
-                  <ListItemText primary={item.title} secondary={item.deadline ?? undefined} />
-                </ListItem>
-              ))
-            )}
-          </List>
+            </Box>
+            <Box className="flex-1 min-w-0 flex flex-col" sx={{ gap: '1.5rem' }}>
+              {isTeacher && (
+                <Button
+                  variant="contained"
+                  startIcon={<SendOutlinedIcon />}
+                  sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                  onClick={() => setCreateAssignmentOpen(true)}
+                  aria-label="Создать задание"
+                >
+                  Новое задание
+                </Button>
+              )}
+              <Box className="flex flex-col gap-4">
+                {assignments.length === 0 ? (
+                  <Box className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+                    <Typography variant="body2" color="text.secondary">
+                      Нет заданий
+                    </Typography>
+                  </Box>
+                ) : (
+                  assignments.map((item) => (
+                    <AssignmentCard
+                      key={item.id}
+                      item={item}
+                      courseId={courseId ?? ''}
+                      authorName={getAuthorForAssignment(item)}
+                      onClick={() => courseId && navigate(`/course/${courseId}/assignment/${item.id}`)}
+                      isTeacher={isTeacher}
+                      courseMembers={members.map((m) => ({ user_id: m.user_id, role: m.role }))}
+                    />
+                  ))
+                )}
+              </Box>
+            </Box>
+          </Box>
         </TabPanel>
 
         <TabPanel value={tabValue} index={1}>
@@ -765,6 +819,12 @@ export function CoursePage() {
         <CreatePostDialog
           open={createPostOpen}
           onClose={() => setCreatePostOpen(false)}
+          courseId={courseId ?? ''}
+          onCreated={refreshFeed}
+        />
+        <CreateAssignmentDialog
+          open={createAssignmentOpen}
+          onClose={() => setCreateAssignmentOpen(false)}
           courseId={courseId ?? ''}
           onCreated={refreshFeed}
         />

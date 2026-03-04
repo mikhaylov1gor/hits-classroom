@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from 'react'
 import { queryClient } from '../../../app/queryClient'
-import { currentUserQueryKey } from '../../profile/model/profileQueries'
 import type { LoginResponse, User } from './types'
 
 type AuthState = {
@@ -76,8 +75,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const logout = useCallback((onRedirect?: () => void) => {
-    setState({ user: null, token: null })
-    queryClient.removeQueries({ queryKey: currentUserQueryKey })
+    const cleared = { user: null, token: null }
+    setState(cleared)
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleared))
+    } catch {
+      // ignore
+    }
+    queryClient.clear()
     onRedirect?.()
   }, [])
 

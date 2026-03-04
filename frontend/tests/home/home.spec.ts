@@ -146,18 +146,24 @@ test.describe('Главный экран и профиль', () => {
   })
 
   test('logout перенаправляет на страницу логина', async ({ page }) => {
+    const userPayload = {
+      id: 'user-1',
+      email: 'student@example.com',
+      first_name: 'Иван',
+      last_name: 'Иванов',
+      birth_date: '2000-01-01',
+      created_at: new Date().toISOString(),
+    }
     await page.route('**/api/v1/users/me', async (route) => {
+      const auth = route.request().headers()['authorization']
+      if (!auth?.startsWith('Bearer ')) {
+        await route.fulfill({ status: 401 })
+        return
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          id: 'user-1',
-          email: 'student@example.com',
-          first_name: 'Иван',
-          last_name: 'Иванов',
-          birth_date: '2000-01-01',
-          created_at: new Date().toISOString(),
-        }),
+        body: JSON.stringify(userPayload),
       })
     })
 
@@ -169,6 +175,13 @@ test.describe('Главный экран и профиль', () => {
       })
     })
 
+    await page.goto('/')
+    await page.evaluate((user) => {
+      localStorage.setItem(
+        'hits-classroom-auth',
+        JSON.stringify({ user, token: 'test-token' }),
+      )
+    }, userPayload)
     await page.goto('/')
 
     await page.getByRole('menuitem', { name: /профиль/i }).click()

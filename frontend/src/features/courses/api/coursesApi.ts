@@ -1,10 +1,12 @@
 import type {
+  Assignment,
   Comment,
   CourseWithRole,
   FeedItem,
   InviteCode,
   Member,
   Post,
+  Submission,
   SubmissionWithAssignment,
 } from '../model/types'
 
@@ -178,10 +180,27 @@ export async function createPost(
   return (await response.json()) as Post
 }
 
+export async function getAssignment(
+  courseId: string,
+  assignmentId: string,
+): Promise<Assignment> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_ASSIGNMENT_FAILED')
+
+  return (await response.json()) as Assignment
+}
+
 export async function createAssignment(
   courseId: string,
   payload: { title: string; body?: string; file_ids?: string[]; deadline?: string },
-): Promise<unknown> {
+): Promise<Assignment> {
   const response = await fetch(`${API_BASE}/courses/${courseId}/assignments`, {
     method: 'POST',
     headers: {
@@ -196,7 +215,78 @@ export async function createAssignment(
   if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
   if (!response.ok) throw new Error('CREATE_ASSIGNMENT_FAILED')
 
-  return response.json()
+  return (await response.json()) as Assignment
+}
+
+export async function listSubmissions(
+  courseId: string,
+  assignmentId: string,
+): Promise<Submission[]> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_SUBMISSIONS_FAILED')
+
+  return (await response.json()) as Submission[]
+}
+
+export async function submitAssignment(
+  courseId: string,
+  assignmentId: string,
+  payload: { body?: string; file_ids?: string[] },
+): Promise<Submission> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(payload),
+    },
+  )
+
+  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (response.status === 409) throw new Error('ALREADY_SUBMITTED')
+  if (!response.ok) throw new Error('SUBMIT_ASSIGNMENT_FAILED')
+
+  return (await response.json()) as Submission
+}
+
+export async function gradeSubmission(
+  courseId: string,
+  assignmentId: string,
+  submissionId: string,
+  grade: number,
+): Promise<Submission> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/grade`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ grade }),
+    },
+  )
+
+  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('GRADE_SUBMISSION_FAILED')
+
+  return (await response.json()) as Submission
 }
 
 export async function createMaterial(
@@ -242,7 +332,7 @@ export async function listComments(
 export async function createComment(
   courseId: string,
   entityId: string,
-  payload: { body?: string; file_ids?: string[] },
+  payload: { body?: string; file_ids?: string[]; user_id?: string },
 ): Promise<Comment> {
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/assignments/${entityId}/comments`,

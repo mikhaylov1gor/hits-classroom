@@ -204,8 +204,9 @@ test.describe('Вкладка Задания', () => {
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /задания/i }).click()
 
-      await page.getByRole('button', { name: /решить задачу/i }).click()
+      await page.getByRole('button', { name: /открыть задание решить задачу|решить задачу/i }).click()
 
+      await expect(page).toHaveURL(/\/course\/course-1\/assignment\/a1/)
       await expect(page.getByRole('heading', { name: 'Решить задачу' })).toBeVisible()
       await expect(page.getByText('Описание задания для студентов.')).toBeVisible()
     })
@@ -375,7 +376,7 @@ test.describe('Вкладка Задания', () => {
   })
 
   test.describe('Студент: сдача ответа', () => {
-    test('форма ответа: текст и файлы, кнопка Отправить', async ({ page }) => {
+    test('форма ответа: текст и файлы, кнопка Отметить как выполненное', async ({ page }) => {
       await mockCourseList(page, [{ id: 'c-sub', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'c-sub', { id: 'c-sub', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-sub', [
@@ -425,9 +426,8 @@ test.describe('Вкладка Задания', () => {
       await page.getByRole('button', { name: /задание/i }).click()
 
       await expect(page.getByRole('heading', { name: 'Задание' })).toBeVisible()
-      await expect(page.getByRole('heading', { name: 'Описание' })).toBeVisible()
       await expect(page.getByLabel(/текст ответа|ответ/i)).toBeVisible()
-      await expect(page.getByRole('button', { name: /отправить/i })).toBeVisible()
+      await expect(page.getByRole('button', { name: /отметить как выполненное/i })).toBeVisible()
     })
 
     test('отправка ответа обновляет статус', async ({ page }) => {
@@ -482,13 +482,13 @@ test.describe('Вкладка Задания', () => {
       await page.getByRole('button', { name: /задание/i }).click()
 
       await page.getByLabel(/текст ответа|ответ/i).fill('Мой ответ на задание')
-      await page.getByRole('button', { name: /отправить/i }).click()
+      await page.getByRole('button', { name: /отметить как выполненное/i }).click()
 
-      await expect(page.getByRole('heading', { name: /статус: проверяется/i })).toBeVisible()
+      await expect(page.getByText(/сдано|проверяется/i).first()).toBeVisible()
       await expect(page.getByText('Мой ответ на задание')).toBeVisible()
     })
 
-    test('кнопка Отмена закрывает форму без отправки', async ({ page }) => {
+    test('кнопка Отмена очищает форму без отправки', async ({ page }) => {
       await mockCourseList(page, [{ id: 'c-cancel', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'c-cancel', { id: 'c-cancel', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-cancel', [
@@ -520,13 +520,12 @@ test.describe('Вкладка Задания', () => {
       await page.goto('/')
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /задания/i }).click()
-      await page.getByRole('button', { name: /задание/i }).click()
+      await page.getByRole('button', { name: /открыть задание задание/i }).click()
 
       await page.getByLabel(/текст ответа|ответ/i).fill('Не отправлю')
       await page.getByRole('button', { name: /отмена/i }).first().click()
 
-      const dialog = page.getByRole('dialog', { name: /задание/i })
-      await expect(dialog).not.toBeVisible()
+      await expect(page.getByLabel(/текст ответа|ответ/i)).toHaveValue('')
     })
 
     test('после отправки форма неизменяема (immutable)', async ({ page }) => {
@@ -576,7 +575,7 @@ test.describe('Вкладка Задания', () => {
       await page.getByRole('button', { name: /задание/i }).click()
 
       await expect(page.getByText('Уже сданный ответ')).toBeVisible()
-      await expect(page.getByRole('button', { name: /отправить/i })).not.toBeVisible()
+      await expect(page.getByRole('button', { name: /отметить как выполненное/i })).not.toBeVisible()
     })
 
     test('отображение статуса: не сдано, просрочено, проверяется, оценка', async ({
@@ -630,7 +629,7 @@ test.describe('Вкладка Задания', () => {
       await page.getByRole('tab', { name: /задания/i }).click()
       await page.getByRole('button', { name: /задание с оценкой/i }).click()
 
-      await expect(page.getByText(/оценка|85|балл/i)).toBeVisible()
+      await expect(page.getByText(/оценка|85|балл/i).first()).toBeVisible()
       await expect(page.getByText('Мой ответ')).toBeVisible()
     })
   })
@@ -825,15 +824,12 @@ test.describe('Вкладка Задания', () => {
       await page.getByRole('tab', { name: /задания/i }).click()
       await page.getByRole('button', { name: /открыть задание задание/i }).click()
 
-      const assignmentDialog = page.getByRole('dialog', { name: /задание/i })
-      await assignmentDialog.getByText(/добавить комментарий/i).click()
-      await assignmentDialog.getByLabel(/текст комментария|комментарий/i).fill('Отличная работа!')
-      await assignmentDialog.getByRole('button', { name: 'Отправить' }).click()
+      await expect(page).toHaveURL(/\/course\/c-comment\/assignment\/a1/)
+      await page.getByText(/добавить комментарий/i).click()
+      await page.getByLabel(/текст комментария|комментарий/i).fill('Отличная работа!')
+      await page.getByRole('button', { name: 'Отправить' }).first().click()
 
-      await expect(page.getByText(/комментарии \(\d+\)/i)).toBeVisible()
-      await page.getByText(/комментарии \(\d+\)/i).click()
-      const commentsDialog = page.getByRole('dialog', { name: /комментарии/i })
-      await expect(commentsDialog.getByText('Отличная работа!')).toBeVisible()
+      await expect(page.getByText('Отличная работа!')).toBeVisible()
     })
   })
 })
