@@ -81,12 +81,9 @@ func TestJoinCourse_AlreadyMember(t *testing.T) {
 	}
 	uc := NewJoinCourse(courseRepo, memberRepo)
 
-	gotCourse, role, err := uc.JoinCourse(JoinCourseInput{UserID: "user-1", Code: "ABCD1234"})
-	if err != nil {
-		t.Fatalf("JoinCourse() err = %v", err)
-	}
-	if gotCourse.ID != "c1" || role != domain.RoleStudent {
-		t.Errorf("course = %+v, role = %s", gotCourse, role)
+	_, _, err := uc.JoinCourse(JoinCourseInput{UserID: "user-1", Code: "ABCD1234"})
+	if !errors.Is(err, ErrAlreadyMember) {
+		t.Fatalf("expected ErrAlreadyMember, got %v", err)
 	}
 	if len(memberRepo.members) != 1 {
 		t.Error("should not create duplicate member")

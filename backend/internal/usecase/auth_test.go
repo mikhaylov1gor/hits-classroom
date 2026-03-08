@@ -105,9 +105,10 @@ func mustHash(p string) string {
 
 func TestRegister_Success(t *testing.T) {
 	repo := &stubUserRepo{byEmail: make(map[string]*domain.User)}
-	uc := NewRegister(repo, stubHasher{})
+	issuer := &stubTokenIssuer{token: "test-token"}
+	uc := NewRegister(repo, stubHasher{}, issuer)
 
-	user, err := uc.Register(RegisterInput{
+	user, token, err := uc.Register(RegisterInput{
 		Email:     "u@test.com",
 		Password:  "password12",
 		FirstName: "John",
@@ -132,14 +133,18 @@ func TestRegister_Success(t *testing.T) {
 	if user.CreatedAt.IsZero() {
 		t.Error("user.CreatedAt is zero")
 	}
+	if token != "test-token" {
+		t.Errorf("token = %q, want test-token", token)
+	}
 }
 
 func TestRegister_EmailExists(t *testing.T) {
 	existing := &domain.User{ID: "1", Email: "taken@test.com"}
 	repo := &stubUserRepo{byEmail: map[string]*domain.User{"taken@test.com": existing}}
-	uc := NewRegister(repo, stubHasher{})
+	issuer := &stubTokenIssuer{token: "t"}
+	uc := NewRegister(repo, stubHasher{}, issuer)
 
-	_, err := uc.Register(RegisterInput{
+	_, _, err := uc.Register(RegisterInput{
 		Email:     "taken@test.com",
 		Password:  "password12",
 		FirstName: "A",
@@ -156,7 +161,8 @@ func TestRegister_EmailExists(t *testing.T) {
 
 func TestRegister_Validation(t *testing.T) {
 	repo := &stubUserRepo{byEmail: make(map[string]*domain.User)}
-	uc := NewRegister(repo, stubHasher{})
+	issuer := &stubTokenIssuer{token: "t"}
+	uc := NewRegister(repo, stubHasher{}, issuer)
 
 	tests := []struct {
 		name string
@@ -168,15 +174,18 @@ func TestRegister_Validation(t *testing.T) {
 		{"empty first name", RegisterInput{Email: "a@b.com", Password: "password12", FirstName: "", LastName: "B", BirthDate: "1990-01-01"}},
 		{"empty last name", RegisterInput{Email: "a@b.com", Password: "password12", FirstName: "A", LastName: "", BirthDate: "1990-01-01"}},
 		{"bad birth_date", RegisterInput{Email: "a@b.com", Password: "password12", FirstName: "A", LastName: "B", BirthDate: "invalid"}},
+		{"future birth_date", RegisterInput{Email: "a@b.com", Password: "password12", FirstName: "A", LastName: "B", BirthDate: "2099-01-01"}},
+		{"too young", RegisterInput{Email: "a@b.com", Password: "password12", FirstName: "A", LastName: "B", BirthDate: "2020-01-01"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := uc.Register(tt.in)
+			_, _, err := uc.Register(tt.in)
 			if err == nil {
 				t.Fatal("expected validation err")
 			}
-			if !errors.Is(err, ErrValidation) {
-				t.Errorf("err = %v, want ErrValidation", err)
+			var vErr *ValidationError
+			if !errors.As(err, &vErr) {
+				t.Errorf("err = %v, want *ValidationError", err)
 			}
 		})
 	}
@@ -184,9 +193,10 @@ func TestRegister_Validation(t *testing.T) {
 
 func TestRegister_RepoError(t *testing.T) {
 	repo := &stubUserRepo{byEmail: make(map[string]*domain.User), createErr: errors.New("db error")}
-	uc := NewRegister(repo, stubHasher{})
+	issuer := &stubTokenIssuer{token: "t"}
+	uc := NewRegister(repo, stubHasher{}, issuer)
 
-	_, err := uc.Register(RegisterInput{
+	_, _, err := uc.Register(RegisterInput{
 		Email:     "u@test.com",
 		Password:  "password12",
 		FirstName: "A",
@@ -196,7 +206,8 @@ func TestRegister_RepoError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected err")
 	}
-	if errors.Is(err, ErrValidation) || errors.Is(err, ErrEmailExists) {
+	var vErr *ValidationError
+	if errors.As(err, &vErr) || errors.Is(err, ErrEmailExists) {
 		t.Errorf("expected repo err, got %v", err)
 	}
 }

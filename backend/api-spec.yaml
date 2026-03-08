@@ -569,7 +569,7 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/comments:
     get:
       tags: [comments]
-      summary: Комментарии к заданию (F-19)
+      summary: Комментарии к заданию, возвращаются в виде дерева (F-19)
       operationId: listComments
       security:
         - bearerAuth: []
@@ -593,7 +593,7 @@ paths:
           $ref: "#/components/responses/NotFound"
     post:
       tags: [comments]
-      summary: Добавить комментарий (текст + файлы)
+      summary: Добавить комментарий (текст + файлы), поле parent_id — для ответа на комментарий
       operationId: createComment
       security:
         - bearerAuth: []
@@ -615,6 +615,32 @@ paths:
                 $ref: "#/components/schemas/Comment"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/comments/{commentId}:
+    delete:
+      tags: [comments]
+      summary: Удалить комментарий (и все вложенные ответы). Автор или owner/teacher.
+      operationId: deleteComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: No Content
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1035,7 +1061,13 @@ components:
 
     CreateCommentRequest:
       type: object
+      required: [body]
       properties:
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID родительского комментария. Если не указан — корневой комментарий.
         body:
           type: string
         file_ids:
@@ -1056,8 +1088,18 @@ components:
         user_id:
           type: string
           format: uuid
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID родительского комментария или null для корневых комментариев
         body:
           type: string
         created_at:
           type: string
           format: date-time
+        replies:
+          type: array
+          description: Вложенные ответы на комментарий (рекурсивно)
+          items:
+            $ref: "#/components/schemas/Comment"

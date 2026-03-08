@@ -44,6 +44,7 @@ type Comment struct {
 	ID           string
 	AssignmentID string
 	UserID       string
+	ParentID     *string
 	Body         string
 	FileIDs      []string
 	CreatedAt    time.Time

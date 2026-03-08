@@ -19,6 +19,13 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
+// ValidationError содержит конкретное сообщение для клиента.
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Message }
+
 type PasswordHasher interface {
 	Hash(password string) (string, error)
 	Compare(hash, plain string) error
@@ -77,37 +84,50 @@ type RegisterInput struct {
 type Register struct {
 	repo   repository.UserRepository
 	hasher PasswordHasher
+	issuer TokenIssuer
 }
 
-func NewRegister(repo repository.UserRepository, hasher PasswordHasher) *Register {
-	return &Register{repo: repo, hasher: hasher}
+func NewRegister(repo repository.UserRepository, hasher PasswordHasher, issuer TokenIssuer) *Register {
+	return &Register{repo: repo, hasher: hasher, issuer: issuer}
 }
 
-func (uc *Register) Register(in RegisterInput) (*domain.User, error) {
+func (uc *Register) Register(in RegisterInput) (*domain.User, string, error) {
 	in.Email = strings.TrimSpace(strings.ToLower(in.Email))
-	if in.Email == "" || in.FirstName == "" || in.LastName == "" || in.BirthDate == "" {
-		return nil, ErrValidation
+	if in.Email == "" {
+		return nil, "", &ValidationError{Message: "email is required"}
 	}
 	if _, err := mail.ParseAddress(in.Email); err != nil {
-		return nil, ErrValidation
+		return nil, "", &ValidationError{Message: "email must be a valid email address"}
 	}
 	if len(in.Password) < 8 {
-		return nil, ErrValidation
+		return nil, "", &ValidationError{Message: "password must be at least 8 characters"}
 	}
-	existing, err := uc.repo.ByEmail(in.Email)
-	if err != nil {
-		return nil, err
+	if in.FirstName == "" {
+		return nil, "", &ValidationError{Message: "first_name is required"}
 	}
-	if existing != nil {
-		return nil, ErrEmailExists
+	if in.LastName == "" {
+		return nil, "", &ValidationError{Message: "last_name is required"}
+	}
+	if in.BirthDate == "" {
+		return nil, "", &ValidationError{Message: "birth_date is required"}
 	}
 	birth, err := time.Parse("2006-01-02", in.BirthDate)
 	if err != nil {
-		return nil, ErrValidation
+		return nil, "", &ValidationError{Message: "birth_date must be in format YYYY-MM-DD"}
+	}
+	if err := validateBirthDate(birth); err != nil {
+		return nil, "", err
+	}
+	existing, err := uc.repo.ByEmail(in.Email)
+	if err != nil {
+		return nil, "", err
+	}
+	if existing != nil {
+		return nil, "", ErrEmailExists
 	}
 	hash, err := uc.hasher.Hash(in.Password)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	user := &domain.User{
 		ID:           uuid.New().String(),
@@ -119,9 +139,32 @@ func (uc *Register) Register(in RegisterInput) (*domain.User, error) {
 		CreatedAt:    time.Now().UTC(),
 	}
 	if err := uc.repo.Create(user); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return user, nil
+	token, err := uc.issuer.Issue(user.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	return user, token, nil
+}
+
+// validateBirthDate проверяет, что дата рождения в прошлом и возраст разумный.
+func validateBirthDate(birth time.Time) error {
+	now := time.Now().UTC()
+	if birth.After(now) {
+		return &ValidationError{Message: "birth_date cannot be in the future"}
+	}
+	age := now.Year() - birth.Year()
+	if birth.AddDate(age, 0, 0).After(now) {
+		age--
+	}
+	if age < 14 {
+		return &ValidationError{Message: "user must be at least 14 years old"}
+	}
+	if age > 150 {
+		return &ValidationError{Message: "birth_date is not realistic"}
+	}
+	return nil
 }
 
 type LoginInput struct {
@@ -202,7 +245,10 @@ func (uc *UpdateMe) UpdateMe(in UpdateProfileInput) (*domain.User, error) {
 	if in.BirthDate != "" {
 		birth, err := time.Parse("2006-01-02", in.BirthDate)
 		if err != nil {
-			return nil, ErrValidation
+			return nil, &ValidationError{Message: "birth_date must be in format YYYY-MM-DD"}
+		}
+		if err := validateBirthDate(birth); err != nil {
+			return nil, err
 		}
 		user.BirthDate = birth
 	}

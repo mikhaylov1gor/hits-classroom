@@ -389,6 +389,7 @@ type CreateCommentInput struct {
 	CourseID     string
 	AssignmentID string
 	UserID       string
+	ParentID     *string
 	Body         string
 	FileIDs      []string
 }
@@ -412,10 +413,20 @@ func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, 
 	if err != nil || a == nil || a.CourseID != in.CourseID {
 		return nil, ErrCourseNotFound
 	}
+	if strings.TrimSpace(in.Body) == "" {
+		return nil, &ValidationError{Message: "body is required"}
+	}
+	if in.ParentID != nil {
+		parent, err := uc.commentRepo.GetByID(*in.ParentID)
+		if err != nil || parent == nil || parent.AssignmentID != in.AssignmentID {
+			return nil, ErrCourseNotFound
+		}
+	}
 	c := &domain.Comment{
 		ID:           uuid.New().String(),
 		AssignmentID: in.AssignmentID,
 		UserID:       in.UserID,
+		ParentID:     in.ParentID,
 		Body:         in.Body,
 		FileIDs:      in.FileIDs,
 		CreatedAt:    time.Now().UTC(),
@@ -424,4 +435,67 @@ func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, 
 		return nil, err
 	}
 	return c, nil
+}
+
+var ErrCommentNotFound = errors.New("comment not found")
+
+type DeleteCommentInput struct {
+	CourseID     string
+	AssignmentID string
+	CommentID    string
+	UserID       string
+}
+
+type DeleteComment struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	commentRepo    repository.CommentRepository
+}
+
+func NewDeleteComment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, commentRepo repository.CommentRepository) *DeleteComment {
+	return &DeleteComment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, commentRepo: commentRepo}
+}
+
+func (uc *DeleteComment) DeleteComment(in DeleteCommentInput) error {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role == "" {
+		return ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return ErrCourseNotFound
+	}
+	comment, err := uc.commentRepo.GetByID(in.CommentID)
+	if err != nil || comment == nil || comment.AssignmentID != in.AssignmentID {
+		return ErrCommentNotFound
+	}
+	// Автор может удалять свои, owner/teacher — любые
+	if comment.UserID != in.UserID && role != domain.RoleOwner && role != domain.RoleTeacher {
+		return ErrForbidden
+	}
+	// Каскадно удаляем все дочерние комментарии
+	all, err := uc.commentRepo.ListByAssignment(in.AssignmentID)
+	if err != nil {
+		return err
+	}
+	toDelete := collectDescendants(in.CommentID, all)
+	toDelete = append(toDelete, in.CommentID)
+	for _, id := range toDelete {
+		if err := uc.commentRepo.Delete(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// collectDescendants рекурсивно собирает ID всех дочерних комментариев.
+func collectDescendants(parentID string, all []*domain.Comment) []string {
+	var ids []string
+	for _, c := range all {
+		if c.ParentID != nil && *c.ParentID == parentID {
+			ids = append(ids, c.ID)
+			ids = append(ids, collectDescendants(c.ID, all)...)
+		}
+	}
+	return ids
 }

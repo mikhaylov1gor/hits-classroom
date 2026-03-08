@@ -34,7 +34,7 @@ func (h *RegisterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	user, err := h.register.Register(usecase.RegisterInput{
+	user, token, err := h.register.Register(usecase.RegisterInput{
 		Email:     req.Email,
 		Password:  req.Password,
 		FirstName: req.FirstName,
@@ -47,9 +47,10 @@ func (h *RegisterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already exists"})
 			return
 		}
-		if errors.Is(err, usecase.ErrValidation) {
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
@@ -58,7 +59,10 @@ func (h *RegisterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(userResponse(user))
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"token": token,
+		"user":  userResponse(user),
+	})
 }
 
 type LoginHandler struct {
@@ -180,6 +184,12 @@ func (h *UpdateMeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		BirthDate: req.BirthDate,
 	})
 	if err != nil {
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
 		if errors.Is(err, usecase.ErrValidation) {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
