@@ -242,31 +242,6 @@ func (r *CommentRepository) Delete(id string) error {
 	return nil
 }
 
-func (r *CommentRepository) GetByID(id string) (*domain.Comment, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.byID[id], nil
-}
-
-func (r *CommentRepository) Delete(id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.byID[id]
-	if !ok {
-		return nil
-	}
-	delete(r.byID, id)
-	list := r.byAssign[c.AssignmentID]
-	filtered := list[:0]
-	for _, item := range list {
-		if item.ID != id {
-			filtered = append(filtered, item)
-		}
-	}
-	r.byAssign[c.AssignmentID] = filtered
-	return nil
-}
-
 func (r *CommentRepository) ListByAssignment(assignmentID string) ([]*domain.Comment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
