@@ -4,6 +4,7 @@ import "hits-classroom/internal/domain"
 
 type PostRepository interface {
 	Create(post *domain.Post) error
+	GetByID(id string) (*domain.Post, error)
 	ListByCourse(courseID string) ([]*domain.Post, error)
 }
 
@@ -31,4 +32,5 @@ type CommentRepository interface {
 	GetByID(id string) (*domain.Comment, error)
 	Delete(id string) error
 	ListByAssignment(assignmentID string) ([]*domain.Comment, error)
+	ListByPost(postID string) ([]*domain.Comment, error)
 }

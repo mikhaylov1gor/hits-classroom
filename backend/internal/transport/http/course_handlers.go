@@ -536,6 +536,7 @@ func postResponse(p *domain.Post) map[string]interface{} {
 	return map[string]interface{}{
 		"id":         p.ID,
 		"course_id":  p.CourseID,
+		"user_id":    p.UserID,
 		"title":      p.Title,
 		"body":       p.Body,
 		"created_at": p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -564,6 +565,7 @@ func assignmentResponse(a *domain.Assignment) map[string]interface{} {
 		"course_id":  a.CourseID,
 		"title":      a.Title,
 		"body":       a.Body,
+		"max_grade":  a.MaxGrade,
 		"created_at": a.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if a.Deadline != nil {
@@ -590,36 +592,42 @@ func submissionResponse(s *domain.Submission) map[string]interface{} {
 	} else {
 		out["grade"] = nil
 	}
+	if s.GradeComment != nil {
+		out["grade_comment"] = *s.GradeComment
+	} else {
+		out["grade_comment"] = nil
+	}
 	return out
 }
 
-func commentResponse(c *domain.Comment) map[string]interface{} {
-	return commentResponseWithReplies(c, nil)
-}
-
-func commentResponseWithReplies(c *domain.Comment, replies []map[string]interface{}) map[string]interface{} {
+func commentNodeResponse(c *domain.Comment, replies []map[string]interface{}) map[string]interface{} {
 	if c == nil {
 		return nil
 	}
 	out := map[string]interface{}{
 		"id":            c.ID,
 		"assignment_id": c.AssignmentID,
+		"post_id":       c.PostID,
 		"user_id":       c.UserID,
 		"parent_id":     nil,
 		"body":          c.Body,
 		"created_at":    c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		"replies":       []map[string]interface{}{},
+		"replies":       replies,
 	}
 	if c.ParentID != nil {
 		out["parent_id"] = *c.ParentID
 	}
-	if replies != nil {
-		out["replies"] = replies
+	if replies == nil {
+		out["replies"] = []map[string]interface{}{}
 	}
 	return out
 }
 
-// buildCommentTree строит дерево комментариев из плоского списка.
+func commentResponse(c *domain.Comment) map[string]interface{} {
+	return commentNodeResponse(c, nil)
+}
+
+// buildCommentTree строит дерево вложенных комментариев из плоского списка.
 func buildCommentTree(all []*domain.Comment) []map[string]interface{} {
 	byParent := make(map[string][]*domain.Comment)
 	for _, c := range all {
@@ -632,14 +640,11 @@ func buildCommentTree(all []*domain.Comment) []map[string]interface{} {
 	var buildNode func(c *domain.Comment) map[string]interface{}
 	buildNode = func(c *domain.Comment) map[string]interface{} {
 		children := byParent[c.ID]
-		var replies []map[string]interface{}
+		replies := make([]map[string]interface{}, 0, len(children))
 		for _, ch := range children {
 			replies = append(replies, buildNode(ch))
 		}
-		if replies == nil {
-			replies = []map[string]interface{}{}
-		}
-		return commentResponseWithReplies(c, replies)
+		return commentNodeResponse(c, replies)
 	}
 	roots := byParent[""]
 	out := make([]map[string]interface{}, 0, len(roots))
@@ -747,9 +752,10 @@ func (h *CreatePostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
 			return
 		}
-		if errors.Is(err, usecase.ErrValidation) {
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
@@ -843,6 +849,7 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		Body     string   `json:"body"`
 		FileIDs  []string `json:"file_ids"`
 		Deadline *string  `json:"deadline"`
+		MaxGrade int      `json:"max_grade"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -859,7 +866,7 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			deadline = &t
 		}
 	}
-	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, FileIDs: req.FileIDs, Deadline: deadline})
+	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, FileIDs: req.FileIDs, Deadline: deadline, MaxGrade: req.MaxGrade})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
@@ -1054,14 +1061,15 @@ func (h *GradeSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req struct {
-		Grade int `json:"grade"`
+		Grade        int    `json:"grade"`
+		GradeComment string `json:"grade_comment"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	s, err := h.gradeSubmission.GradeSubmission(usecase.GradeSubmissionInput{CourseID: courseID, AssignmentID: assignmentID, SubmissionID: submissionID, UserID: userID, Grade: req.Grade})
+	s, err := h.gradeSubmission.GradeSubmission(usecase.GradeSubmissionInput{CourseID: courseID, AssignmentID: assignmentID, SubmissionID: submissionID, UserID: userID, Grade: req.Grade, GradeComment: req.GradeComment})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1071,6 +1079,12 @@ func (h *GradeSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
 			return
 		}
 		if errors.Is(err, usecase.ErrValidation) {
@@ -1218,14 +1232,7 @@ func (h *CreateCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{
-		CourseID:     courseID,
-		AssignmentID: assignmentID,
-		UserID:       userID,
-		ParentID:     req.ParentID,
-		Body:         req.Body,
-		FileIDs:      req.FileIDs,
-	})
+	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID, ParentID: req.ParentID, Body: req.Body, FileIDs: req.FileIDs})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1252,6 +1259,116 @@ func (h *CreateCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(commentResponse(c))
 }
 
+// ── Post comments ─────────────────────────────────────────────────────────────
+
+type ListPostCommentsHandler struct {
+	listPostComments *usecase.ListPostComments
+}
+
+func NewListPostCommentsHandler(lpc *usecase.ListPostComments) *ListPostCommentsHandler {
+	return &ListPostCommentsHandler{listPostComments: lpc}
+}
+
+func (h *ListPostCommentsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	postID := r.PathValue("postId")
+	if courseID == "" || postID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	list, err := h.listPostComments.ListPostComments(courseID, postID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(buildCommentTree(list))
+}
+
+type CreatePostCommentHandler struct {
+	createComment *usecase.CreateComment
+}
+
+func NewCreatePostCommentHandler(createComment *usecase.CreateComment) *CreatePostCommentHandler {
+	return &CreatePostCommentHandler{createComment: createComment}
+}
+
+func (h *CreatePostCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	postID := r.PathValue("postId")
+	if courseID == "" || postID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		ParentID *string  `json:"parent_id"`
+		Body     string   `json:"body"`
+		FileIDs  []string `json:"file_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, PostID: postID, UserID: userID, ParentID: req.ParentID, Body: req.Body, FileIDs: req.FileIDs})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(commentResponse(c))
+}
+
+// ── Delete comment (unified for both assignment and post comments) ─────────────
+
 type DeleteCommentHandler struct {
 	deleteComment *usecase.DeleteComment
 }
@@ -1271,22 +1388,16 @@ func (h *DeleteCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	courseID := r.PathValue("courseId")
-	assignmentID := r.PathValue("assignmentId")
 	commentID := r.PathValue("commentId")
-	if courseID == "" || assignmentID == "" || commentID == "" {
+	if courseID == "" || commentID == "" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	err := h.deleteComment.DeleteComment(usecase.DeleteCommentInput{
-		CourseID:     courseID,
-		AssignmentID: assignmentID,
-		CommentID:    commentID,
-		UserID:       userID,
-	})
+	err := h.deleteComment.DeleteComment(usecase.DeleteCommentInput{CourseID: courseID, CommentID: commentID, UserID: userID})
 	if err != nil {
-		if errors.Is(err, usecase.ErrCommentNotFound) || errors.Is(err, usecase.ErrCourseNotFound) {
+		if errors.Is(err, usecase.ErrCommentNotFound) {
 			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "comment not found"})
 			return
 		}
 		if errors.Is(err, usecase.ErrForbidden) {

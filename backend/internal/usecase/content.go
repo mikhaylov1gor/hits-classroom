@@ -28,21 +28,20 @@ func NewCreatePost(memberRepo repository.CourseMemberRepository, postRepo reposi
 	return &CreatePost{memberRepo: memberRepo, postRepo: postRepo}
 }
 
+// CreatePost доступен всем участникам курса (owner, teacher, student).
 func (uc *CreatePost) CreatePost(in CreatePostInput) (*domain.Post, error) {
 	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
 	if err != nil || role == "" {
 		return nil, ErrForbidden
 	}
-	if role != domain.RoleOwner && role != domain.RoleTeacher {
-		return nil, ErrForbidden
-	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
-		return nil, ErrValidation
+		return nil, &ValidationError{Message: "title is required"}
 	}
 	p := &domain.Post{
 		ID:        uuid.New().String(),
 		CourseID:  in.CourseID,
+		UserID:    in.UserID,
 		Title:     title,
 		Body:      in.Body,
 		FileIDs:   in.FileIDs,
@@ -104,6 +103,7 @@ type CreateAssignmentInput struct {
 	Body     string
 	FileIDs  []string
 	Deadline *time.Time
+	MaxGrade int
 }
 
 type CreateAssignment struct {
@@ -127,6 +127,10 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 	if title == "" {
 		return nil, ErrValidation
 	}
+	maxGrade := in.MaxGrade
+	if maxGrade <= 0 {
+		maxGrade = 100
+	}
 	a := &domain.Assignment{
 		ID:        uuid.New().String(),
 		CourseID:  in.CourseID,
@@ -134,6 +138,7 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 		Body:      in.Body,
 		FileIDs:   in.FileIDs,
 		Deadline:  in.Deadline,
+		MaxGrade:  maxGrade,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := uc.assignmentRepo.Create(a); err != nil {
@@ -287,6 +292,7 @@ type GradeSubmissionInput struct {
 	SubmissionID string
 	UserID       string
 	Grade        int
+	GradeComment string
 }
 
 type GradeSubmission struct {
@@ -315,14 +321,36 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	if err != nil || s == nil || s.AssignmentID != in.AssignmentID {
 		return nil, ErrCourseNotFound
 	}
-	if in.Grade < 0 || in.Grade > 100 {
-		return nil, ErrValidation
+	if in.Grade < 0 || in.Grade > a.MaxGrade {
+		return nil, &ValidationError{Message: "grade must be between 0 and " + itoa(a.MaxGrade)}
 	}
 	s.Grade = &in.Grade
+	if in.GradeComment != "" {
+		s.GradeComment = &in.GradeComment
+	}
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := make([]byte, 0, 10)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		buf = append([]byte{byte('0' + n%10)}, buf...)
+		n /= 10
+	}
+	if neg {
+		buf = append([]byte{'-'}, buf...)
+	}
+	return string(buf)
 }
 
 type SubmissionWithAssignmentItem struct {
@@ -363,6 +391,8 @@ func (uc *GetStudentGrades) GetStudentGrades(courseID, targetUserID, userID stri
 	return out, nil
 }
 
+// ── Comment usecases ──────────────────────────────────────────────────────────
+
 type ListComments struct {
 	memberRepo     repository.CourseMemberRepository
 	assignmentRepo repository.AssignmentRepository
@@ -385,9 +415,32 @@ func (uc *ListComments) ListComments(courseID, assignmentID, userID string) ([]*
 	return uc.commentRepo.ListByAssignment(assignmentID)
 }
 
+type ListPostComments struct {
+	memberRepo  repository.CourseMemberRepository
+	postRepo    repository.PostRepository
+	commentRepo repository.CommentRepository
+}
+
+func NewListPostComments(memberRepo repository.CourseMemberRepository, postRepo repository.PostRepository, commentRepo repository.CommentRepository) *ListPostComments {
+	return &ListPostComments{memberRepo: memberRepo, postRepo: postRepo, commentRepo: commentRepo}
+}
+
+func (uc *ListPostComments) ListPostComments(courseID, postID, userID string) ([]*domain.Comment, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	p, err := uc.postRepo.GetByID(postID)
+	if err != nil || p == nil || p.CourseID != courseID {
+		return nil, ErrCourseNotFound
+	}
+	return uc.commentRepo.ListByPost(postID)
+}
+
 type CreateCommentInput struct {
 	CourseID     string
 	AssignmentID string
+	PostID       string
 	UserID       string
 	ParentID     *string
 	Body         string
@@ -397,11 +450,12 @@ type CreateCommentInput struct {
 type CreateComment struct {
 	memberRepo     repository.CourseMemberRepository
 	assignmentRepo repository.AssignmentRepository
+	postRepo       repository.PostRepository
 	commentRepo    repository.CommentRepository
 }
 
-func NewCreateComment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, commentRepo repository.CommentRepository) *CreateComment {
-	return &CreateComment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, commentRepo: commentRepo}
+func NewCreateComment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, postRepo repository.PostRepository, commentRepo repository.CommentRepository) *CreateComment {
+	return &CreateComment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, postRepo: postRepo, commentRepo: commentRepo}
 }
 
 func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, error) {
@@ -409,22 +463,37 @@ func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, 
 	if err != nil || role == "" {
 		return nil, ErrForbidden
 	}
-	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
-	if err != nil || a == nil || a.CourseID != in.CourseID {
-		return nil, ErrCourseNotFound
-	}
 	if strings.TrimSpace(in.Body) == "" {
 		return nil, &ValidationError{Message: "body is required"}
 	}
+	// Validate target exists
+	if in.AssignmentID != "" {
+		a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+		if err != nil || a == nil || a.CourseID != in.CourseID {
+			return nil, ErrCourseNotFound
+		}
+	} else if in.PostID != "" {
+		p, err := uc.postRepo.GetByID(in.PostID)
+		if err != nil || p == nil || p.CourseID != in.CourseID {
+			return nil, ErrCourseNotFound
+		}
+	} else {
+		return nil, &ValidationError{Message: "assignment_id or post_id is required"}
+	}
+	// Validate parent comment if provided
 	if in.ParentID != nil {
 		parent, err := uc.commentRepo.GetByID(*in.ParentID)
-		if err != nil || parent == nil || parent.AssignmentID != in.AssignmentID {
+		if err != nil || parent == nil {
+			return nil, ErrCourseNotFound
+		}
+		if parent.AssignmentID != in.AssignmentID || parent.PostID != in.PostID {
 			return nil, ErrCourseNotFound
 		}
 	}
 	c := &domain.Comment{
 		ID:           uuid.New().String(),
 		AssignmentID: in.AssignmentID,
+		PostID:       in.PostID,
 		UserID:       in.UserID,
 		ParentID:     in.ParentID,
 		Body:         in.Body,
@@ -440,20 +509,18 @@ func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, 
 var ErrCommentNotFound = errors.New("comment not found")
 
 type DeleteCommentInput struct {
-	CourseID     string
-	AssignmentID string
-	CommentID    string
-	UserID       string
+	CourseID  string
+	CommentID string
+	UserID    string
 }
 
 type DeleteComment struct {
-	memberRepo     repository.CourseMemberRepository
-	assignmentRepo repository.AssignmentRepository
-	commentRepo    repository.CommentRepository
+	memberRepo  repository.CourseMemberRepository
+	commentRepo repository.CommentRepository
 }
 
-func NewDeleteComment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, commentRepo repository.CommentRepository) *DeleteComment {
-	return &DeleteComment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, commentRepo: commentRepo}
+func NewDeleteComment(memberRepo repository.CourseMemberRepository, commentRepo repository.CommentRepository) *DeleteComment {
+	return &DeleteComment{memberRepo: memberRepo, commentRepo: commentRepo}
 }
 
 func (uc *DeleteComment) DeleteComment(in DeleteCommentInput) error {
@@ -461,12 +528,8 @@ func (uc *DeleteComment) DeleteComment(in DeleteCommentInput) error {
 	if err != nil || role == "" {
 		return ErrForbidden
 	}
-	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
-	if err != nil || a == nil || a.CourseID != in.CourseID {
-		return ErrCourseNotFound
-	}
 	comment, err := uc.commentRepo.GetByID(in.CommentID)
-	if err != nil || comment == nil || comment.AssignmentID != in.AssignmentID {
+	if err != nil || comment == nil {
 		return ErrCommentNotFound
 	}
 	// Автор может удалять свои, owner/teacher — любые
@@ -474,11 +537,13 @@ func (uc *DeleteComment) DeleteComment(in DeleteCommentInput) error {
 		return ErrForbidden
 	}
 	// Каскадно удаляем все дочерние комментарии
-	all, err := uc.commentRepo.ListByAssignment(in.AssignmentID)
-	if err != nil {
-		return err
+	var allComments []*domain.Comment
+	if comment.AssignmentID != "" {
+		allComments, _ = uc.commentRepo.ListByAssignment(comment.AssignmentID)
+	} else {
+		allComments, _ = uc.commentRepo.ListByPost(comment.PostID)
 	}
-	toDelete := collectDescendants(in.CommentID, all)
+	toDelete := collectDescendants(in.CommentID, allComments)
 	toDelete = append(toDelete, in.CommentID)
 	for _, id := range toDelete {
 		if err := uc.commentRepo.Delete(id); err != nil {

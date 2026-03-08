@@ -62,8 +62,9 @@ func main() {
 	gradeSubmissionUC := usecase.NewGradeSubmission(memberRepo, assignmentRepo, submissionRepo)
 	getStudentGradesUC := usecase.NewGetStudentGrades(memberRepo, assignmentRepo, submissionRepo)
 	listCommentsUC := usecase.NewListComments(memberRepo, assignmentRepo, commentRepo)
-	createCommentUC := usecase.NewCreateComment(memberRepo, assignmentRepo, commentRepo)
-	deleteCommentUC := usecase.NewDeleteComment(memberRepo, assignmentRepo, commentRepo)
+	createCommentUC := usecase.NewCreateComment(memberRepo, assignmentRepo, postRepo, commentRepo)
+	listPostCommentsUC := usecase.NewListPostComments(memberRepo, postRepo, commentRepo)
+	deleteCommentUC := usecase.NewDeleteComment(memberRepo, commentRepo)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -89,7 +90,9 @@ func main() {
 	mux.Handle("GET /api/v1/courses/{courseId}/members/{userId}/grades", authWrap(httphandler.NewGetStudentGradesHandler(getStudentGradesUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/comments", authWrap(httphandler.NewListCommentsHandler(listCommentsUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/comments", authWrap(httphandler.NewCreateCommentHandler(createCommentUC)))
-	mux.Handle("DELETE /api/v1/courses/{courseId}/assignments/{assignmentId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
+	mux.Handle("GET /api/v1/courses/{courseId}/posts/{postId}/comments", authWrap(httphandler.NewListPostCommentsHandler(listPostCommentsUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/posts/{postId}/comments", authWrap(httphandler.NewCreatePostCommentHandler(createCommentUC)))
+	mux.Handle("DELETE /api/v1/courses/{courseId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

@@ -5,6 +5,7 @@ import "time"
 type Post struct {
 	ID        string
 	CourseID  string
+	UserID    string
 	Title     string
 	Body      string
 	FileIDs   []string
@@ -27,6 +28,7 @@ type Assignment struct {
 	Body      string
 	FileIDs   []string
 	Deadline  *time.Time
+	MaxGrade  int
 	CreatedAt time.Time
 }
 
@@ -38,11 +40,15 @@ type Submission struct {
 	FileIDs      []string
 	SubmittedAt  time.Time
 	Grade        *int
+	GradeComment *string
 }
 
+// Comment используется и для комментариев к заданиям, и к постам.
+// Ровно одно из AssignmentID / PostID непусто.
 type Comment struct {
 	ID           string
 	AssignmentID string
+	PostID       string
 	UserID       string
 	ParentID     *string
 	Body         string
