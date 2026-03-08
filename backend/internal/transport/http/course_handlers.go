@@ -594,16 +594,59 @@ func submissionResponse(s *domain.Submission) map[string]interface{} {
 }
 
 func commentResponse(c *domain.Comment) map[string]interface{} {
+	return commentResponseWithReplies(c, nil)
+}
+
+func commentResponseWithReplies(c *domain.Comment, replies []map[string]interface{}) map[string]interface{} {
 	if c == nil {
 		return nil
 	}
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"id":            c.ID,
 		"assignment_id": c.AssignmentID,
 		"user_id":       c.UserID,
+		"parent_id":     nil,
 		"body":          c.Body,
 		"created_at":    c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"replies":       []map[string]interface{}{},
 	}
+	if c.ParentID != nil {
+		out["parent_id"] = *c.ParentID
+	}
+	if replies != nil {
+		out["replies"] = replies
+	}
+	return out
+}
+
+// buildCommentTree строит дерево комментариев из плоского списка.
+func buildCommentTree(all []*domain.Comment) []map[string]interface{} {
+	byParent := make(map[string][]*domain.Comment)
+	for _, c := range all {
+		key := ""
+		if c.ParentID != nil {
+			key = *c.ParentID
+		}
+		byParent[key] = append(byParent[key], c)
+	}
+	var buildNode func(c *domain.Comment) map[string]interface{}
+	buildNode = func(c *domain.Comment) map[string]interface{} {
+		children := byParent[c.ID]
+		var replies []map[string]interface{}
+		for _, ch := range children {
+			replies = append(replies, buildNode(ch))
+		}
+		if replies == nil {
+			replies = []map[string]interface{}{}
+		}
+		return commentResponseWithReplies(c, replies)
+	}
+	roots := byParent[""]
+	out := make([]map[string]interface{}, 0, len(roots))
+	for _, r := range roots {
+		out = append(out, buildNode(r))
+	}
+	return out
 }
 
 func feedItemResponse(item usecase.FeedItem) map[string]interface{} {
@@ -1136,13 +1179,9 @@ func (h *ListCommentsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
 		return
 	}
-	out := make([]map[string]interface{}, 0, len(list))
-	for _, c := range list {
-		out = append(out, commentResponse(c))
-	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(out)
+	_ = json.NewEncoder(w).Encode(buildCommentTree(list))
 }
 
 type CreateCommentHandler struct {
@@ -1170,17 +1209,82 @@ func (h *CreateCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		Body    string   `json:"body"`
-		FileIDs []string `json:"file_ids"`
+		ParentID *string  `json:"parent_id"`
+		Body     string   `json:"body"`
+		FileIDs  []string `json:"file_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID, Body: req.Body, FileIDs: req.FileIDs})
+	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{
+		CourseID:     courseID,
+		AssignmentID: assignmentID,
+		UserID:       userID,
+		ParentID:     req.ParentID,
+		Body:         req.Body,
+		FileIDs:      req.FileIDs,
+	})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(commentResponse(c))
+}
+
+type DeleteCommentHandler struct {
+	deleteComment *usecase.DeleteComment
+}
+
+func NewDeleteCommentHandler(deleteComment *usecase.DeleteComment) *DeleteCommentHandler {
+	return &DeleteCommentHandler{deleteComment: deleteComment}
+}
+
+func (h *DeleteCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	commentID := r.PathValue("commentId")
+	if courseID == "" || assignmentID == "" || commentID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := h.deleteComment.DeleteComment(usecase.DeleteCommentInput{
+		CourseID:     courseID,
+		AssignmentID: assignmentID,
+		CommentID:    commentID,
+		UserID:       userID,
+	})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCommentNotFound) || errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 			return
@@ -1194,7 +1298,5 @@ func (h *CreateCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(commentResponse(c))
+	w.WriteHeader(http.StatusNoContent)
 }

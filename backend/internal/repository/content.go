@@ -28,5 +28,7 @@ type SubmissionRepository interface {
 
 type CommentRepository interface {
 	Create(c *domain.Comment) error
+	GetByID(id string) (*domain.Comment, error)
+	Delete(id string) error
 	ListByAssignment(assignmentID string) ([]*domain.Comment, error)
 }

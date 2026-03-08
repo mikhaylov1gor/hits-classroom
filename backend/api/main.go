@@ -63,6 +63,7 @@ func main() {
 	getStudentGradesUC := usecase.NewGetStudentGrades(memberRepo, assignmentRepo, submissionRepo)
 	listCommentsUC := usecase.NewListComments(memberRepo, assignmentRepo, commentRepo)
 	createCommentUC := usecase.NewCreateComment(memberRepo, assignmentRepo, commentRepo)
+	deleteCommentUC := usecase.NewDeleteComment(memberRepo, assignmentRepo, commentRepo)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -88,6 +89,7 @@ func main() {
 	mux.Handle("GET /api/v1/courses/{courseId}/members/{userId}/grades", authWrap(httphandler.NewGetStudentGradesHandler(getStudentGradesUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/comments", authWrap(httphandler.NewListCommentsHandler(listCommentsUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/comments", authWrap(httphandler.NewCreateCommentHandler(createCommentUC)))
+	mux.Handle("DELETE /api/v1/courses/{courseId}/assignments/{assignmentId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
