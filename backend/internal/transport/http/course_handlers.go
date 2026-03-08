@@ -109,9 +109,14 @@ func (h *JoinCourseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "course not found or invalid code"})
 			return
 		}
+		if errors.Is(err, usecase.ErrAlreadyMember) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "already a member of this course"})
+			return
+		}
 		if errors.Is(err, usecase.ErrValidation) {
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invite code must be 8 characters"})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
@@ -241,7 +246,57 @@ func (h *GetInviteCodeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"code":        code,
+		"invite_link": "/join?code=" + code,
+	})
+}
+
+type RegenerateInviteCodeHandler struct {
+	regenerate *usecase.RegenerateInviteCode
+}
+
+func NewRegenerateInviteCodeHandler(regenerate *usecase.RegenerateInviteCode) *RegenerateInviteCodeHandler {
+	return &RegenerateInviteCodeHandler{regenerate: regenerate}
+}
+
+func (h *RegenerateInviteCodeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	if courseID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	course, err := h.regenerate.RegenerateInviteCode(courseID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"code":        course.InviteCode,
+		"invite_link": "/join?code=" + course.InviteCode,
+	})
 }
 
 type DeleteCourseHandler struct {

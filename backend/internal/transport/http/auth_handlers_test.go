@@ -20,7 +20,8 @@ func mustHash(p string) string {
 func TestRegisterHandler_Success(t *testing.T) {
 	repo := memory.NewUserRepository()
 	hasher := usecase.BcryptHasher{}
-	uc := usecase.NewRegister(repo, hasher)
+	issuer := &usecase.JWTIssuer{Secret: []byte("secret"), Expiry: 0}
+	uc := usecase.NewRegister(repo, hasher, issuer)
 	h := NewRegisterHandler(uc)
 
 	body := map[string]string{
@@ -44,17 +45,23 @@ func TestRegisterHandler_Success(t *testing.T) {
 		t.Errorf("Content-Type = %q", rec.Header().Get("Content-Type"))
 	}
 	var res struct {
-		ID        string `json:"id"`
-		Email     string `json:"email"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		BirthDate string `json:"birth_date"`
+		Token string `json:"token"`
+		User  struct {
+			ID        string `json:"id"`
+			Email     string `json:"email"`
+			FirstName string `json:"first_name"`
+			LastName  string `json:"last_name"`
+			BirthDate string `json:"birth_date"`
+		} `json:"user"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if res.ID == "" || res.Email != "u@test.com" || res.FirstName != "John" || res.LastName != "Doe" || res.BirthDate != "1990-01-15" {
-		t.Errorf("response = %+v", res)
+	if res.Token == "" {
+		t.Error("token is empty")
+	}
+	if res.User.ID == "" || res.User.Email != "u@test.com" || res.User.FirstName != "John" || res.User.LastName != "Doe" || res.User.BirthDate != "1990-01-15" {
+		t.Errorf("user response = %+v", res.User)
 	}
 }
 
@@ -62,7 +69,8 @@ func TestRegisterHandler_EmailExists(t *testing.T) {
 	repo := memory.NewUserRepository()
 	_ = repo.Create(&domain.User{ID: "1", Email: "taken@test.com"})
 	hasher := usecase.BcryptHasher{}
-	uc := usecase.NewRegister(repo, hasher)
+	issuer := &usecase.JWTIssuer{Secret: []byte("s"), Expiry: 0}
+	uc := usecase.NewRegister(repo, hasher, issuer)
 	h := NewRegisterHandler(uc)
 
 	body := map[string]string{
@@ -86,7 +94,8 @@ func TestRegisterHandler_EmailExists(t *testing.T) {
 
 func TestRegisterHandler_Validation(t *testing.T) {
 	repo := memory.NewUserRepository()
-	uc := usecase.NewRegister(repo, usecase.BcryptHasher{})
+	issuer := &usecase.JWTIssuer{Secret: []byte("s"), Expiry: 0}
+	uc := usecase.NewRegister(repo, usecase.BcryptHasher{}, issuer)
 	h := NewRegisterHandler(uc)
 
 	body := map[string]string{
@@ -105,6 +114,11 @@ func TestRegisterHandler_Validation(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	var res map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&res)
+	if res["error"] == "" || res["error"] == "validation failed" {
+		t.Errorf("expected specific error message, got %q", res["error"])
 	}
 }
 

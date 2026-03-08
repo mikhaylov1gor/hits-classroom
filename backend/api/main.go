@@ -15,12 +15,12 @@ func main() {
 	mux.Handle("/health", httphandler.NewHealthHandler())
 
 	jwtSecret := []byte("dev-secret-change-in-production")
+	jwtIssuer := &usecase.JWTIssuer{Secret: jwtSecret, Expiry: 24 * time.Hour}
 	userRepo := memory.NewUserRepository()
 	hasher := usecase.BcryptHasher{}
-	registerUC := usecase.NewRegister(userRepo, hasher)
+	registerUC := usecase.NewRegister(userRepo, hasher, jwtIssuer)
 	mux.Handle("/api/v1/auth/register", httphandler.NewRegisterHandler(registerUC))
 
-	jwtIssuer := &usecase.JWTIssuer{Secret: jwtSecret, Expiry: 24 * time.Hour}
 	loginUC := usecase.NewLogin(userRepo, hasher, jwtIssuer)
 	mux.Handle("/api/v1/auth/login", httphandler.NewLoginHandler(loginUC))
 
@@ -40,6 +40,7 @@ func main() {
 	listCoursesUC := usecase.NewListCourses(courseRepo, memberRepo)
 	getCourseUC := usecase.NewGetCourse(courseRepo, memberRepo)
 	getInviteCodeUC := usecase.NewGetInviteCode(courseRepo, memberRepo)
+	regenerateInviteCodeUC := usecase.NewRegenerateInviteCode(courseRepo, memberRepo)
 	deleteCourseUC := usecase.NewDeleteCourse(courseRepo, memberRepo)
 	updateCourseUC := usecase.NewUpdateCourse(courseRepo, memberRepo)
 	listCourseMembersUC := usecase.NewListCourseMembers(memberRepo, userRepo)
@@ -73,6 +74,7 @@ func main() {
 	mux.Handle("PATCH /api/v1/courses/{courseId}", authWrap(httphandler.NewUpdateCourseHandler(updateCourseUC)))
 	mux.Handle("DELETE /api/v1/courses/{courseId}", authWrap(httphandler.NewDeleteCourseHandler(deleteCourseUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/invite-code", authWrap(httphandler.NewGetInviteCodeHandler(getInviteCodeUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/invite-code", authWrap(httphandler.NewRegenerateInviteCodeHandler(regenerateInviteCodeUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/members", authWrap(httphandler.NewListCourseMembersHandler(listCourseMembersUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/members", authWrap(httphandler.NewAssignTeacherHandler(assignTeacherUC, userRepo)))
 	mux.Handle("GET /api/v1/courses/{courseId}/feed", authWrap(httphandler.NewGetCourseFeedHandler(getCourseFeedUC)))

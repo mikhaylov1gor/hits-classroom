@@ -15,6 +15,7 @@ import (
 var (
 	ErrCourseNotFound = errors.New("course not found")
 	ErrForbidden      = errors.New("forbidden")
+	ErrAlreadyMember  = errors.New("already a member")
 )
 
 const inviteCodeLen = 8
@@ -112,7 +113,7 @@ func (uc *JoinCourse) JoinCourse(in JoinCourseInput) (*domain.Course, domain.Cou
 		return nil, "", err
 	}
 	if role != "" {
-		return course, role, nil
+		return nil, "", ErrAlreadyMember
 	}
 	member := &domain.CourseMember{
 		CourseID: course.ID,
@@ -344,4 +345,39 @@ func (uc *AssignTeacher) AssignTeacher(in AssignTeacherInput) error {
 	}
 	member.Role = domain.RoleTeacher
 	return uc.memberRepo.Update(member)
+}
+
+type RegenerateInviteCode struct {
+	courseRepo repository.CourseRepository
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewRegenerateInviteCode(courseRepo repository.CourseRepository, memberRepo repository.CourseMemberRepository) *RegenerateInviteCode {
+	return &RegenerateInviteCode{courseRepo: courseRepo, memberRepo: memberRepo}
+}
+
+func (uc *RegenerateInviteCode) RegenerateInviteCode(courseID, userID string) (*domain.Course, error) {
+	course, err := uc.courseRepo.GetByID(courseID)
+	if err != nil {
+		return nil, err
+	}
+	if course == nil {
+		return nil, ErrCourseNotFound
+	}
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if role == "" || role == domain.RoleStudent {
+		return nil, ErrForbidden
+	}
+	code, err := generateInviteCode()
+	if err != nil {
+		return nil, err
+	}
+	course.InviteCode = code
+	if err := uc.courseRepo.Update(course); err != nil {
+		return nil, err
+	}
+	return course, nil
 }
