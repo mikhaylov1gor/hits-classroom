@@ -347,6 +347,85 @@ func (uc *AssignTeacher) AssignTeacher(in AssignTeacherInput) error {
 	return uc.memberRepo.Update(member)
 }
 
+// ── InviteTeacher — новая фича: пригласить пользователя на роль учителя по email ──
+
+var (
+	ErrUserNotFound = errors.New("user not found")
+	ErrAlreadyRole  = errors.New("user already has this role")
+)
+
+type InviteTeacherInput struct {
+	CourseID string
+	UserID   string // кто приглашает (должен быть owner)
+	Email    string
+}
+
+type InviteTeacher struct {
+	memberRepo repository.CourseMemberRepository
+	userRepo   repository.UserRepository
+}
+
+func NewInviteTeacher(memberRepo repository.CourseMemberRepository, userRepo repository.UserRepository) *InviteTeacher {
+	return &InviteTeacher{memberRepo: memberRepo, userRepo: userRepo}
+}
+
+func (uc *InviteTeacher) InviteTeacher(in InviteTeacherInput) (*domain.CourseMember, error) {
+	// Только owner может приглашать учителей
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role != domain.RoleOwner {
+		return nil, ErrForbidden
+	}
+
+	email := strings.TrimSpace(strings.ToLower(in.Email))
+	if email == "" {
+		return nil, &ValidationError{Message: "email is required"}
+	}
+
+	// Найти пользователя по email
+	target, err := uc.userRepo.ByEmail(email)
+	if err != nil || target == nil {
+		return nil, ErrUserNotFound
+	}
+
+	// Нельзя приглашать самого себя
+	if target.ID == in.UserID {
+		return nil, &ValidationError{Message: "cannot invite yourself"}
+	}
+
+	// Проверить, есть ли уже в курсе
+	existing, err := uc.memberRepo.Get(in.CourseID, target.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	if existing != nil {
+		switch existing.Role {
+		case domain.RoleOwner:
+			return nil, &ValidationError{Message: "user is the course owner"}
+		case domain.RoleTeacher:
+			return nil, ErrAlreadyRole
+		case domain.RoleStudent:
+			// Обновляем роль студента до учителя
+			existing.Role = domain.RoleTeacher
+			if err := uc.memberRepo.Update(existing); err != nil {
+				return nil, err
+			}
+			return existing, nil
+		}
+	}
+
+	// Пользователь не в курсе — добавляем сразу как учителя
+	member := &domain.CourseMember{
+		CourseID: in.CourseID,
+		UserID:   target.ID,
+		Role:     domain.RoleTeacher,
+	}
+	if err := uc.memberRepo.Create(member); err != nil {
+		return nil, err
+	}
+	return member, nil
+}
+
 type RegenerateInviteCode struct {
 	courseRepo repository.CourseRepository
 	memberRepo repository.CourseMemberRepository

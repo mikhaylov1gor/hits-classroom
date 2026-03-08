@@ -45,6 +45,7 @@ func main() {
 	updateCourseUC := usecase.NewUpdateCourse(courseRepo, memberRepo)
 	listCourseMembersUC := usecase.NewListCourseMembers(memberRepo, userRepo)
 	assignTeacherUC := usecase.NewAssignTeacher(memberRepo)
+	inviteTeacherUC := usecase.NewInviteTeacher(memberRepo, userRepo)
 
 	postRepo := memory.NewPostRepository()
 	materialRepo := memory.NewMaterialRepository()
@@ -79,6 +80,7 @@ func main() {
 	mux.Handle("POST /api/v1/courses/{courseId}/invite-code", authWrap(httphandler.NewRegenerateInviteCodeHandler(regenerateInviteCodeUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/members", authWrap(httphandler.NewListCourseMembersHandler(listCourseMembersUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/members", authWrap(httphandler.NewAssignTeacherHandler(assignTeacherUC, userRepo)))
+	mux.Handle("POST /api/v1/courses/{courseId}/invite-teacher", authWrap(httphandler.NewInviteTeacherHandler(inviteTeacherUC, userRepo)))
 	mux.Handle("GET /api/v1/courses/{courseId}/feed", authWrap(httphandler.NewGetCourseFeedHandler(getCourseFeedUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/posts", authWrap(httphandler.NewCreatePostHandler(createPostUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/materials", authWrap(httphandler.NewCreateMaterialHandler(createMaterialUC)))

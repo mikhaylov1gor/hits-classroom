@@ -529,6 +529,81 @@ func (h *AssignTeacherHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(memberResponse(m))
 }
 
+// ── InviteTeacherHandler — пригласить пользователя по email с ролью учителя ──
+
+type InviteTeacherHandler struct {
+	inviteTeacher *usecase.InviteTeacher
+	userRepo      repository.UserRepository
+}
+
+func NewInviteTeacherHandler(inviteTeacher *usecase.InviteTeacher, userRepo repository.UserRepository) *InviteTeacherHandler {
+	return &InviteTeacherHandler{inviteTeacher: inviteTeacher, userRepo: userRepo}
+}
+
+func (h *InviteTeacherHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	if courseID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	member, err := h.inviteTeacher.InviteTeacher(usecase.InviteTeacherInput{
+		CourseID: courseID,
+		UserID:   userID,
+		Email:    req.Email,
+	})
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "only the course owner can invite teachers"})
+			return
+		}
+		if errors.Is(err, usecase.ErrUserNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user with this email not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrAlreadyRole) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "user is already a teacher in this course"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	u, _ := h.userRepo.GetByID(member.UserID)
+	m := usecase.MemberWithUser{UserID: member.UserID, Role: member.Role}
+	if u != nil {
+		m.Email, m.FirstName, m.LastName = u.Email, u.FirstName, u.LastName
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(memberResponse(m))
+}
+
 func postResponse(p *domain.Post) map[string]interface{} {
 	if p == nil {
 		return nil
