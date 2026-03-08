@@ -356,7 +356,7 @@ paths:
   /courses/{courseId}/posts:
     post:
       tags: [posts]
-      summary: Создание поста (F-09)
+      summary: Создание поста (F-09). Доступно всем участникам курса (owner, teacher, student).
       operationId: createPost
       security:
         - bearerAuth: []
@@ -569,7 +569,7 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/comments:
     get:
       tags: [comments]
-      summary: Комментарии к заданию, возвращаются в виде дерева (F-19)
+      summary: Комментарии к заданию в виде дерева (F-19)
       operationId: listComments
       security:
         - bearerAuth: []
@@ -593,7 +593,7 @@ paths:
           $ref: "#/components/responses/NotFound"
     post:
       tags: [comments]
-      summary: Добавить комментарий (текст + файлы), поле parent_id — для ответа на комментарий
+      summary: Добавить комментарий (текст + файлы)
       operationId: createComment
       security:
         - bearerAuth: []
@@ -622,16 +622,81 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /courses/{courseId}/assignments/{assignmentId}/comments/{commentId}:
+  /courses/{courseId}/posts/{postId}/comments:
+    get:
+      tags: [comments]
+      summary: Публичные комментарии к посту в виде дерева
+      operationId: listPostComments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [comments]
+      summary: Добавить комментарий к посту. Поддерживает вложенность через parent_id.
+      operationId: createPostComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/comments/{commentId}:
     delete:
       tags: [comments]
-      summary: Удалить комментарий (и все вложенные ответы). Автор или owner/teacher.
+      summary: Удалить комментарий (и все вложенные ответы). Автор или owner/teacher курса.
       operationId: deleteComment
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/CourseId"
-        - $ref: "#/components/parameters/AssignmentId"
         - name: commentId
           in: path
           required: true
@@ -930,6 +995,10 @@ components:
         course_id:
           type: string
           format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: ID пользователя, создавшего пост
         title:
           type: string
         body:
@@ -986,6 +1055,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        max_grade:
+          type: integer
+          minimum: 1
+          default: 100
+          description: "Максимальный балл (шкала оценки). Примеры: 5, 10, 100. По умолчанию 100."
 
     Assignment:
       type: object
@@ -1004,6 +1078,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        max_grade:
+          type: integer
+          description: Максимальный балл по шкале оценки
         created_at:
           type: string
           format: date-time
@@ -1039,8 +1116,12 @@ components:
         grade:
           type: integer
           minimum: 0
-          maximum: 100
           nullable: true
+          description: Оценка в диапазоне [0, max_grade] задания
+        grade_comment:
+          type: string
+          nullable: true
+          description: Комментарий преподавателя к оценке
 
     GradeRequest:
       type: object
@@ -1049,7 +1130,10 @@ components:
         grade:
           type: integer
           minimum: 0
-          maximum: 100
+          description: Оценка, должна быть в диапазоне [0, max_grade] задания
+        grade_comment:
+          type: string
+          description: Необязательный комментарий преподавателя к оценке
 
     SubmissionWithAssignment:
       type: object
@@ -1067,7 +1151,7 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: ID родительского комментария. Если не указан — корневой комментарий.
+          description: ID родительского комментария для ответа. Если не указан — корневой комментарий.
         body:
           type: string
         file_ids:
@@ -1085,6 +1169,11 @@ components:
         assignment_id:
           type: string
           format: uuid
+          description: Непусто для комментариев к заданиям
+        post_id:
+          type: string
+          format: uuid
+          description: Непусто для комментариев к постам
         user_id:
           type: string
           format: uuid
@@ -1092,7 +1181,7 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: ID родительского комментария или null для корневых комментариев
+          description: ID родительского комментария или null для корневых
         body:
           type: string
         created_at:
@@ -1100,6 +1189,6 @@ components:
           format: date-time
         replies:
           type: array
-          description: Вложенные ответы на комментарий (рекурсивно)
+          description: Вложенные ответы (рекурсивно, только в GET-ответах)
           items:
             $ref: "#/components/schemas/Comment"

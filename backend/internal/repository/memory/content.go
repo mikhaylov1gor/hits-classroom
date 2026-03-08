@@ -28,6 +28,12 @@ func (r *PostRepository) Create(p *domain.Post) error {
 	return nil
 }
 
+func (r *PostRepository) GetByID(id string) (*domain.Post, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.byID[id], nil
+}
+
 func (r *PostRepository) ListByCourse(courseID string) ([]*domain.Post, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -169,16 +175,20 @@ func (r *SubmissionRepository) Update(s *domain.Submission) error {
 	return nil
 }
 
+var _ repository.SubmissionRepository = (*SubmissionRepository)(nil)
+
 type CommentRepository struct {
 	mu       sync.RWMutex
 	byID     map[string]*domain.Comment
 	byAssign map[string][]*domain.Comment
+	byPost   map[string][]*domain.Comment
 }
 
 func NewCommentRepository() *CommentRepository {
 	return &CommentRepository{
 		byID:     make(map[string]*domain.Comment),
 		byAssign: make(map[string][]*domain.Comment),
+		byPost:   make(map[string][]*domain.Comment),
 	}
 }
 
@@ -186,7 +196,49 @@ func (r *CommentRepository) Create(c *domain.Comment) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.byID[c.ID] = c
-	r.byAssign[c.AssignmentID] = append(r.byAssign[c.AssignmentID], c)
+	if c.AssignmentID != "" {
+		r.byAssign[c.AssignmentID] = append(r.byAssign[c.AssignmentID], c)
+	}
+	if c.PostID != "" {
+		r.byPost[c.PostID] = append(r.byPost[c.PostID], c)
+	}
+	return nil
+}
+
+func (r *CommentRepository) GetByID(id string) (*domain.Comment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.byID[id], nil
+}
+
+func (r *CommentRepository) Delete(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.byID[id]
+	if !ok {
+		return nil
+	}
+	delete(r.byID, id)
+	if c.AssignmentID != "" {
+		list := r.byAssign[c.AssignmentID]
+		out := list[:0]
+		for _, item := range list {
+			if item.ID != id {
+				out = append(out, item)
+			}
+		}
+		r.byAssign[c.AssignmentID] = out
+	}
+	if c.PostID != "" {
+		list := r.byPost[c.PostID]
+		out := list[:0]
+		for _, item := range list {
+			if item.ID != id {
+				out = append(out, item)
+			}
+		}
+		r.byPost[c.PostID] = out
+	}
 	return nil
 }
 
@@ -222,6 +274,15 @@ func (r *CommentRepository) ListByAssignment(assignmentID string) ([]*domain.Com
 		return []*domain.Comment{}, nil
 	}
 	return r.byAssign[assignmentID], nil
+}
+
+func (r *CommentRepository) ListByPost(postID string) ([]*domain.Comment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.byPost[postID] == nil {
+		return []*domain.Comment{}, nil
+	}
+	return r.byPost[postID], nil
 }
 
 var _ repository.CommentRepository = (*CommentRepository)(nil)
