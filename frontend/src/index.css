@@ -17,7 +17,6 @@ body {
   background: radial-gradient(circle at top left, #e3f2fd, #f5f7fb 40%, #ffffff 70%);
 }
 
-/* Prevent iOS zoom on input focus */
 @media screen and (max-width: 768px) {
   input, select, textarea {
     font-size: 16px !important;

@@ -17,10 +17,6 @@ type AuthState = {
 
 type AuthContextValue = AuthState & {
   applyLogin: (response: LoginResponse) => void
-  /**
-   * Hydrate user from a trusted server response (например, /api/v1/users/me),
-   * когда у нас уже есть сессия на сервере (cookie), но нет данных в localStorage.
-   */
   setUserFromServer: (user: User) => void
   logout: (onRedirect?: () => void) => void
 }
@@ -55,7 +51,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     } catch {
-      // ignore storage errors
     }
   }, [state])
 
@@ -69,7 +64,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const setUserFromServer = useCallback((user: User) => {
     setState((prev) => ({
       user,
-      // если токена нет, оставляем null — сервер может жить на cookies
       token: prev.token ?? null,
     }))
   }, [])
@@ -80,7 +74,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleared))
     } catch {
-      // ignore
     }
     queryClient.clear()
     onRedirect?.()

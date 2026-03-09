@@ -28,6 +28,8 @@ import HomePage from './pages/home/ui/HomePage'
 import CoursesTab from './features/courses/ui/CoursesTab/CoursesTab'
 import CoursePage from './pages/course/ui/CoursePage'
 import { AssignmentPage } from './pages/course/ui/AssignmentPage'
+import { MaterialsPage } from './pages/course/ui/MaterialsPage'
+import MaterialPage from './pages/course/ui/MaterialPage'
 import ProfileTab from './features/profile/ui/ProfileTab/ProfileTab'
 import { AddCourseButton } from './features/courses/ui/AddCourseButton/AddCourseButton'
 import { CoursesLoader } from './features/courses/ui/CoursesLoader/CoursesLoader'
@@ -322,6 +324,22 @@ function AppShellContent() {
               element={
                 <RequireAuth>
                   <AssignmentPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/course/:courseId/materials"
+              element={
+                <RequireAuth>
+                  <MaterialsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/course/:courseId/material/:materialId"
+              element={
+                <RequireAuth>
+                  <MaterialPage />
                 </RequireAuth>
               }
             />

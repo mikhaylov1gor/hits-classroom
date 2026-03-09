@@ -10,7 +10,6 @@ import type {
   SubmissionWithAssignment,
 } from '../model/types'
 
-// Use relative base URL so that webpack devServer proxy can forward to backend on port 8080
 const API_BASE = '/api/v1'
 const AUTH_STORAGE_KEY = 'hits-classroom-auth'
 
@@ -40,6 +39,41 @@ function getAuthHeaders(): HeadersInit {
     headers.Authorization = `Bearer ${token}`
   }
   return headers
+}
+
+export type UploadedFile = {
+  id: string
+  name: string
+  url?: string | null
+  type?: string | null
+}
+
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch(`${API_BASE}/files`, {
+    method: 'POST',
+    headers: {
+      ...getAuthHeaders(),
+    },
+    body: formData,
+  })
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (!response.ok) throw new Error('UPLOAD_FAILED')
+
+  return (await response.json()) as UploadedFile
+}
+
+export async function uploadFiles(files: File[]): Promise<string[]> {
+  const ids: string[] = []
+  for (const file of files) {
+    const uploaded = await uploadFile(file)
+    ids.push(uploaded.id)
+  }
+  return ids
 }
 
 export async function createCourse(payload: { title: string }): Promise<CourseWithRole> {
@@ -167,6 +201,20 @@ export async function getInviteCode(courseId: string): Promise<InviteCode> {
   return (await response.json()) as InviteCode
 }
 
+export async function regenerateInviteCode(courseId: string): Promise<InviteCode> {
+  const response = await fetch(`${API_BASE}/courses/${courseId}/invite-code`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (!response.ok) throw new Error('REGENERATE_INVITE_CODE_FAILED')
+
+  return (await response.json()) as InviteCode
+}
+
 export async function getCourseFeed(courseId: string): Promise<FeedItem[]> {
   const response = await fetch(`${API_BASE}/courses/${courseId}/feed`, {
     method: 'GET',
@@ -221,15 +269,31 @@ export async function getAssignment(
 
 export async function createAssignment(
   courseId: string,
-  payload: { title: string; body?: string; file_ids?: string[]; deadline?: string },
+  payload: {
+    title: string
+    body?: string
+    file_ids?: string[]
+    deadline?: string
+    max_grade?: number
+  },
 ): Promise<Assignment> {
+  const body: Record<string, unknown> = {
+    title: payload.title,
+    body: payload.body,
+    file_ids: payload.file_ids,
+    max_grade: payload.max_grade,
+  }
+  if (payload.deadline != null && payload.deadline !== '') {
+    body.deadline = payload.deadline
+  }
+
   const response = await fetch(`${API_BASE}/courses/${courseId}/assignments`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...getAuthHeaders(),
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   })
 
   if (response.status === 401) throw new Error('UNAUTHORIZED')
@@ -288,8 +352,13 @@ export async function gradeSubmission(
   courseId: string,
   assignmentId: string,
   submissionId: string,
-  grade: number,
+  payload: { grade: number; grade_comment?: string },
 ): Promise<Submission> {
+  const body: { grade: number; grade_comment?: string } = { grade: payload.grade }
+  if (payload.grade_comment != null && payload.grade_comment.trim() !== '') {
+    body.grade_comment = payload.grade_comment.trim()
+  }
+
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/grade`,
     {
@@ -298,7 +367,7 @@ export async function gradeSubmission(
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
-      body: JSON.stringify({ grade }),
+      body: JSON.stringify(body),
     },
   )
 
@@ -309,6 +378,79 @@ export async function gradeSubmission(
   if (!response.ok) throw new Error('GRADE_SUBMISSION_FAILED')
 
   return (await response.json()) as Submission
+}
+
+export async function updateSubmission(
+  courseId: string,
+  assignmentId: string,
+  submissionId: string,
+  payload: { body?: string; file_ids?: string[] },
+): Promise<Submission> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(payload),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('UPDATE_SUBMISSION_FAILED')
+
+  return (await response.json()) as Submission
+}
+
+export async function returnSubmission(
+  courseId: string,
+  assignmentId: string,
+  submissionId: string,
+): Promise<Submission> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/return`,
+    {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('RETURN_SUBMISSION_FAILED')
+
+  return (await response.json()) as Submission
+}
+
+export async function inviteTeacherByEmail(
+  courseId: string,
+  email: string,
+): Promise<Member> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/invite-teacher`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ email: email.trim() }),
+    },
+  )
+
+  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('USER_NOT_FOUND')
+  if (response.status === 409) throw new Error('ALREADY_TEACHER')
+  if (!response.ok) throw new Error('INVITE_TEACHER_FAILED')
+
+  return (await response.json()) as Member
 }
 
 export async function createMaterial(
@@ -332,13 +474,12 @@ export async function createMaterial(
   return response.json()
 }
 
-/** Комментарии к заданию или посту — один endpoint для обоих (entityId = assignmentId или postId) */
-export async function listComments(
+export async function listAssignmentComments(
   courseId: string,
-  entityId: string,
+  assignmentId: string,
 ): Promise<Comment[]> {
   const response = await fetch(
-    `${API_BASE}/courses/${courseId}/assignments/${entityId}/comments`,
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/comments`,
     { method: 'GET', headers: getAuthHeaders() },
   )
 
@@ -350,21 +491,29 @@ export async function listComments(
   return (await response.json()) as Comment[]
 }
 
-/** Добавить комментарий к заданию или посту */
-export async function createComment(
+export async function createAssignmentComment(
   courseId: string,
-  entityId: string,
-  payload: { body?: string; file_ids?: string[]; user_id?: string },
+  assignmentId: string,
+  payload: {
+    body: string
+    parent_id?: string | null
+    file_ids?: string[]
+    reply_to_user_id?: string | null
+  },
 ): Promise<Comment> {
+  const body: Record<string, unknown> = { body: payload.body, file_ids: payload.file_ids ?? [] }
+  if (payload.parent_id != null) body.parent_id = payload.parent_id
+  if (payload.reply_to_user_id != null) body.reply_to_user_id = payload.reply_to_user_id
+
   const response = await fetch(
-    `${API_BASE}/courses/${courseId}/assignments/${entityId}/comments`,
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/comments`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     },
   )
 
@@ -374,6 +523,110 @@ export async function createComment(
   if (!response.ok) throw new Error('CREATE_COMMENT_FAILED')
 
   return (await response.json()) as Comment
+}
+
+export async function listPostComments(
+  courseId: string,
+  postId: string,
+): Promise<Comment[]> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/posts/${postId}/comments`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_COMMENTS_FAILED')
+
+  return (await response.json()) as Comment[]
+}
+
+export async function createPostComment(
+  courseId: string,
+  postId: string,
+  payload: { body: string; parent_id?: string | null; file_ids?: string[] },
+): Promise<Comment> {
+  const body: Record<string, unknown> = { body: payload.body, file_ids: payload.file_ids ?? [] }
+  if (payload.parent_id != null) body.parent_id = payload.parent_id
+
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/posts/${postId}/comments`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(body),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('CREATE_COMMENT_FAILED')
+
+  return (await response.json()) as Comment
+}
+
+export async function listMaterialComments(
+  courseId: string,
+  materialId: string,
+): Promise<Comment[]> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/materials/${materialId}/comments`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_COMMENTS_FAILED')
+
+  return (await response.json()) as Comment[]
+}
+
+export async function createMaterialComment(
+  courseId: string,
+  materialId: string,
+  payload: { body: string; parent_id?: string | null; file_ids?: string[] },
+): Promise<Comment> {
+  const body: Record<string, unknown> = { body: payload.body, file_ids: payload.file_ids ?? [] }
+  if (payload.parent_id != null) body.parent_id = payload.parent_id
+
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/materials/${materialId}/comments`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(body),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('CREATE_COMMENT_FAILED')
+
+  return (await response.json()) as Comment
+}
+
+export const listComments = listAssignmentComments
+
+export async function createComment(
+  courseId: string,
+  entityId: string,
+  payload: { body?: string; file_ids?: string[]; reply_to_user_id?: string },
+): Promise<Comment> {
+  return createAssignmentComment(courseId, entityId, {
+    body: payload.body ?? '',
+    file_ids: payload.file_ids,
+    reply_to_user_id: payload.reply_to_user_id,
+  })
 }
 
 export async function listCourseMembers(courseId: string): Promise<Member[]> {
@@ -388,6 +641,28 @@ export async function listCourseMembers(courseId: string): Promise<Member[]> {
   if (!response.ok) throw new Error('FETCH_MEMBERS_FAILED')
 
   return (await response.json()) as Member[]
+}
+
+export async function assignTeacher(
+  courseId: string,
+  userId: string,
+): Promise<Member> {
+  const response = await fetch(`${API_BASE}/courses/${courseId}/members`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ user_id: userId }),
+  })
+
+  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (!response.ok) throw new Error('ASSIGN_TEACHER_FAILED')
+
+  return (await response.json()) as Member
 }
 
 export async function getMemberGrades(

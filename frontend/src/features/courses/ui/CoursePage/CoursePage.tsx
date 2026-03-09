@@ -11,9 +11,6 @@ import {
   DialogTitle,
   Divider,
   IconButton,
-  List,
-  ListItem,
-  ListItemText,
   Menu,
   MenuItem,
   Tab,
@@ -25,17 +22,21 @@ import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import PersonRemoveOutlinedIcon from '@mui/icons-material/PersonRemoveOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
+import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined'
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getCourse,
   getInviteCode,
+  regenerateInviteCode,
   getCourseFeed,
   listCourseMembers,
   deleteCourse,
   removeMember,
   updateMemberRole,
   updateCourse,
+  inviteTeacherByEmail,
+  assignTeacher,
 } from '../../api/coursesApi'
 import { useAuth } from '../../../auth/model/AuthContext'
 import { useCourses } from '../../model/CoursesContext'
@@ -45,8 +46,17 @@ import { CreateMaterialDialog } from './CreateMaterialDialog/CreateMaterialDialo
 import { CreatePostDialog } from './CreatePostDialog/CreatePostDialog'
 import { AssignmentCard } from './AssignmentCard/AssignmentCard'
 import { PostCard } from './PostCard/PostCard'
+import { MaterialCard } from './MaterialCard/MaterialCard'
 import { UserProfileDialog } from './UserProfileDialog'
-import type { CourseTabId, CourseWithRole, FeedItem, Member } from '../../model/types'
+import {
+  type CourseTabId,
+  type CourseWithRole,
+  type FeedItem,
+  type Member,
+  getNameByUserId,
+  getInitialsFromMember,
+  getMemberInitials,
+} from '../../model/types'
 
 const ROLE_LABELS: Record<string, string> = {
   owner: 'владелец',
@@ -82,16 +92,41 @@ function getUpcomingAssignments(assignments: FeedItem[]): FeedItem[] {
   const now = new Date()
   const nextWeek = new Date(now)
   nextWeek.setDate(nextWeek.getDate() + 7)
-  return assignments.filter((a) => {
-    if (!a.deadline) return false
-    const d = new Date(a.deadline)
-    return d >= now && d <= nextWeek
-  })
+  return assignments
+    .filter((a) => {
+      if (!a.deadline) return false
+      const d = new Date(a.deadline)
+      return d >= now && d <= nextWeek
+    })
+    .sort((a, b) => {
+      const da = new Date(a.deadline!).getTime()
+      const db = new Date(b.deadline!).getTime()
+      return da - db
+    })
 }
+
+function formatDateTime(dateStr?: string): string {
+  if (!dateStr) return ''
+  try {
+    const d = new Date(dateStr)
+    return d.toLocaleString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
+const TAB_PARAM = 'tab'
 
 export function CoursePage() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const ctx = useCourses()
   const [course, setCourse] = useState<CourseWithRole | null>(null)
   const [inviteCode, setInviteCode] = useState<string | null>(null)
@@ -119,6 +154,10 @@ export function CoursePage() {
   const [createPostOpen, setCreatePostOpen] = useState(false)
   const [createAssignmentOpen, setCreateAssignmentOpen] = useState(false)
   const [createMaterialOpen, setCreateMaterialOpen] = useState(false)
+  const [inviteTeacherEmail, setInviteTeacherEmail] = useState('')
+  const [inviteTeacherLoading, setInviteTeacherLoading] = useState(false)
+  const [inviteTeacherError, setInviteTeacherError] = useState<string | null>(null)
+  const [inviteCodeRegenerating, setInviteCodeRegenerating] = useState(false)
 
   const { user: authUser } = useAuth()
   const isTeacher = course?.role === 'teacher' || course?.role === 'owner'
@@ -130,6 +169,24 @@ export function CoursePage() {
 
   const currentTabId = tabIds[tabValue] ?? tabIds[0]
 
+  const handleTabChange = (idx: number) => {
+    setTabValue(idx)
+    const tabId = tabIds[idx]
+    if (tabId) {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set(TAB_PARAM, tabId)
+        return next
+      })
+    }
+  }
+
+  useEffect(() => {
+    const tabFromUrl = searchParams.get(TAB_PARAM)
+    const idx = tabFromUrl ? tabIds.indexOf(tabFromUrl as CourseTabId) : -1
+    if (idx >= 0) setTabValue(idx)
+  }, [searchParams, tabIds.join(',')])
+
   useEffect(() => {
     if (!courseId) {
       navigate('/')
@@ -140,11 +197,17 @@ export function CoursePage() {
     setLoading(true)
     setError(null)
 
-    getCourse(courseId)
-      .then((data) => {
+    Promise.all([
+      getCourse(courseId),
+      getCourseFeed(courseId),
+      listCourseMembers(courseId),
+    ])
+      .then(([courseData, feedData, membersData]) => {
         if (!cancelled) {
-          setCourse(data)
-          ctx?.addCourse(data)
+          setCourse(courseData)
+          ctx?.addCourse(courseData)
+          setFeed(feedData)
+          setMembers(membersData)
         }
       })
       .catch((err) => {
@@ -180,8 +243,12 @@ export function CoursePage() {
     }
   }
 
+  const prevCourseIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!courseId || currentTabId === 'settings') return
+    const isNewCourse = prevCourseIdRef.current !== courseId
+    prevCourseIdRef.current = courseId
+    if (isNewCourse) return
     if (currentTabId === 'users') {
       listCourseMembers(courseId)
         .then(setMembers)
@@ -211,7 +278,6 @@ export function CoursePage() {
       await deleteCourse(courseId)
       handleCourseDeleted()
     } catch {
-      // TODO: show error
     } finally {
       setDeleteLoading(false)
     }
@@ -222,6 +288,19 @@ export function CoursePage() {
       navigator.clipboard.writeText(inviteCode)
       setCopySnackbar(true)
       setTimeout(() => setCopySnackbar(false), 2000)
+    }
+  }
+
+  const handleRegenerateInviteCode = async () => {
+    if (!courseId || inviteCodeRegenerating) return
+    setInviteCodeRegenerating(true)
+    try {
+      const res = await regenerateInviteCode(courseId)
+      setInviteCode(res.code)
+    } catch {
+      setInviteCode(null)
+    } finally {
+      setInviteCodeRegenerating(false)
     }
   }
 
@@ -259,13 +338,16 @@ export function CoursePage() {
     if (!courseId) return
     setRoleMenuAnchor(null)
     try {
-      await updateMemberRole(courseId, member.user_id, newRole)
+      if (newRole === 'teacher') {
+        await assignTeacher(courseId, member.user_id)
+      } else {
+        await updateMemberRole(courseId, member.user_id, newRole)
+      }
       refreshMembers()
       setProfileMember((prev) =>
         prev?.user_id === member.user_id ? { ...prev, role: newRole } : prev,
       )
     } catch {
-      // TODO: show error
     }
   }
 
@@ -291,7 +373,6 @@ export function CoursePage() {
       handleCourseUpdated(updated)
       setIsEditingRename(false)
     } catch {
-      // TODO: show error
     } finally {
       setRenameLoading(false)
     }
@@ -326,13 +407,13 @@ export function CoursePage() {
   const teachers = members.filter((m) => m.role === 'owner' || m.role === 'teacher')
   const students = members.filter((m) => m.role === 'student')
 
-  function getInitials(m: Member): string {
-    const first = (m.first_name?.[0] ?? '').toUpperCase()
-    const last = (m.last_name?.[0] ?? '').toUpperCase()
-    return (first + last) || m.email[0]?.toUpperCase() || '?'
-  }
-
   function getAuthorForPost(post: FeedItem): { name: string; initial: string } {
+    if (post.user_id) {
+      const name = getNameByUserId(members, post.user_id, post.author)
+      const m = members.find((x) => x.user_id === post.user_id)
+      const initial = m ? getMemberInitials(m) : getInitialsFromMember(members, post.user_id, post.author)
+      return { name: name || 'Автор', initial }
+    }
     if (post.author) {
       const name = `${post.author.first_name} ${post.author.last_name}`.trim()
       const initial = (post.author.first_name?.[0] ?? post.author.last_name?.[0] ?? 'А').toUpperCase()
@@ -340,25 +421,32 @@ export function CoursePage() {
     }
     const firstTeacher = teachers[0]
     if (firstTeacher) {
-      const name = `${firstTeacher.first_name} ${firstTeacher.last_name}`.trim() || firstTeacher.email
-      return { name, initial: getInitials(firstTeacher) }
+      const name = getNameByUserId(members, firstTeacher.user_id, null)
+      return { name: name !== 'Участник' ? name : firstTeacher.email, initial: getMemberInitials(firstTeacher) }
     }
     return { name: 'Преподаватель', initial: 'П' }
   }
 
   function getAuthorForAssignment(item: FeedItem): string {
+    if (item.user_id) {
+      return getNameByUserId(members, item.user_id, item.author) || 'Автор'
+    }
     if (item.author) {
       return `${item.author.first_name} ${item.author.last_name}`.trim() || 'Автор'
     }
     const firstTeacher = teachers[0]
     if (firstTeacher) {
-      return `${firstTeacher.first_name} ${firstTeacher.last_name}`.trim() || firstTeacher.email
+      const name = getNameByUserId(members, firstTeacher.user_id, null)
+      return name !== 'Участник' ? name : `${firstTeacher.first_name} ${firstTeacher.last_name}`.trim() || firstTeacher.email
     }
     return 'Преподаватель'
   }
 
   function MemberRow({ member }: { member: Member }) {
-    const name = `${member.first_name} ${member.last_name}`.trim() || member.email
+    const name =
+      getNameByUserId(members, member.user_id, null) !== 'Участник'
+        ? getNameByUserId(members, member.user_id, null)
+        : `${member.first_name} ${member.last_name}`.trim() || member.email
     const showActions = canExclude(member) || canChangeRole(member)
     return (
       <Box className="flex items-center justify-between gap-3 py-3 group">
@@ -383,7 +471,7 @@ export function CoursePage() {
               fontSize: '1rem',
             }}
           >
-            {getInitials(member)}
+            {getMemberInitials(member)}
           </Avatar>
           <Box className="min-w-0 flex-1">
             <Typography variant="body1" className="text-slate-800 font-medium">
@@ -435,7 +523,7 @@ export function CoursePage() {
 
       <Tabs
         value={tabValue}
-        onChange={(_, v) => setTabValue(v)}
+        onChange={(_, v) => handleTabChange(Number(v))}
         variant="scrollable"
         scrollButtons="auto"
         allowScrollButtonsMobile
@@ -458,39 +546,59 @@ export function CoursePage() {
       <Box className="flex-1 overflow-auto min-w-0 px-3 sm:px-4 md:px-6">
         <TabPanel value={tabValue} index={0}>
           <Box className="flex flex-col lg:flex-row gap-6 py-4">
-            <Box className="lg:w-64 shrink-0">
-              <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-                <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-2">
-                  Предстоящие
-                </Typography>
-                {upcomingAssignments.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" className="mb-3">
-                    У вас нет заданий, которые нужно сдать на следующей неделе.
+            {!isTeacher && (
+              <Box className="lg:w-64 shrink-0">
+                <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                  <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-2">
+                    Предстоящие задания
                   </Typography>
-                ) : (
-                  <Box className="flex flex-col gap-2 mb-3">
-                    {upcomingAssignments.slice(0, 3).map((a) => (
-                      <Typography
-                        key={a.id}
-                        variant="body2"
-                        className="text-slate-700 cursor-pointer hover:text-primary-600"
-                        onClick={() => courseId && navigate(`/course/${courseId}/assignment/${a.id}`)}
-                      >
-                        {a.title}
-                      </Typography>
-                    ))}
-                  </Box>
-                )}
-                <Typography
-                  component="button"
-                  variant="body2"
-                  className="text-primary-600 hover:text-primary-700 font-medium cursor-pointer border-0 bg-transparent p-0"
-                  onClick={() => setTabValue(tabIds.indexOf('assignments'))}
-                >
-                  Посмотреть всё
-                </Typography>
+                  {upcomingAssignments.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" className="mb-3">
+                      У вас нет заданий, которые нужно сдать на следующей неделе.
+                    </Typography>
+                  ) : (
+                    <Box className="flex flex-col gap-2">
+                      {upcomingAssignments.slice(0, 3).map((a, idx) => (
+                        <Box key={a.id}>
+                          {idx > 0 && <Divider light className="border-slate-200 my-1" />}
+                          <Box
+                            className="cursor-pointer hover:text-primary-600 flex flex-col gap-0.5 pt-1"
+                            onClick={() => courseId && navigate(`/course/${courseId}/assignment/${a.id}`)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                courseId && navigate(`/course/${courseId}/assignment/${a.id}`)
+                              }
+                            }}
+                          >
+                            <Typography variant="body2" className="text-slate-700 font-medium">
+                              {a.title}
+                            </Typography>
+                            {a.deadline && (
+                              <Typography variant="caption" color="text.secondary">
+                                · {formatDateTime(a.deadline)}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                  {currentTabId !== 'assignments' && (
+                    <Typography
+                      component="button"
+                      variant="body2"
+                      className="text-primary-600 hover:text-primary-700 font-medium cursor-pointer border-0 bg-transparent p-0"
+                      onClick={() => handleTabChange(tabIds.indexOf('assignments'))}
+                    >
+                      Посмотреть всё
+                    </Typography>
+                  )}
+                </Box>
               </Box>
-            </Box>
+            )}
             <Box className="flex-1 min-w-0 flex flex-col" sx={{ gap: '1.5rem' }}>
               {isTeacher && (
                 <Button
@@ -519,7 +627,7 @@ export function CoursePage() {
                       authorName={getAuthorForAssignment(item)}
                       onClick={() => courseId && navigate(`/course/${courseId}/assignment/${item.id}`)}
                       isTeacher={isTeacher}
-                      courseMembers={members.map((m) => ({ user_id: m.user_id, role: m.role }))}
+                      courseMembers={members}
                     />
                   ))
                 )}
@@ -530,46 +638,69 @@ export function CoursePage() {
 
         <TabPanel value={tabValue} index={1}>
           <Box className="flex flex-col lg:flex-row gap-6 py-4">
-            <Box className="lg:w-64 shrink-0">
-              <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-                <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-2">
-                  Предстоящие
-                </Typography>
-                {upcomingAssignments.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" className="mb-3">
-                    У вас нет заданий, которые нужно сдать на следующей неделе.
+            {!isTeacher && (
+              <Box className="lg:w-64 shrink-0">
+                <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                  <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-2">
+                    Предстоящие задания
                   </Typography>
-                ) : (
-                  <Box className="flex flex-col gap-2 mb-3">
-                    {upcomingAssignments.slice(0, 3).map((a) => (
-                      <Typography key={a.id} variant="body2" className="text-slate-700">
-                        {a.title}
-                      </Typography>
-                    ))}
-                  </Box>
-                )}
-                <Typography
-                  component="button"
-                  variant="body2"
-                  className="text-primary-600 hover:text-primary-700 font-medium cursor-pointer border-0 bg-transparent p-0"
-                  onClick={() => setTabValue(tabIds.indexOf('assignments'))}
-                >
-                  Посмотреть всё
-                </Typography>
+                  {upcomingAssignments.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" className="mb-3">
+                      У вас нет заданий, которые нужно сдать на следующей неделе.
+                    </Typography>
+                  ) : (
+                    <Box className="flex flex-col gap-2">
+                      {upcomingAssignments.slice(0, 3).map((a, idx) => (
+                        <Box key={a.id}>
+                          {idx > 0 && <Divider light className="border-slate-200 my-1" />}
+                          <Box
+                            className="cursor-pointer hover:text-primary-600 flex flex-col gap-0.5 pt-1"
+                            onClick={() => courseId && navigate(`/course/${courseId}/assignment/${a.id}`)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                courseId && navigate(`/course/${courseId}/assignment/${a.id}`)
+                              }
+                            }}
+                          >
+                            <Typography variant="body2" className="text-slate-700 font-medium">
+                              {a.title}
+                            </Typography>
+                            {a.deadline && (
+                              <Typography variant="caption" color="text.secondary">
+                                · {formatDateTime(a.deadline)}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                  {currentTabId !== 'assignments' && (
+                    <Typography
+                      component="button"
+                      variant="body2"
+                      className="text-primary-600 hover:text-primary-700 font-medium cursor-pointer border-0 bg-transparent p-0"
+                      onClick={() => handleTabChange(tabIds.indexOf('assignments'))}
+                    >
+                      Посмотреть всё
+                    </Typography>
+                  )}
+                </Box>
               </Box>
-            </Box>
+            )}
             <Box className="flex-1 min-w-0 flex flex-col" sx={{ gap: '1.5rem' }}>
-              {isTeacher && (
-                <Button
-                  variant="contained"
-                  startIcon={<SendOutlinedIcon />}
-                  sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
-                  onClick={() => setCreatePostOpen(true)}
-                  aria-label="Создать пост"
-                >
-                  Новый пост
-                </Button>
-              )}
+              <Button
+                variant="contained"
+                startIcon={<SendOutlinedIcon />}
+                sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+                onClick={() => setCreatePostOpen(true)}
+                aria-label="Создать пост"
+              >
+                Новый пост
+              </Button>
               <Box className="flex flex-col gap-4">
                 {posts.length === 0 ? (
                   <Box className="bg-white rounded-xl border border-slate-200 p-8 text-center">
@@ -587,6 +718,7 @@ export function CoursePage() {
                         courseId={courseId ?? ''}
                         authorName={author.name}
                         authorInitial={author.initial}
+                        courseMembers={members}
                       />
                     )
                   })
@@ -597,19 +729,28 @@ export function CoursePage() {
         </TabPanel>
 
         <TabPanel value={tabValue} index={2}>
-          {isTeacher && (
+          <Box className="flex flex-wrap items-center gap-3 mb-4">
+            {isTeacher && (
+              <Button
+                variant="contained"
+                startIcon={<SendOutlinedIcon />}
+                sx={{ textTransform: 'none' }}
+                onClick={() => setCreateMaterialOpen(true)}
+                aria-label="Создать материал"
+              >
+                Новый материал
+              </Button>
+            )}
             <Button
-              variant="contained"
-              startIcon={<SendOutlinedIcon />}
-              className="mb-4"
+              variant="outlined"
               sx={{ textTransform: 'none' }}
-              onClick={() => setCreateMaterialOpen(true)}
-              aria-label="Создать материал"
+              onClick={() => courseId && navigate(`/course/${courseId}/materials`)}
+              aria-label="Открыть страницу материалов"
             >
-              Новый материал
+              Открыть страницу материалов
             </Button>
-          )}
-          <List className="flex flex-col gap-1 min-w-0">
+          </Box>
+          <Box className="flex flex-col gap-4">
             {materials.length === 0 ? (
               <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
                 <Typography variant="body2" className="text-slate-500 text-center md:text-left">
@@ -617,13 +758,24 @@ export function CoursePage() {
                 </Typography>
               </Box>
             ) : (
-              materials.map((item) => (
-                <ListItem key={item.id} className="border border-slate-200 rounded-lg min-w-0">
-                  <ListItemText primary={item.title} />
-                </ListItem>
-              ))
+              materials.map((item) => {
+                const author = getAuthorForPost(item)
+                return (
+                  <MaterialCard
+                    key={item.id}
+                    item={item}
+                    courseId={courseId ?? ''}
+                    authorName={author.name}
+                    authorInitial={author.initial}
+                    courseMembers={members}
+                    onClick={() =>
+                      courseId && navigate(`/course/${courseId}/material/${item.id}`, { state: { material: item } })
+                    }
+                  />
+                )
+              })
             )}
-          </List>
+          </Box>
         </TabPanel>
 
         <TabPanel value={tabValue} index={3}>
@@ -759,6 +911,18 @@ export function CoursePage() {
                     </Box>
                     <IconButton
                       size="small"
+                      aria-label="Перегенерировать код"
+                      onClick={handleRegenerateInviteCode}
+                      disabled={inviteCodeRegenerating}
+                    >
+                      {inviteCodeRegenerating ? (
+                        <CircularProgress size={20} />
+                      ) : (
+                        <RefreshOutlinedIcon fontSize="small" />
+                      )}
+                    </IconButton>
+                    <IconButton
+                      size="small"
                       aria-label="Копировать код"
                       onClick={handleCopyCode}
                     >
@@ -772,6 +936,61 @@ export function CoursePage() {
                     </Box>
                   )}
                 </Box>
+                {course.role === 'owner' && (
+                  <Box className="flex flex-col gap-4 p-4 bg-slate-50 rounded-xl">
+                    <Typography variant="subtitle2" className="text-slate-600">
+                      Добавить преподавателя по email
+                    </Typography>
+                    <Box className="flex flex-col sm:flex-row gap-2">
+                      <TextField
+                        size="small"
+                        type="email"
+                        label="Email"
+                        placeholder="teacher@example.com"
+                        value={inviteTeacherEmail}
+                        onChange={(e) => {
+                          setInviteTeacherEmail(e.target.value)
+                          setInviteTeacherError(null)
+                        }}
+                        disabled={inviteTeacherLoading}
+                        sx={{ minWidth: 240 }}
+                        inputProps={{ 'aria-label': 'Email преподавателя' }}
+                      />
+                      <Button
+                        variant="outlined"
+                        onClick={async () => {
+                          const email = inviteTeacherEmail.trim()
+                          if (!email || !courseId) return
+                          setInviteTeacherLoading(true)
+                          setInviteTeacherError(null)
+                          try {
+                            await inviteTeacherByEmail(courseId, email)
+                            setInviteTeacherEmail('')
+                            refreshMembers()
+                          } catch (err) {
+                            const msg =
+                              err instanceof Error && err.message === 'USER_NOT_FOUND'
+                                ? 'Пользователь с таким email не найден'
+                                : err instanceof Error && err.message === 'ALREADY_TEACHER'
+                                  ? 'Пользователь уже является преподавателем'
+                                  : 'Не удалось пригласить'
+                            setInviteTeacherError(msg)
+                          } finally {
+                            setInviteTeacherLoading(false)
+                          }
+                        }}
+                        disabled={inviteTeacherLoading || !inviteTeacherEmail.trim()}
+                      >
+                        {inviteTeacherLoading ? 'Добавление…' : 'Добавить'}
+                      </Button>
+                    </Box>
+                    {inviteTeacherError && (
+                      <Typography variant="body2" color="error">
+                        {inviteTeacherError}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
                 {course.role === 'owner' && (
                   <Box className="flex flex-col gap-2">
                     <Button
@@ -825,6 +1044,12 @@ export function CoursePage() {
         <CreateAssignmentDialog
           open={createAssignmentOpen}
           onClose={() => setCreateAssignmentOpen(false)}
+          courseId={courseId ?? ''}
+          onCreated={refreshFeed}
+        />
+        <CreateMaterialDialog
+          open={createMaterialOpen}
+          onClose={() => setCreateMaterialOpen(false)}
           courseId={courseId ?? ''}
           onCreated={refreshFeed}
         />

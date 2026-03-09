@@ -18,6 +18,7 @@ export type FeedItem = {
   body?: string | null
   created_at?: string
   deadline?: string | null
+  user_id?: string | null
   author?: { first_name: string; last_name: string } | null
   attachments?: { id: string; name: string; type?: string; url?: string }[] | null
 }
@@ -34,15 +35,32 @@ export type Post = {
 export type Comment = {
   id: string
   assignment_id?: string
+  post_id?: string
+  material_id?: string
   user_id: string
-  /** Адресат личного комментария (от преподавателя студенту) */
+  parent_id?: string | null
   reply_to_user_id?: string | null
   body?: string | null
   created_at?: string
   author?: { first_name: string; last_name: string } | null
+  replies?: Comment[]
 }
 
-/** Комментарии студента: только свои и от преподавателя (адресованные ему) */
+export function countCommentsRecursively(comments: Comment[]): number {
+  return comments.reduce(
+    (acc, c) => acc + 1 + (c.replies?.length ? countCommentsRecursively(c.replies) : 0),
+    0,
+  )
+}
+
+export function flattenComments(comments: Comment[]): Comment[] {
+  return comments.flatMap((c) => [c, ...(c.replies ? flattenComments(c.replies) : [])])
+}
+
+export function getGeneralComments(comments: Comment[]): Comment[] {
+  return comments.filter((c) => c.reply_to_user_id == null)
+}
+
 export function filterStudentComments(
   comments: Comment[],
   authUserId: string | undefined,
@@ -56,7 +74,6 @@ export function filterStudentComments(
   })
 }
 
-/** Комментарии преподавателя в диалоге со студентом */
 export function filterTeacherDialogComments(
   comments: Comment[],
   authUserId: string | undefined,
@@ -80,6 +97,50 @@ export type Member = {
   birth_date?: string | null
 }
 
+type MemberLike = {
+  user_id: string
+  first_name?: string
+  last_name?: string
+}
+
+export function getNameByUserId(
+  members: MemberLike[],
+  userId: string,
+  fallback?: { first_name?: string; last_name?: string } | null,
+): string {
+  console.error(12312, members)
+  const m = members.find((x) => x.user_id === userId)
+  if (m) {
+    const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim()
+    return name || 'Участник'
+  }
+  if (fallback && (fallback.first_name || fallback.last_name)) {
+    return `${fallback.first_name ?? ''} ${fallback.last_name ?? ''}`.trim()
+  }
+  return 'Участник'
+}
+
+export function getInitialsFromMember(
+  members: MemberLike[],
+  userId: string,
+  fallback?: { first_name?: string; last_name?: string } | null,
+): string {
+  const m = members.find((x) => x.user_id === userId)
+  if (m) return getMemberInitials(m)
+  if (fallback && (fallback.first_name || fallback.last_name)) {
+    const f = (fallback.first_name ?? '').trim().charAt(0)
+    const l = (fallback.last_name ?? '').trim().charAt(0)
+    return (f + l).toUpperCase() || '?'
+  }
+  return '?'
+}
+
+export function getMemberInitials(m: MemberLike & { email?: string }): string {
+  const f = (m.first_name ?? '').trim().charAt(0)
+  const l = (m.last_name ?? '').trim().charAt(0)
+  return (f + l).toUpperCase() || m.email?.[0]?.toUpperCase() || '?'
+}
+
 export type InviteCode = {
   code: string
 }
@@ -90,8 +151,13 @@ export type Assignment = {
   title: string
   body?: string | null
   deadline?: string | null
+  max_grade?: number
   created_at?: string
+  user_id?: string | null
+  author?: { first_name: string; last_name: string } | null
 }
+
+export type SubmissionStatus = 'draft' | 'submitted' | 'returned'
 
 export type Submission = {
   id: string
@@ -100,6 +166,8 @@ export type Submission = {
   body?: string | null
   submitted_at?: string
   grade: number | null
+  grade_comment?: string | null
+  status?: SubmissionStatus | null
   author?: { first_name: string; last_name: string } | null
 }
 

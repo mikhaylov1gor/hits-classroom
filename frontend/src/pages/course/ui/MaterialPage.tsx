@@ -10,8 +10,16 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import LinkIcon from '@mui/icons-material/Link'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { getCourseFeed, getCourse } from '../../../features/courses/api/coursesApi'
-import type { FeedItem } from '../../../features/courses/model/types'
+import {
+  getCourseFeed,
+  getCourse,
+  listCourseMembers,
+} from '../../../features/courses/api/coursesApi'
+import {
+  type FeedItem,
+  type Member,
+  getNameByUserId,
+} from '../../../features/courses/model/types'
 
 function formatDate(dateStr?: string): string {
   if (!dateStr) return ''
@@ -35,6 +43,7 @@ export function MaterialPage() {
   const location = useLocation()
   const [material, setMaterial] = useState<FeedItem | null>(null)
   const [courseTitle, setCourseTitle] = useState('')
+  const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
 
   const stateItem = (location.state as { material?: FeedItem })?.material
@@ -47,13 +56,21 @@ export function MaterialPage() {
     if (stateItem && stateItem.type === 'material' && stateItem.id === materialId) {
       setMaterial(stateItem)
       setLoading(false)
-      getCourse(courseId).then((c) => setCourseTitle(c.title)).catch(() => {})
+      Promise.all([
+        getCourse(courseId).then((c) => setCourseTitle(c.title)),
+        listCourseMembers(courseId).then(setMembers).catch(() => setMembers([])),
+      ]).catch(() => {})
       return
     }
     setLoading(true)
-    Promise.all([getCourse(courseId), getCourseFeed(courseId)])
-      .then(([c, feed]) => {
+    Promise.all([
+      getCourse(courseId),
+      getCourseFeed(courseId),
+      listCourseMembers(courseId),
+    ])
+      .then(([c, feed, m]) => {
         setCourseTitle(c.title)
+        setMembers(m ?? [])
         const found = feed.find(
           (f) => f.type === 'material' && f.id === materialId,
         ) ?? null
@@ -91,9 +108,12 @@ export function MaterialPage() {
   }
 
   const attachments = material.attachments ?? []
-  const authorName = material.author
-    ? `${material.author.first_name} ${material.author.last_name}`.trim()
-    : 'Преподаватель'
+  const authorName =
+    (material.user_id
+      ? getNameByUserId(members, material.user_id, material.author)
+      : material.author
+        ? `${material.author.first_name} ${material.author.last_name}`.trim()
+        : null) || 'Преподаватель'
 
   return (
     <Container maxWidth="lg" disableGutters>

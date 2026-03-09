@@ -15,6 +15,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import { getMemberGrades } from '../../api/coursesApi'
 import type { Member, SubmissionWithAssignment } from '../../model/types'
+import { getMemberInitials } from '../../model/types'
 
 const ROLE_LABELS: Record<string, string> = {
   owner: 'Владелец',
@@ -56,7 +57,8 @@ export function UserProfileDialog({
 
   const showGrades =
     Boolean(member) &&
-    (Boolean(isTeacher) || (Boolean(authUserId) && member!.user_id === authUserId))
+    member.role === 'student' &&
+    (Boolean(isTeacher) || (Boolean(authUserId) && member.user_id === authUserId))
 
   useEffect(() => {
     if (!open || !member || !courseId || !showGrades) {
@@ -73,11 +75,7 @@ export function UserProfileDialog({
   if (!member) return null
 
   const fullName = `${member.first_name} ${member.last_name}`.trim() || member.email
-  const initials =
-    (member.first_name?.[0] ?? '').toUpperCase() +
-    (member.last_name?.[0] ?? '').toUpperCase() ||
-    member.email[0]?.toUpperCase() ||
-    '?'
+  const initials = getMemberInitials(member)
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>

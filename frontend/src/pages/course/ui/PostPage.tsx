@@ -19,8 +19,18 @@ import {
   getCourse,
   listPostComments,
   createPostComment,
+  uploadFiles,
+  listCourseMembers,
 } from '../../../features/courses/api/coursesApi'
-import type { Comment, FeedItem } from '../../../features/courses/model/types'
+import { useAuth } from '../../../features/auth/model/AuthContext'
+import {
+  type Comment,
+  type FeedItem,
+  type Member,
+  countCommentsRecursively,
+  getNameByUserId,
+  getInitialsFromMember,
+} from '../../../features/courses/model/types'
 
 function formatDate(dateStr?: string): string {
   if (!dateStr) return ''
@@ -38,21 +48,17 @@ function formatDate(dateStr?: string): string {
   }
 }
 
-function getInitials(author?: { first_name?: string; last_name?: string } | null): string {
-  if (!author) return '?'
-  const f = author.first_name?.trim().charAt(0) ?? ''
-  const l = author.last_name?.trim().charAt(0) ?? ''
-  return (f + l).toUpperCase() || '?'
-}
-
 export function PostPage() {
   const { courseId, postId } = useParams<{ courseId: string; postId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const { user: authUser } = useAuth()
   const [post, setPost] = useState<FeedItem | null>(null)
   const [courseTitle, setCourseTitle] = useState('')
+  const [members, setMembers] = useState<Member[]>([])
   const [comments, setComments] = useState<Comment[]>([])
   const [commentText, setCommentText] = useState('')
+  const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [submittingComment, setSubmittingComment] = useState(false)
   const [loading, setLoading] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -67,14 +73,22 @@ export function PostPage() {
     if (stateItem && stateItem.type === 'post' && stateItem.id === postId) {
       setPost(stateItem)
       setLoading(false)
-      getCourse(courseId).then((c) => setCourseTitle(c.title)).catch(() => {})
-      listPostComments(courseId, postId).then(setComments).catch(() => setComments([]))
+      Promise.all([
+        getCourse(courseId).then((c) => setCourseTitle(c.title)),
+        listCourseMembers(courseId).then(setMembers).catch(() => setMembers([])),
+        listPostComments(courseId, postId).then(setComments).catch(() => setComments([])),
+      ]).catch(() => {})
       return
     }
     setLoading(true)
-    Promise.all([getCourse(courseId), getCourseFeed(courseId)])
-      .then(([c, feed]) => {
+    Promise.all([
+      getCourse(courseId),
+      getCourseFeed(courseId),
+      listCourseMembers(courseId),
+    ])
+      .then(([c, feed, m]) => {
         setCourseTitle(c.title)
+        setMembers(m ?? [])
         const found = feed.find((f) => f.type === 'post' && f.id === postId) ?? null
         setPost(found)
         return found ? listPostComments(courseId, postId) : []
@@ -103,9 +117,14 @@ export function PostPage() {
     if (!trimmed || !courseId || !postId || submittingComment) return
     setSubmittingComment(true)
     try {
-      const created = await createPostComment(courseId, postId, { body: trimmed, file_ids: [] })
+      const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
+      const created = await createPostComment(courseId, postId, {
+        body: trimmed,
+        file_ids: fileIds,
+      })
       setComments((prev) => [...prev, created])
       setCommentText('')
+      setCommentFiles([])
     } finally {
       setSubmittingComment(false)
     }
@@ -135,10 +154,17 @@ export function PostPage() {
   }
 
   const attachments = post.attachments ?? []
-  const authorName = post.author
-    ? `${post.author.first_name} ${post.author.last_name}`.trim()
-    : 'Преподаватель'
-  const authorInitial = getInitials(post.author)
+  const authorName =
+    (post.user_id
+      ? getNameByUserId(members, post.user_id, post.author)
+      : post.author
+        ? `${post.author.first_name} ${post.author.last_name}`.trim()
+        : null) || 'Преподаватель'
+  const authorInitial = getInitialsFromMember(
+    members,
+    post.user_id ?? '',
+    post.author,
+  )
 
   return (
     <Container maxWidth="lg" disableGutters>
@@ -204,25 +230,36 @@ export function PostPage() {
 
           <Box className="border-t border-slate-200 pt-4">
             <Typography variant="subtitle2" className="text-slate-600 mb-3">
-              Комментарии ({comments.length})
+              Комментарии ({countCommentsRecursively(comments)})
             </Typography>
             <Box className="flex flex-col gap-3 mb-4">
-              {comments.map((c) => (
-                <Box
-                  key={c.id}
-                  className="p-3 bg-slate-50 rounded-lg border border-slate-100"
-                >
-                  <Typography variant="body2" className="text-slate-700">
-                    {c.body || '(без текста)'}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {c.author
-                      ? `${c.author.first_name} ${c.author.last_name}`.trim()
-                      : 'Участник'}{' '}
-                    · {formatDate(c.created_at)}
-                  </Typography>
-                </Box>
-              ))}
+              {comments.map((c) => {
+                const isOwn = authUser?.id && c.user_id === authUser.id
+                return (
+                  <Box
+                    key={c.id}
+                    className="p-3 rounded-lg"
+                    sx={{
+                      bgcolor: 'grey.50',
+                      border: '1px solid',
+                      borderColor: 'grey.200',
+                      ...(isOwn && {
+                        borderLeft: '4px solid',
+                        borderLeftColor: 'primary.main',
+                        pl: 2.5,
+                      }),
+                    }}
+                  >
+                    <Typography variant="body2" className="text-slate-700">
+                      {c.body || '(без текста)'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {getNameByUserId(members, c.user_id, c.author)}{' '}
+                      · {formatDate(c.created_at)}
+                    </Typography>
+                  </Box>
+                )
+              })}
             </Box>
             <Box component="form" onSubmit={handleSubmitComment} className="flex flex-col gap-2">
               <TextField
@@ -242,6 +279,11 @@ export function PostPage() {
                   type="file"
                   multiple
                   className="hidden"
+                  onChange={(e) => {
+                    const selected = e.target.files
+                    if (selected) setCommentFiles((prev) => [...prev, ...Array.from(selected)])
+                    e.target.value = ''
+                  }}
                   aria-label="Прикрепить файл"
                 />
                 <Button
@@ -253,6 +295,11 @@ export function PostPage() {
                 >
                   Файл
                 </Button>
+                {commentFiles.length > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    {commentFiles.map((f) => f.name).join(', ')}
+                  </Typography>
+                )}
                 <Button
                   type="submit"
                   variant="contained"

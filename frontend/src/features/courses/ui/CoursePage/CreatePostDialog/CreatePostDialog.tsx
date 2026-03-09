@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
-import { createPost } from '../../../api/coursesApi'
+import { createPost, uploadFiles } from '../../../api/coursesApi'
 
 type CreatePostDialogProps = {
   open: boolean
@@ -60,25 +60,23 @@ export function CreatePostDialog({
       setError('Введите заголовок')
       return
     }
-    if (!trimmedContent) {
-      setError('Введите содержание')
-      return
-    }
 
     const linkLines = links
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
-    const body =
-      trimmedContent +
-      (linkLines.length > 0 ? '\n\nСсылки:\n' + linkLines.join('\n') : '')
+    const parts: string[] = []
+    if (trimmedContent) parts.push(trimmedContent)
+    if (linkLines.length > 0) parts.push('Ссылки:\n' + linkLines.join('\n'))
+    const body = parts.length > 0 ? parts.join('\n\n') : undefined
 
     setLoading(true)
     try {
+      const fileIds = files.length > 0 ? await uploadFiles(files) : []
       await createPost(courseId, {
         title: trimmedTitle,
         body,
-        file_ids: [], // TODO: upload files when backend supports
+        file_ids: fileIds,
       })
       resetForm()
       onClose()
@@ -125,7 +123,6 @@ export function CreatePostDialog({
           />
           <TextField
             label="Содержание"
-            required
             fullWidth
             multiline
             minRows={4}

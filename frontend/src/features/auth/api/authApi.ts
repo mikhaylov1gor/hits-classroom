@@ -7,7 +7,6 @@ import type {
   User,
 } from '../model/types'
 
-// Use relative base URL so that webpack devServer proxy can forward to backend on port 8080
 const API_BASE = '/api/v1'
 
 const jsonHeaders = {

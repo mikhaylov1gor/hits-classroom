@@ -35,7 +35,6 @@ function CourseIllustration() {
       className="w-full h-full max-w-[280px] max-h-[140px] opacity-90"
       sx={{ flexShrink: 0 }}
     >
-      {/* Books */}
       <rect x="100" y="50" width="50" height="60" rx="2" fill="#FFEB3B" opacity="0.9" />
       <rect x="98" y="52" width="8" height="8" rx="1" fill="#fff" opacity="0.8" />
       <rect x="98" y="64" width="8" height="8" rx="1" fill="#fff" opacity="0.8" />
@@ -43,7 +42,6 @@ function CourseIllustration() {
       <line x1="125" y1="60" x2="155" y2="60" stroke="#78909C" strokeWidth="1" />
       <line x1="125" y1="70" x2="155" y2="70" stroke="#78909C" strokeWidth="1" />
       <line x1="125" y1="80" x2="145" y2="80" stroke="#78909C" strokeWidth="1" />
-      {/* Earbuds */}
       <ellipse cx="60" cy="70" rx="18" ry="12" fill="#fff" opacity="0.95" />
       <ellipse cx="60" cy="70" rx="12" ry="8" fill="#E0E0E0" />
       <ellipse cx="140" cy="70" rx="18" ry="12" fill="#fff" opacity="0.95" />
