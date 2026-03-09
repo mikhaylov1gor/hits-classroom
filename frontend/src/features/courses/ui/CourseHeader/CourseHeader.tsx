@@ -28,7 +28,6 @@ export function CourseHeader({ course, onCourseUpdated }: CourseHeaderProps) {
       onCourseUpdated(updated)
       setIsEditing(false)
     } catch {
-      // TODO: show error
     } finally {
       setRenameLoading(false)
     }

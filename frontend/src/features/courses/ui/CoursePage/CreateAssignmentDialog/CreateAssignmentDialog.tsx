@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
-import { createAssignment } from '../../../api/coursesApi'
+import { createAssignment, uploadFiles } from '../../../api/coursesApi'
 
 type CreateAssignmentDialogProps = {
   open: boolean
@@ -30,6 +30,7 @@ export function CreateAssignmentDialog({
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [deadline, setDeadline] = useState('')
+  const [maxGrade, setMaxGrade] = useState<string>('100')
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,6 +40,7 @@ export function CreateAssignmentDialog({
     setTitle('')
     setContent('')
     setDeadline('')
+    setMaxGrade('100')
     setFiles([])
     setError(null)
   }
@@ -65,13 +67,26 @@ export function CreateAssignmentDialog({
       return
     }
 
+    const parsedMaxGrade = maxGrade.trim() ? parseInt(maxGrade, 10) : 100
+    if (isNaN(parsedMaxGrade) || parsedMaxGrade < 1 || parsedMaxGrade > 1000) {
+      setError('Максимальный балл должен быть от 1 до 1000')
+      return
+    }
+
     setLoading(true)
     try {
+      const fileIds = files.length > 0 ? await uploadFiles(files) : []
+      const trimmedDeadline = deadline.trim()
+      const deadlineIso =
+        trimmedDeadline && !isNaN(new Date(trimmedDeadline).getTime())
+          ? new Date(trimmedDeadline).toISOString()
+          : undefined
       await createAssignment(courseId, {
         title: trimmedTitle,
         body: trimmedContent,
-        deadline: deadline.trim() || undefined,
-        file_ids: [],
+        deadline: deadlineIso,
+        max_grade: parsedMaxGrade,
+        file_ids: fileIds,
       })
       resetForm()
       onClose()
@@ -136,6 +151,16 @@ export function CreateAssignmentDialog({
             onChange={(e) => setDeadline(e.target.value)}
             InputLabelProps={{ shrink: true }}
             inputProps={{ 'aria-label': 'Дедлайн' }}
+          />
+          <TextField
+            label="Максимальный балл"
+            fullWidth
+            size="small"
+            type="number"
+            value={maxGrade}
+            onChange={(e) => setMaxGrade(e.target.value)}
+            inputProps={{ min: 1, max: 1000, 'aria-label': 'Максимальный балл' }}
+            helperText="Шкала оценки (по умолчанию 100)"
           />
           <Box>
             <input

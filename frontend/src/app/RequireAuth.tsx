@@ -26,8 +26,6 @@ export function RequireAuth({ children }: RequireAuthProps) {
     }
   }, [user, hasCheckedServer, serverUser, isLoading, setUserFromServer])
 
-  // Пока разбираемся, есть ли сессия на сервере — ничего не рендерим,
-  // чтобы не мигать редиректом на /login.
   if (!user && !hasCheckedServer) {
     return null
   }

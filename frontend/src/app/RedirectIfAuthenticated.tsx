@@ -29,7 +29,6 @@ export function RedirectIfAuthenticated({ children }: RedirectIfAuthenticatedPro
     return <Navigate to="/" replace />
   }
 
-  // Пока проверяем сессию на сервере — не показываем форму, чтобы не мигать
   if (!hasCheckedServer) {
     return null
   }

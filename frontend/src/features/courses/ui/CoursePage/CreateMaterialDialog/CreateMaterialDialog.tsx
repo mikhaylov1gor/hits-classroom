@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
-import { createMaterial } from '../../../api/coursesApi'
+import { createMaterial, uploadFiles } from '../../../api/coursesApi'
 
 type CreateMaterialDialogProps = {
   open: boolean
@@ -60,10 +60,11 @@ export function CreateMaterialDialog({
 
     setLoading(true)
     try {
+      const fileIds = files.length > 0 ? await uploadFiles(files) : []
       await createMaterial(courseId, {
         title: trimmedTitle,
         body: content.trim() || undefined,
-        file_ids: [],
+        file_ids: fileIds,
       })
       resetForm()
       onClose()

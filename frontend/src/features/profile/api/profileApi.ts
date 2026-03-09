@@ -1,6 +1,5 @@
 import type { User } from '../../auth/model/types'
 
-// Use relative base URL so that webpack devServer proxy can forward to backend on port 8080
 const API_BASE = '/api/v1'
 const AUTH_STORAGE_KEY = 'hits-classroom-auth'
 

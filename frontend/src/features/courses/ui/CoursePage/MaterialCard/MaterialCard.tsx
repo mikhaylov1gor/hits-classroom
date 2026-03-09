@@ -7,8 +7,6 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  Menu,
-  MenuItem,
   TextField,
   Typography,
 } from '@mui/material'
@@ -16,13 +14,11 @@ import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
 import CloseIcon from '@mui/icons-material/Close'
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
-import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
 import LinkIcon from '@mui/icons-material/Link'
-import MoreVertIcon from '@mui/icons-material/MoreVert'
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
 import {
-  listPostComments,
-  createPostComment,
+  listMaterialComments,
+  createMaterialComment,
   uploadFiles,
 } from '../../../api/coursesApi'
 import { useAuth } from '../../../../auth/model/AuthContext'
@@ -35,11 +31,12 @@ import {
   getNameByUserId,
 } from '../../../model/types'
 
-type PostCardProps = {
+type MaterialCardProps = {
   item: FeedItem
   courseId: string
   authorName: string
   authorInitial: string
+  onClick?: () => void
   courseMembers?: Member[]
 }
 
@@ -235,13 +232,14 @@ function CommentItem({
   )
 }
 
-export function PostCard({
+export function MaterialCard({
   item,
   courseId,
   authorName,
   authorInitial,
+  onClick,
   courseMembers = [],
-}: PostCardProps) {
+}: MaterialCardProps) {
   const { user: authUser } = useAuth()
   const getName = (userId: string, fallback?: { first_name?: string; last_name?: string } | null) =>
     getNameByUserId(courseMembers, userId, fallback)
@@ -253,13 +251,12 @@ export function PostCard({
   const [submittingComment, setSubmittingComment] = useState(false)
   const [showAddCommentInput, setShowAddCommentInput] = useState(false)
   const [commentsModalOpen, setCommentsModalOpen] = useState(false)
-  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!courseId) return
     setLoadingComments(true)
-    listPostComments(courseId, item.id)
+    listMaterialComments(courseId, item.id)
       .then(setComments)
       .catch(() => setComments([]))
       .finally(() => setLoadingComments(false))
@@ -273,7 +270,7 @@ export function PostCard({
     setSubmittingComment(true)
     try {
       const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
-      await createPostComment(courseId, item.id, {
+      await createMaterialComment(courseId, item.id, {
         body: trimmed,
         parent_id: replyToParentId,
         file_ids: fileIds,
@@ -282,7 +279,7 @@ export function PostCard({
       setCommentFiles([])
       setReplyToParentId(null)
       setShowAddCommentInput(false)
-      const list = await listPostComments(courseId, item.id)
+      const list = await listMaterialComments(courseId, item.id)
       setComments(list)
     } catch {
     } finally {
@@ -309,12 +306,23 @@ export function PostCard({
   const hasComments = totalCommentsCount > 0
 
   return (
-    <Box className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+    <Box
+      className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden"
+      sx={
+        onClick
+          ? {
+              cursor: 'pointer',
+              '&:hover': { borderColor: 'primary.main', boxShadow: 1 },
+            }
+          : undefined
+      }
+      onClick={onClick}
+    >
       <Box className="p-4">
         <Box className="flex items-start gap-3">
           <Avatar
             sx={{
-              bgcolor: 'secondary.main',
+              bgcolor: 'info.main',
               width: 40,
               height: 40,
               fontSize: '1rem',
@@ -335,36 +343,6 @@ export function PostCard({
                 <Typography variant="caption" color="text.secondary">
                   {displayDate}
                 </Typography>
-                <IconButton
-                  size="small"
-                  aria-label="Меню"
-                  sx={{ p: 0.5 }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setMenuAnchor(e.currentTarget)
-                  }}
-                >
-                  <MoreVertIcon fontSize="small" />
-                </IconButton>
-                <Menu
-                  anchorEl={menuAnchor}
-                  open={Boolean(menuAnchor)}
-                  onClose={() => setMenuAnchor(null)}
-                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MenuItem
-                    onClick={() => {
-                      const url = `${window.location.origin}/course/${courseId}?tab=posts#post-${item.id}`
-                      navigator.clipboard.writeText(url)
-                      setMenuAnchor(null)
-                    }}
-                  >
-                    <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
-                    Копировать ссылку
-                  </MenuItem>
-                </Menu>
               </Box>
             </Box>
             <Typography
@@ -378,144 +356,156 @@ export function PostCard({
         </Box>
       </Box>
 
-      <Box className="px-4 pb-4 pt-0 border-t border-slate-100">
-          {attachments.length > 0 && (
-            <Box className="flex flex-col gap-2 mb-4">
-              <Typography variant="subtitle2" className="text-slate-600">
-                Вложения
-              </Typography>
-              <Box className="flex flex-wrap gap-2">
-                {attachments.map((a) => (
-                  <Box
-                    key={a.id}
-                    className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
-                  >
-                    <InsertDriveFileOutlinedIcon fontSize="small" color="action" />
-                    <Typography variant="body2" className="font-medium">
-                      {a.name}
-                    </Typography>
-                    {a.url && (
-                      <IconButton
-                        size="small"
-                        component="a"
-                        href={a.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`Открыть ${a.name}`}
-                      >
-                        <LinkIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Box>
-                ))}
-              </Box>
+      <Box
+        className="px-4 pb-4 pt-0 border-t border-slate-100"
+        onClick={(e) => onClick && e.stopPropagation()}
+      >
+        {attachments.length > 0 && (
+          <Box className="flex flex-col gap-2 mb-4">
+            <Typography variant="subtitle2" className="text-slate-600">
+              Вложения
+            </Typography>
+            <Box className="flex flex-wrap gap-2">
+              {attachments.map((a) => (
+                <Box
+                  key={a.id}
+                  className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
+                >
+                  <InsertDriveFileOutlinedIcon fontSize="small" color="action" />
+                  <Typography variant="body2" className="font-medium">
+                    {a.name}
+                  </Typography>
+                  {a.url && (
+                    <IconButton
+                      size="small"
+                      component="a"
+                      href={a.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Открыть ${a.name}`}
+                    >
+                      <LinkIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
+              ))}
             </Box>
-          )}
+          </Box>
+        )}
 
-          <Box className="border-t border-slate-200 pt-4">
-            {loadingComments ? (
-              <Typography variant="body2" color="text.secondary">
-                Загрузка…
-              </Typography>
-            ) : !hasComments ? (
-              <>
-                {!showAddCommentInput ? (
-                  <Box
-                    component="button"
-                    className="flex items-center gap-2 border-0 bg-transparent p-0 cursor-pointer text-left ml-4"
-                    onClick={() => setShowAddCommentInput(true)}
-                  >
-                    <ChatBubbleOutlineOutlinedIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-                    <Typography variant="body2" color="primary" className="font-medium">
-                      Добавить комментарий
-                    </Typography>
-                  </Box>
-                ) : (
-                  <CommentForm
-                    commentText={commentText}
-                    setCommentText={setCommentText}
-                    commentFiles={commentFiles}
-                    handleFileChange={handleFileChange}
-                    removeCommentFile={removeCommentFile}
-                    handleSubmitComment={handleSubmitComment}
-                    submittingComment={submittingComment}
-                    fileInputRef={fileInputRef}
-                  />
-                )}
-              </>
-            ) : (
-              <>
+        <Box
+          className="border-t border-slate-200 pt-4"
+          onClick={(e) => onClick && e.stopPropagation()}
+        >
+          {loadingComments ? (
+            <Typography variant="body2" color="text.secondary">
+              Загрузка…
+            </Typography>
+          ) : !hasComments ? (
+            <>
+              {!showAddCommentInput ? (
                 <Box
                   component="button"
                   className="flex items-center gap-2 border-0 bg-transparent p-0 cursor-pointer text-left ml-4"
-                  onClick={() => setCommentsModalOpen(true)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setShowAddCommentInput(true)
+                  }}
                 >
                   <ChatBubbleOutlineOutlinedIcon sx={{ color: 'primary.main', fontSize: 20 }} />
                   <Typography variant="body2" color="primary" className="font-medium">
-                    Комментарии ({totalCommentsCount})
+                    Добавить комментарий
                   </Typography>
                 </Box>
-                <Dialog
-                  open={commentsModalOpen}
-                  onClose={() => {
-                    setCommentsModalOpen(false)
-                    setReplyToParentId(null)
-                  }}
-                  maxWidth="sm"
-                  fullWidth
-                  aria-labelledby="comments-dialog-title"
-                >
-                  <DialogTitle id="comments-dialog-title">Комментарии</DialogTitle>
-                  <DialogContent className="flex flex-col gap-4">
-                    <Box className="flex flex-col gap-3">
-                      {comments.map((c) => (
-                        <CommentItem
-                          key={c.id}
-                          comment={c}
-                          formatDate={formatDate}
-                          onReply={(id) => setReplyToParentId(id)}
-                          onCancelReply={() => {
-                    setReplyToParentId(null)
-                    setCommentText('')
-                    setCommentFiles([])
-                  }}
-                          depth={0}
-                          replyToParentId={replyToParentId}
-                          authUserId={authUser?.id}
-                          renderReplyForm={() => (
-                            <CommentForm
-                              commentText={commentText}
-                              setCommentText={setCommentText}
-                              commentFiles={commentFiles}
-                              handleFileChange={handleFileChange}
-                              removeCommentFile={removeCommentFile}
-                              handleSubmitComment={handleSubmitComment}
-                              submittingComment={submittingComment}
-                              fileInputRef={fileInputRef}
-                            />
-                          )}
-                          getName={getName}
-                        />
-                      ))}
-                    </Box>
-                    {!replyToParentId && (
-                      <CommentForm
-                        commentText={commentText}
-                        setCommentText={setCommentText}
-                        commentFiles={commentFiles}
-                        handleFileChange={handleFileChange}
-                        removeCommentFile={removeCommentFile}
-                        handleSubmitComment={handleSubmitComment}
-                        submittingComment={submittingComment}
-                        fileInputRef={fileInputRef}
+              ) : (
+                <CommentForm
+                  commentText={commentText}
+                  setCommentText={setCommentText}
+                  commentFiles={commentFiles}
+                  handleFileChange={handleFileChange}
+                  removeCommentFile={removeCommentFile}
+                  handleSubmitComment={handleSubmitComment}
+                  submittingComment={submittingComment}
+                  fileInputRef={fileInputRef}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <Box
+                component="button"
+                className="flex items-center gap-2 border-0 bg-transparent p-0 cursor-pointer text-left ml-4"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setCommentsModalOpen(true)
+                }}
+              >
+                <ChatBubbleOutlineOutlinedIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                <Typography variant="body2" color="primary" className="font-medium">
+                  Комментарии ({totalCommentsCount})
+                </Typography>
+              </Box>
+              <Dialog
+                open={commentsModalOpen}
+                onClose={() => {
+                  setCommentsModalOpen(false)
+                  setReplyToParentId(null)
+                }}
+                maxWidth="sm"
+                fullWidth
+                aria-labelledby="material-comments-dialog-title"
+              >
+                <DialogTitle id="material-comments-dialog-title">Комментарии</DialogTitle>
+                <DialogContent className="flex flex-col gap-4">
+                  <Box className="flex flex-col gap-3">
+                    {comments.map((c) => (
+                      <CommentItem
+                        key={c.id}
+                        comment={c}
+                        formatDate={formatDate}
+                        onReply={(id) => setReplyToParentId(id)}
+                        onCancelReply={() => {
+                        setReplyToParentId(null)
+                        setCommentText('')
+                        setCommentFiles([])
+                      }}
+                        depth={0}
+                        replyToParentId={replyToParentId}
+                        authUserId={authUser?.id}
+                        renderReplyForm={() => (
+                          <CommentForm
+                            commentText={commentText}
+                            setCommentText={setCommentText}
+                            commentFiles={commentFiles}
+                            handleFileChange={handleFileChange}
+                            removeCommentFile={removeCommentFile}
+                            handleSubmitComment={handleSubmitComment}
+                            submittingComment={submittingComment}
+                            fileInputRef={fileInputRef}
+                          />
+                        )}
+                        getName={getName}
                       />
-                    )}
-                  </DialogContent>
-                </Dialog>
-              </>
-            )}
-          </Box>
+                    ))}
+                  </Box>
+                  {!replyToParentId && (
+                    <CommentForm
+                      commentText={commentText}
+                      setCommentText={setCommentText}
+                      commentFiles={commentFiles}
+                      handleFileChange={handleFileChange}
+                      removeCommentFile={removeCommentFile}
+                      handleSubmitComment={handleSubmitComment}
+                      submittingComment={submittingComment}
+                      fileInputRef={fileInputRef}
+                    />
+                  )}
+                </DialogContent>
+              </Dialog>
+            </>
+          )}
         </Box>
+      </Box>
     </Box>
   )
 }

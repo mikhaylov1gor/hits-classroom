@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -11,22 +11,26 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined'
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
+import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import { listComments, listSubmissions, createComment } from '../../../api/coursesApi'
+import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
+import {
+  listAssignmentComments,
+  createAssignmentComment,
+  uploadFiles,
+} from '../../../api/coursesApi'
 import { useAuth } from '../../../../auth/model/AuthContext'
 import {
   type Comment,
   type FeedItem,
-  type Submission,
-  filterStudentComments,
-  filterTeacherDialogComments,
+  type Member,
+  countCommentsRecursively,
+  getGeneralComments,
+  getNameByUserId,
 } from '../../../model/types'
-
-type Member = { user_id: string; role: string }
 
 type AssignmentCardProps = {
   item: FeedItem
@@ -51,6 +55,96 @@ function formatDateTime(dateStr?: string): string {
   } catch {
     return ''
   }
+}
+
+function GeneralCommentItem({
+  comment,
+  depth,
+  replyToParentId,
+  onReply,
+  onCancelReply,
+  renderReplyForm,
+  courseMembers,
+  authUserId,
+  formatDateTime,
+}: {
+  comment: Comment
+  depth: number
+  replyToParentId: string | null
+  onReply: (parentId: string) => void
+  onCancelReply: () => void
+  renderReplyForm: (parentId: string) => React.ReactNode
+  courseMembers: Member[]
+  authUserId?: string
+  formatDateTime: (s?: string) => string
+}) {
+  const authorName = getNameByUserId(courseMembers, comment.user_id, comment.author)
+  const isReplyingToThis = replyToParentId === comment.id
+  const isOwn = authUserId && comment.user_id === authUserId
+  return (
+    <Box className="flex flex-col gap-1" sx={{ ml: depth * 2 }}>
+      <Box
+        className="p-3 rounded-lg"
+        sx={{
+          bgcolor: 'grey.50',
+          border: '1px solid',
+          borderColor: 'grey.200',
+          ...(isOwn && {
+            borderLeft: '4px solid',
+            borderLeftColor: 'primary.main',
+            pl: 2.5,
+          }),
+        }}
+      >
+        <Typography variant="body2" className="text-slate-700">
+          {comment.body || '(без текста)'}
+        </Typography>
+        <Box className="flex items-center gap-2 mt-1 flex-wrap">
+          <Typography variant="caption" color="text.secondary">
+            {authorName} · {formatDateTime(comment.created_at)}
+          </Typography>
+          <Button
+            size="small"
+            variant="text"
+            startIcon={<ReplyOutlinedIcon sx={{ fontSize: 14 }} />}
+            onClick={() => onReply(comment.id)}
+            sx={{ minWidth: 'auto', p: 0, fontSize: '0.75rem' }}
+          >
+            Ответить
+          </Button>
+        </Box>
+      </Box>
+      {isReplyingToThis && (
+        <Box className="mt-2 pl-2" sx={{ borderLeft: '2px solid', borderColor: 'primary.light' }}>
+          <Typography variant="caption" color="text.secondary" className="block mb-1">
+            Ответ на комментарий {authorName}
+          </Typography>
+          {renderReplyForm(comment.id)}
+          <Button size="small" variant="text" onClick={onCancelReply} sx={{ mt: 0.5 }}>
+            Отмена
+          </Button>
+        </Box>
+      )}
+      {comment.replies && comment.replies.length > 0 && (
+        <Box className="flex flex-col gap-2 mt-1">
+          {comment.replies.map((r) => (
+            <GeneralCommentItem
+              key={r.id}
+              comment={r}
+              depth={depth + 1}
+              replyToParentId={replyToParentId}
+              onReply={onReply}
+              onCancelReply={onCancelReply}
+              renderReplyForm={renderReplyForm}
+              courseMembers={courseMembers}
+              authUserId={authUserId}
+              formatDateTime={formatDateTime}
+            />
+          ))}
+        </Box>
+      )}
+    </Box>
+  )
 }
 
 function formatDate(dateStr?: string): string {
@@ -81,49 +175,46 @@ export function AssignmentCard({
 }: AssignmentCardProps) {
   const { user: authUser } = useAuth()
   const [comments, setComments] = useState<Comment[]>([])
-  const [submissions, setSubmissions] = useState<Submission[]>([])
   const [loadingComments, setLoadingComments] = useState(false)
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [commentsModalOpen, setCommentsModalOpen] = useState(false)
-  const [selectedDialogUserId, setSelectedDialogUserId] = useState<string | null>(null)
   const [commentText, setCommentText] = useState('')
   const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [submittingComment, setSubmittingComment] = useState(false)
-  const [replyToStudent, setReplyToStudent] = useState<string | null>(null)
+  const [replyToParentId, setReplyToParentId] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!courseId) return
     setLoadingComments(true)
-    Promise.all([
-      listComments(courseId, item.id),
-      isTeacher ? listSubmissions(courseId, item.id) : Promise.resolve([] as Submission[]),
-    ])
-      .then(([cm, sub]) => {
-        setComments(cm)
-        setSubmissions(sub)
-      })
-      .catch(() => {
-        setComments([])
-        setSubmissions([])
-      })
+    listAssignmentComments(courseId, item.id)
+      .then(setComments)
+      .catch(() => setComments([]))
       .finally(() => setLoadingComments(false))
-  }, [item.id, courseId, isTeacher])
+  }, [item.id, courseId])
 
-  const handleAddComment = async (e: React.FormEvent) => {
+  const handleAddComment = async (
+    e: React.FormEvent,
+    opts?: { isGeneral?: boolean; parent_id?: string | null },
+  ) => {
     e.preventDefault()
     const trimmed = commentText.trim()
     if (!trimmed || !courseId || submittingComment) return
     setSubmittingComment(true)
     try {
-      const payload: { body: string; file_ids: string[]; user_id?: string } = {
-        body: trimmed,
-        file_ids: [],
-      }
-      if (replyToStudent) payload.user_id = replyToStudent
-      const created = await createComment(courseId, item.id, payload)
-      setComments((prev) => [...prev, created])
+      const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
+      const payload: {
+        body: string
+        file_ids: string[]
+        parent_id?: string | null
+      } = { body: trimmed, file_ids: fileIds }
+      if (opts?.parent_id != null) payload.parent_id = opts.parent_id
+      const created = await createAssignmentComment(courseId, item.id, payload)
+      const refreshed = await listAssignmentComments(courseId, item.id)
+      setComments(refreshed)
       setCommentText('')
       setCommentFiles([])
+      setReplyToParentId(null)
     } finally {
       setSubmittingComment(false)
     }
@@ -137,18 +228,12 @@ export function AssignmentCard({
 
   const handleCloseCommentsModal = () => {
     setCommentsModalOpen(false)
-    setSelectedDialogUserId(null)
-    setReplyToStudent(null)
+    setReplyToParentId(null)
   }
 
   const displayDate = formatDate(item.created_at)
-  const teacherIds = courseMembers
-    .filter((m) => m.role === 'teacher' || m.role === 'owner')
-    .map((m) => m.user_id)
-  const myCommentsCount = isTeacher
-    ? comments.length
-    : filterStudentComments(comments, authUser?.id, teacherIds).length
-  const hasComments = myCommentsCount > 0
+  const generalCount = countCommentsRecursively(getGeneralComments(comments))
+  const hasComments = generalCount > 0
 
   return (
     <Box className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -188,7 +273,7 @@ export function AssignmentCard({
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   {displayDate}
-                  {item.deadline && ` · Дедлайн: ${formatDate(item.deadline)}`}
+                  {item.deadline && ` · Дедлайн: ${formatDateTime(item.deadline)}`}
                 </Typography>
               </Box>
               <IconButton
@@ -219,20 +304,14 @@ export function AssignmentCard({
               className="flex items-center gap-2 border-0 bg-transparent p-0 cursor-pointer text-left w-full"
               onClick={(e) => {
                 e.stopPropagation()
-                if (!isTeacher) {
-                  const teacherIds = courseMembers
-                    .filter((m) => m.role === 'teacher' || m.role === 'owner')
-                    .map((m) => m.user_id)
-                  setSelectedDialogUserId(teacherIds[0] ?? 'teacher')
-                }
                 setCommentsModalOpen(true)
               }}
             >
               <ChatBubbleOutlineOutlinedIcon sx={{ color: 'primary.main', fontSize: 20 }} />
               <Typography variant="body2" color="primary" className="font-medium">
                 {hasComments
-                  ? `Комментарии (${myCommentsCount})`
-                  : 'Комментарии с преподавателем'}
+                  ? `Комментарии (${generalCount})`
+                  : 'Общие комментарии'}
               </Typography>
             </Box>
           )}
@@ -254,6 +333,16 @@ export function AssignmentCard({
         >
           Открыть задание
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            const url = `${window.location.origin}/course/${courseId}/assignment/${item.id}`
+            navigator.clipboard.writeText(url)
+            setMenuAnchor(null)
+          }}
+        >
+          <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
+          Копировать ссылку
+        </MenuItem>
       </Menu>
 
       <Dialog
@@ -261,238 +350,134 @@ export function AssignmentCard({
         onClose={handleCloseCommentsModal}
         maxWidth="sm"
         fullWidth
-        PaperProps={{ sx: selectedDialogUserId ? { maxHeight: '80vh' } : undefined }}
+        PaperProps={{ sx: { maxHeight: '80vh' } }}
         aria-labelledby="assignment-comments-dialog-title"
       >
-        <DialogTitle
-          id="assignment-comments-dialog-title"
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-          }}
-        >
-          {selectedDialogUserId ? (
-            <>
-              {isTeacher && (
-                <IconButton
-                  size="small"
-                  onClick={() => {
-                    setSelectedDialogUserId(null)
-                    setReplyToStudent(null)
-                  }}
-                  aria-label="Назад"
-                >
-                  <ArrowBackIcon />
-                </IconButton>
-              )}
-              {(() => {
-                if (isTeacher) {
-                  const sub = submissions.find((s) => s.user_id === selectedDialogUserId)
-                  return sub?.author
-                    ? `${sub.author.first_name} ${sub.author.last_name}`.trim()
-                    : 'Студент'
-                }
-                return `Комментарии: ${item.title}`
-              })()}
-            </>
-          ) : (
-            `Комментарии: ${item.title}`
-          )}
+        <DialogTitle id="assignment-comments-dialog-title">
+          Комментарии: {item.title}
         </DialogTitle>
-        <DialogContent dividers={!!selectedDialogUserId} className="flex flex-col gap-4">
-          {!selectedDialogUserId ? (
-            (() => {
-              const teacherIds = courseMembers
-                .filter((m) => m.role === 'teacher' || m.role === 'owner')
-                .map((m) => m.user_id)
-              const studentIds = [
-                ...new Set([
-                  ...comments.map((c) => c.user_id).filter((id) => !teacherIds.includes(id)),
-                  ...submissions.map((s) => s.user_id),
-                ]),
-              ]
-                const dialogs = studentIds.map((uid) => {
-                  const relevant = filterTeacherDialogComments(
-                    comments,
-                    authUser?.id,
-                    uid,
+        <DialogContent dividers className="flex flex-col gap-4">
+          <Box className="flex flex-col gap-4">
+            <Typography variant="subtitle2" className="text-slate-600 mb-2">
+              Общие комментарии
+            </Typography>
+                {(() => {
+                  const generalComments = getGeneralComments(comments).sort(
+                    (a, b) =>
+                      new Date(a.created_at ?? 0).getTime() -
+                      new Date(b.created_at ?? 0).getTime(),
                   )
-                const first = [...relevant].sort(
-                  (a, b) =>
-                    new Date(a.created_at ?? 0).getTime() -
-                    new Date(b.created_at ?? 0).getTime(),
-                )[0]
-                const sub = submissions.find((s) => s.user_id === uid)
-                const commentAuthor = comments.find((c) => c.user_id === uid)?.author
-                const name = sub?.author
-                  ? `${sub.author.first_name} ${sub.author.last_name}`.trim()
-                  : commentAuthor
-                    ? `${commentAuthor.first_name} ${commentAuthor.last_name}`.trim()
-                    : 'Студент'
-                return { uid, name, firstComment: first }
-              })
-              return dialogs.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  Нет диалогов
-                </Typography>
-              ) : (
-                <Box className="flex flex-col gap-2">
-                  {dialogs.map((d) => (
+                  const renderReplyForm = (parentId: string) => (
                     <Box
-                      key={d.uid}
-                      component="button"
-                      type="button"
-                      className="w-full text-left border rounded-lg p-3 hover:bg-slate-50 transition-colors cursor-pointer"
-                      sx={{ borderColor: 'grey.300' }}
-                      onClick={() => {
-                        setSelectedDialogUserId(d.uid)
-                        setReplyToStudent(d.uid)
-                      }}
+                      component="form"
+                      onSubmit={(e) => handleAddComment(e, { parent_id: parentId })}
+                      className="flex flex-col gap-2"
                     >
-                      <Typography variant="subtitle2" className="font-medium text-slate-900">
-                        {d.name}
-                      </Typography>
-                      {d.firstComment && (
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          className="mt-0.5 line-clamp-2"
+                      <TextField
+                        label="Текст ответа"
+                        fullWidth
+                        multiline
+                        minRows={2}
+                        size="small"
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        inputProps={{ 'aria-label': 'Текст комментария' }}
+                      />
+                      <Box className="flex items-center gap-2">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={handleCommentFileChange}
+                          aria-label="Прикрепить файл"
+                        />
+                        <Button
+                          component="span"
+                          variant="outlined"
+                          size="small"
+                          startIcon={<AttachFileOutlinedIcon />}
+                          onClick={() => fileInputRef.current?.click()}
                         >
-                          {d.firstComment.body || '(без текста)'}
-                        </Typography>
+                          Файл
+                        </Button>
+                        <Button
+                          type="submit"
+                          variant="contained"
+                          size="small"
+                          disabled={submittingComment || !commentText.trim()}
+                        >
+                          Отправить
+                        </Button>
+                      </Box>
+                    </Box>
+                  )
+                  return (
+                    <Box className="flex flex-col gap-2">
+                      {generalComments.map((c) => (
+                        <GeneralCommentItem
+                          key={c.id}
+                          comment={c}
+                          depth={0}
+                          replyToParentId={replyToParentId}
+                          onReply={setReplyToParentId}
+                          onCancelReply={() => setReplyToParentId(null)}
+                          renderReplyForm={renderReplyForm}
+                          courseMembers={courseMembers}
+                          authUserId={authUser?.id}
+                          formatDateTime={formatDateTime}
+                        />
+                      ))}
+                      {!replyToParentId && (
+                        <Box
+                          component="form"
+                          onSubmit={(e) => handleAddComment(e)}
+                          className="flex flex-col gap-2 mt-2"
+                        >
+                          <TextField
+                            label="Написать комментарий"
+                            fullWidth
+                            multiline
+                            minRows={2}
+                            size="small"
+                            value={commentText}
+                            onChange={(e) => setCommentText(e.target.value)}
+                            placeholder="Введите комментарий..."
+                            inputProps={{ 'aria-label': 'Текст комментария' }}
+                          />
+                          <Box className="flex items-center gap-2">
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              multiple
+                              className="hidden"
+                              onChange={handleCommentFileChange}
+                              aria-label="Прикрепить файл"
+                            />
+                            <Button
+                              component="span"
+                              variant="outlined"
+                              size="small"
+                              startIcon={<AttachFileOutlinedIcon />}
+                              onClick={() => fileInputRef.current?.click()}
+                            >
+                              Файл
+                            </Button>
+                            <Button
+                              type="submit"
+                              variant="contained"
+                              size="small"
+                              disabled={submittingComment || !commentText.trim()}
+                            >
+                              Отправить
+                            </Button>
+                          </Box>
+                        </Box>
                       )}
                     </Box>
-                  ))}
-                </Box>
-              )
-            })()
-          ) : (
-            <>
-              <Box className="flex flex-col gap-2">
-                {(() => {
-                  const teacherIds = courseMembers
-                    .filter((m) => m.role === 'teacher' || m.role === 'owner')
-                    .map((m) => m.user_id)
-                  const dialogComments =
-                    isTeacher && selectedDialogUserId
-                      ? filterTeacherDialogComments(
-                          comments,
-                          authUser?.id,
-                          selectedDialogUserId,
-                        ).sort(
-                          (a, b) =>
-                            new Date(a.created_at ?? 0).getTime() -
-                            new Date(b.created_at ?? 0).getTime(),
-                        )
-                      : filterStudentComments(
-                          comments,
-                          authUser?.id,
-                          teacherIds,
-                        ).sort(
-                            (a, b) =>
-                              new Date(a.created_at ?? 0).getTime() -
-                              new Date(b.created_at ?? 0).getTime(),
-                          )
-                  return dialogComments.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">
-                      Нет сообщений
-                    </Typography>
-                  ) : (
-                    dialogComments.map((c) => (
-                      <Box
-                        key={c.id}
-                        sx={{
-                          ml: c.user_id === authUser?.id ? 2 : 0,
-                          mr: c.user_id === authUser?.id ? 0 : 2,
-                          p: 1.5,
-                          borderRadius: 1,
-                          bgcolor:
-                            c.user_id === authUser?.id ? 'primary.main' : 'grey.100',
-                          color:
-                            c.user_id === authUser?.id
-                              ? 'primary.contrastText'
-                              : 'text.primary',
-                          border: '1px solid',
-                          borderColor:
-                            c.user_id === authUser?.id ? 'primary.dark' : 'grey.300',
-                        }}
-                      >
-                        <Typography variant="body2" sx={{ color: 'inherit' }}>
-                          {c.body || '(без текста)'}
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            color:
-                              c.user_id === authUser?.id
-                                ? 'primary.contrastText'
-                                : 'text.secondary',
-                            opacity: 0.9,
-                          }}
-                        >
-                          {c.author
-                            ? `${c.author.first_name} ${c.author.last_name}`.trim()
-                            : 'Участник'}{' '}
-                          · {formatDateTime(c.created_at)}
-                        </Typography>
-                      </Box>
-                    ))
                   )
                 })()}
-              </Box>
-              <Box
-                component="form"
-                onSubmit={handleAddComment}
-                className="flex flex-col gap-2 mt-2"
-              >
-                <TextField
-                  label="Текст ответа"
-                  fullWidth
-                  multiline
-                  minRows={2}
-                  size="small"
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  inputProps={{ 'aria-label': 'Текст комментария' }}
-                />
-                <Box className="flex items-center gap-2">
-                  <input
-                    type="file"
-                    multiple
-                    className="hidden"
-                    id={`comment-file-${item.id}`}
-                    onChange={handleCommentFileChange}
-                    aria-label="Прикрепить файл"
-                  />
-                  <Button
-                    component="span"
-                    variant="outlined"
-                    size="small"
-                    startIcon={<AttachFileOutlinedIcon />}
-                    onClick={() =>
-                      document.getElementById(`comment-file-${item.id}`)?.click()
-                    }
-                  >
-                    Файл
-                  </Button>
-                  {commentFiles.length > 0 && (
-                    <Typography variant="caption" color="text.secondary">
-                      {commentFiles.map((f) => f.name).join(', ')}
-                    </Typography>
-                  )}
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    size="small"
-                    disabled={submittingComment || !commentText.trim()}
-                  >
-                    Отправить
-                  </Button>
-                </Box>
-              </Box>
-            </>
-          )}
+          </Box>
         </DialogContent>
       </Dialog>
     </Box>

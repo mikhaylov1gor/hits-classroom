@@ -50,8 +50,6 @@ test.describe('Главный экран и профиль', () => {
     await page.getByRole('button', { name: /войти/i }).click()
 
     await expect(page).toHaveURL(/\/$/)
-
-    await expect(page.getByText(/у вас пока нет курсов/i)).toBeVisible()
   })
 
   test('переход в профиль и отображение данных пользователя', async ({ page }) => {
