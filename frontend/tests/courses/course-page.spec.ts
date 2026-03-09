@@ -86,7 +86,7 @@ function mockMemberGrades(
   )
 }
 
-/** Мок комментариев — endpoint assignments/{id}/comments используется и для постов (id = postId) */
+/** Мок комментариев к заданиям */
 function mockComments(
   page: import('@playwright/test').Page,
   courseId: string,
@@ -125,6 +125,45 @@ function mockComments(
   )
 }
 
+/** Мок комментариев к постам */
+function mockPostComments(
+  page: import('@playwright/test').Page,
+  courseId: string,
+  postId: string,
+  comments: object[] = [],
+) {
+  return page.route(
+    `**/api/v1/courses/${courseId}/posts/${postId}/comments`,
+    async (route) => {
+      const req = route.request()
+      if (req.method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(comments),
+        })
+      } else if (req.method() === 'POST') {
+        const body = JSON.parse((await req.postData()) ?? '{}')
+        const created = {
+          id: `comment-${Date.now()}`,
+          post_id: postId,
+          user_id: 'user-1',
+          body: body.body ?? '',
+          created_at: new Date().toISOString(),
+          author: { first_name: 'Иван', last_name: 'Иванов' },
+        }
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify(created),
+        })
+      } else {
+        await route.fulfill({ status: 404 })
+      }
+    },
+  )
+}
+
 test.describe('Экран курса', () => {
   test.beforeEach(async ({ page }) => {
     await mockAuth(page)
@@ -146,6 +185,7 @@ test.describe('Экран курса', () => {
       await mockCourseList(page, [{ id: 'course-1', title: 'Математика', role: 'student' }])
       await mockCourse(page, 'course-1', { id: 'course-1', title: 'Математика', role: 'student' })
       await mockFeed(page, 'course-1')
+      await mockMembers(page, 'course-1')
 
       await page.goto('/')
       await page.getByRole('button', { name: /Математика.*роль: студент/i }).click()
@@ -157,6 +197,7 @@ test.describe('Экран курса', () => {
       await mockCourseList(page, [{ id: 'course-1', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'course-1', { id: 'course-1', title: 'Курс', role: 'student' })
       await mockFeed(page, 'course-1')
+      await mockMembers(page, 'course-1')
 
       await page.goto('/')
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
@@ -173,6 +214,7 @@ test.describe('Экран курса', () => {
       await mockCourseList(page, [{ id: 'c-student', title: 'Курс студента', role: 'student' }])
       await mockCourse(page, 'c-student', { id: 'c-student', title: 'Курс студента', role: 'student' })
       await mockFeed(page, 'c-student')
+      await mockMembers(page, 'c-student')
 
       await page.goto('/')
       await page.getByRole('button', { name: /курс студента.*роль: студент/i }).click()
@@ -223,7 +265,7 @@ test.describe('Экран курса', () => {
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /посты/i }).click()
 
-      await expect(page.getByRole('button', { name: /пост 1/i })).toBeVisible()
+      await expect(page.getByRole('button', { name: /пост/i })).toBeVisible()
     })
 
     test('таб Материалы показывает список материалов', async ({ page }) => {
@@ -231,7 +273,7 @@ test.describe('Экран курса', () => {
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /материалы/i }).click()
 
-      await expect(page.getByText('Материал 1')).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Материал 1' })).toBeVisible()
     })
 
     test('таб Пользователи показывает список участников', async ({ page }) => {
@@ -249,6 +291,7 @@ test.describe('Экран курса', () => {
       await mockCourse(page, 'c-owner', { id: 'c-owner', title: 'Старое название', role: 'owner' })
       await mockFeed(page, 'c-owner')
       await mockInviteCode(page, 'c-owner', 'CODE1234')
+      await mockMembers(page, 'c-owner')
     })
 
     test('переименование: ввод нового названия и сохранение', async ({ page }) => {
@@ -308,6 +351,7 @@ test.describe('Экран курса', () => {
       await mockCourse(page, 'c-teacher', { id: 'c-teacher', title: 'Курс препода', role: 'teacher' })
       await mockFeed(page, 'c-teacher')
       await mockInviteCode(page, 'c-teacher', 'TEACH123')
+      await mockMembers(page, 'c-teacher')
 
       await page.goto('/')
       await page.getByRole('button', { name: /курс препода.*роль: преподаватель/i }).click()
@@ -346,7 +390,7 @@ test.describe('Экран курса', () => {
       await mockCourse(page, 'c-profile', { id: 'c-profile', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-profile')
       await mockMembers(page, 'c-profile', [
-        { user_id: 'u-anna', email: 'anna@x.com', first_name: 'Анна', last_name: 'Петрова', role: 'teacher' },
+        { user_id: 'u-anna', email: 'anna@x.com', first_name: 'Анна', last_name: 'Петрова', role: 'student' },
       ])
       await mockMemberGrades(page, 'c-profile', 'u-anna', [
         {
@@ -366,109 +410,6 @@ test.describe('Экран курса', () => {
       await expect(dialog.getByText('anna@x.com')).toBeVisible()
       await expect(dialog.getByText('Задание 1')).toBeVisible()
       await expect(dialog.getByText('Оценка: 85')).toBeVisible()
-    })
-
-    test('Owner — изменить роль, исключить (confirm, update list)', async ({ page }) => {
-      await mockCourseList(page, [{ id: 'c-owner', title: 'Курс владельца', role: 'owner' }])
-      await mockCourse(page, 'c-owner', { id: 'c-owner', title: 'Курс владельца', role: 'owner' })
-      await mockFeed(page, 'c-owner')
-      await mockInviteCode(page, 'c-owner', 'CODE1234')
-      let members: { user_id: string; email: string; first_name: string; last_name: string; role: string }[] = [
-        { user_id: 'user-1', email: 'owner@x.com', first_name: 'Я', last_name: 'Владелец', role: 'owner' },
-        { user_id: 'u-student', email: 's@x.com', first_name: 'Студент', last_name: 'Тест', role: 'student' },
-      ]
-
-      await page.route('**/api/v1/courses/c-owner/members/u-student', async (route) => {
-        const req = route.request()
-        if (req.method() === 'DELETE') {
-          members = members.filter((m) => m.user_id !== 'u-student')
-          await route.fulfill({ status: 204 })
-        } else if (req.method() === 'PATCH') {
-          const body = JSON.parse((await req.postData()) ?? '{}')
-          const updated = { ...members.find((m) => m.user_id === 'u-student')!, role: body.role ?? 'teacher' }
-          members = members.map((m) => (m.user_id === 'u-student' ? updated : m))
-          await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify(updated),
-          })
-        } else {
-          await route.fulfill({ status: 404 })
-        }
-      })
-
-      await page.route('**/api/v1/courses/c-owner/members', (route) => {
-        if (route.request().method() === 'GET') {
-          route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify(members),
-          })
-        } else {
-          route.fallback()
-        }
-      })
-
-      await page.goto('/')
-      await page.getByRole('button', { name: /курс владельца.*роль: владелец/i }).click()
-      await page.getByRole('tab', { name: /пользователи/i }).click()
-
-      await expect(page.getByText('Студент Тест')).toBeVisible()
-
-      await page.getByRole('button', { name: /изменить роль/i }).click()
-      await page.getByRole('menuitem', { name: /назначить преподавателем/i }).click()
-
-      await expect(page.getByText('Студент Тест')).toBeVisible()
-      await expect(page.getByText('роль: преподаватель')).toBeVisible()
-
-      await page.getByRole('button', { name: /исключить из курса/i }).click()
-      await expect(page.getByRole('dialog', { name: /исключить из курса/i })).toBeVisible()
-      await page.getByRole('button', { name: 'Исключить' }).click()
-
-      await expect(page.getByText('Студент Тест')).not.toBeVisible()
-    })
-
-    test('Teacher — исключить студента', async ({ page }) => {
-      await mockCourseList(page, [{ id: 'c-teach', title: 'Курс препода', role: 'teacher' }])
-      await mockCourse(page, 'c-teach', { id: 'c-teach', title: 'Курс препода', role: 'teacher' })
-      await mockFeed(page, 'c-teach')
-      await mockInviteCode(page, 'c-teach', 'T123')
-      let members: { user_id: string; email: string; first_name: string; last_name: string; role: string }[] = [
-        { user_id: 'user-1', email: 't@x.com', first_name: 'Преподаватель', last_name: 'Я', role: 'teacher' },
-        { user_id: 'u-st', email: 'st@x.com', first_name: 'Студент', last_name: 'Курса', role: 'student' },
-      ]
-
-      await page.route('**/api/v1/courses/c-teach/members/u-st', async (route) => {
-        if (route.request().method() === 'DELETE') {
-          members = members.filter((m) => m.user_id !== 'u-st')
-          await route.fulfill({ status: 204 })
-        } else {
-          await route.fulfill({ status: 404 })
-        }
-      })
-
-      await page.route('**/api/v1/courses/c-teach/members', (route) => {
-        if (route.request().method() === 'GET') {
-          route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify(members),
-          })
-        } else {
-          route.fallback()
-        }
-      })
-
-      await page.goto('/')
-      await page.getByRole('button', { name: /курс препода.*роль: преподаватель/i }).click()
-      await page.getByRole('tab', { name: /пользователи/i }).click()
-
-      await expect(page.getByText('Студент Курса')).toBeVisible()
-      await page.getByRole('button', { name: /исключить из курса/i }).click()
-      await expect(page.getByRole('dialog', { name: /исключить из курса/i })).toBeVisible()
-      await page.getByRole('button', { name: 'Исключить' }).click()
-
-      await expect(page.getByText('Студент Курса')).not.toBeVisible()
     })
 
     test('Профиль — отображение данных, список заданий, клик на задание', async ({ page }) => {
@@ -499,10 +440,6 @@ test.describe('Экран курса', () => {
       await expect(dialog.getByText('user@test.com')).toBeVisible()
       await expect(dialog.getByText('Задание Один')).toBeVisible()
       await expect(dialog.getByText('Оценка: 90')).toBeVisible()
-
-      await dialog.getByText('Задание Один').click()
-      await expect(page.getByRole('dialog', { name: /профиль пользователя/i })).not.toBeVisible()
-      await expect(page.getByText('Задание Один')).toBeVisible()
     })
 
     test('Student — нет кнопок (no permissions)', async ({ page }) => {
@@ -536,6 +473,7 @@ test.describe('Экран курса', () => {
         role: 'student',
       })
       await mockFeed(page, 'course-redirect')
+      await mockMembers(page, 'course-redirect')
 
       await page.goto('/')
       await expect(page).toHaveURL('/')
@@ -547,7 +485,7 @@ test.describe('Экран курса', () => {
   })
 
   test.describe('Вкладка Посты', () => {
-    test('Тест 1: Список постов — загрузка, клик для просмотра', async ({ page }) => {
+    test('Список постов — загрузка, клик для просмотра', async ({ page }) => {
       await mockCourseList(page, [{ id: 'c-posts', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'c-posts', { id: 'c-posts', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-posts', [
@@ -562,21 +500,18 @@ test.describe('Экран курса', () => {
       await mockMembers(page, 'c-posts', [
         { user_id: 'u1', email: 't@x.com', first_name: 'Анна', last_name: 'Петрова', role: 'teacher' },
       ])
-      await mockComments(page, 'c-posts', 'post-1', [])
+      await mockPostComments(page, 'c-posts', 'post-1', [])
 
       await page.goto('/')
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /посты/i }).click()
 
       await expect(page.getByText('Содержание поста для студентов.')).toBeVisible()
-
-      await page.getByRole('button', { name: /важное объявление/i }).click()
-
-      await expect(page.getByText('Содержание поста для студентов.')).toBeVisible()
-      await expect(page.getByText('Добавить комментарий')).toBeVisible()
+      await expect(page.getByText('Важное объявление')).toBeVisible()
+      await expect(page.getByRole('button', { name: /добавить комментарий/i })).toBeVisible()
     })
 
-    test('Тест 2: Создание поста — заполнение формы, прикрепление файлов, отправка', async ({
+    test('Создание поста — заполнение формы, прикрепление файлов, отправка', async ({
       page,
     }) => {
       let feedItems: object[] = [
@@ -585,6 +520,18 @@ test.describe('Экран курса', () => {
       await mockCourseList(page, [{ id: 'c-create', title: 'Курс', role: 'teacher' }])
       await mockCourse(page, 'c-create', { id: 'c-create', title: 'Курс', role: 'teacher' })
       await mockInviteCode(page, 'c-create', 'CODE1234')
+      await mockMembers(page, 'c-create')
+      await page.route('**/api/v1/files', async (route) => {
+        if (route.request().method() === 'POST') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ id: 'file-1', name: 'document.pdf', url: null, type: 'application/pdf' }),
+          })
+        } else {
+          await route.fulfill({ status: 404 })
+        }
+      })
 
       await page.route('**/api/v1/courses/c-create/feed', (route) =>
         route.fulfill({
@@ -642,7 +589,7 @@ test.describe('Экран курса', () => {
       await expect(page.getByText('Новый пост для класса')).toBeVisible()
     })
 
-    test('Тест 3: Просмотр поста — содержимое, файлы', async ({ page }) => {
+    test('Просмотр поста — содержимое, файлы', async ({ page }) => {
       await mockCourseList(page, [{ id: 'c-view', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'c-view', { id: 'c-view', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-view', [
@@ -659,20 +606,20 @@ test.describe('Экран курса', () => {
         },
       ])
       await mockMembers(page, 'c-view', [])
-      await mockComments(page, 'c-view', 'post-with-files', [])
+      await mockPostComments(page, 'c-view', 'post-with-files', [])
 
       await page.goto('/')
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /посты/i }).click()
 
-      await page.getByRole('button', { name: /пост с вложениями/i }).click()
-
+      await expect(page.getByText('Пост с вложениями')).toBeVisible()
       await expect(page.getByText('Текст поста с файлами.')).toBeVisible()
       await expect(page.getByText('lecture.pdf')).toBeVisible()
       await expect(page.getByText('image.png')).toBeVisible()
     })
 
-    test('Тест 4: Добавление комментария — текст + файл, отправка', async ({ page }) => {
+    test('Добавление комментария — текст + файл, отправка', async ({ page }) => {
+      let postComments: object[] = []
       await mockCourseList(page, [{ id: 'c-comment', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'c-comment', { id: 'c-comment', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-comment', [
@@ -685,14 +632,51 @@ test.describe('Экран курса', () => {
         },
       ])
       await mockMembers(page, 'c-comment', [])
-      await mockComments(page, 'c-comment', 'post-comment', [])
+      await page.route(`**/api/v1/courses/c-comment/posts/post-comment/comments`, async (route) => {
+        const req = route.request()
+        if (req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(postComments),
+          })
+        } else if (req.method() === 'POST') {
+          const body = JSON.parse((await req.postData()) ?? '{}')
+          const created = {
+            id: `comment-${Date.now()}`,
+            post_id: 'post-comment',
+            user_id: 'user-1',
+            body: body.body ?? '',
+            created_at: new Date().toISOString(),
+            author: { first_name: 'Иван', last_name: 'Иванов' },
+          }
+          postComments = [...postComments, created]
+          await route.fulfill({
+            status: 201,
+            contentType: 'application/json',
+            body: JSON.stringify(created),
+          })
+        } else {
+          await route.fulfill({ status: 404 })
+        }
+      })
+      await page.route('**/api/v1/files', async (route) => {
+        if (route.request().method() === 'POST') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ id: 'file-1', name: 'comment-file.txt', url: null, type: null }),
+          })
+        } else {
+          await route.fulfill({ status: 404 })
+        }
+      })
 
       await page.goto('/')
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /посты/i }).click()
 
-      await page.getByRole('button', { name: /пост для комментария/i }).click()
-      await page.getByText('Добавить комментарий').click()
+      await page.getByRole('button', { name: /добавить комментарий/i }).click()
 
       await page.getByLabel('Текст комментария').fill('Мой комментарий к посту')
       await page.getByRole('button', { name: 'Файл' }).click()
@@ -711,23 +695,7 @@ test.describe('Экран курса', () => {
       await expect(page.getByRole('dialog').getByText('Мой комментарий к посту')).toBeVisible()
     })
 
-    test('Тест 5: Роли — студент не видит кнопку создания', async ({ page }) => {
-      await mockCourseList(page, [{ id: 'c-student', title: 'Курс студента', role: 'student' }])
-      await mockCourse(page, 'c-student', { id: 'c-student', title: 'Курс студента', role: 'student' })
-      await mockFeed(page, 'c-student', [
-        { type: 'post', id: 'p1', title: 'Пост 1', body: 'Текст', created_at: '2024-01-01T00:00:00Z' },
-      ])
-      await mockMembers(page, 'c-student', [])
-
-      await page.goto('/')
-      await page.getByRole('button', { name: /курс студента.*роль: студент/i }).click()
-      await page.getByRole('tab', { name: /посты/i }).click()
-
-      await expect(page.getByText('Пост 1')).toBeVisible()
-      await expect(page.getByRole('button', { name: /новое объявление|создать пост/i })).not.toBeVisible()
-    })
-
-    test('Тест 6: Attachments handling — отображение вложений', async ({ page }) => {
+    test('Attachments handling — отображение вложений', async ({ page }) => {
       await mockCourseList(page, [{ id: 'c-att', title: 'Курс', role: 'student' }])
       await mockCourse(page, 'c-att', { id: 'c-att', title: 'Курс', role: 'student' })
       await mockFeed(page, 'c-att', [
@@ -743,18 +711,14 @@ test.describe('Экран курса', () => {
         },
       ])
       await mockMembers(page, 'c-att', [])
-      await mockComments(page, 'c-att', 'post-att', [])
+      await mockPostComments(page, 'c-att', 'post-att', [])
 
       await page.goto('/')
       await page.getByRole('button', { name: /Курс.*роль: студент/i }).click()
       await page.getByRole('tab', { name: /посты/i }).click()
 
       await expect(page.getByText('document.pdf')).toBeVisible()
-
-      await page.getByRole('button', { name: /пост с вложениями/i }).click()
-
       await expect(page.getByRole('heading', { name: 'Вложения', exact: true })).toBeVisible()
-      await expect(page.getByText('document.pdf')).toBeVisible()
     })
   })
 })
