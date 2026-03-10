@@ -57,3 +57,12 @@ type Comment struct {
 	FileIDs      []string
 	CreatedAt    time.Time
 }
+
+type File struct {
+	ID        string
+	UserID    string
+	FileName  string
+	FileSize  int64
+	MimeType  string
+	CreatedAt time.Time
+}

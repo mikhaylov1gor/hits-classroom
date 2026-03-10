@@ -52,6 +52,7 @@ func main() {
 	assignmentRepo := memory.NewAssignmentRepository()
 	submissionRepo := memory.NewSubmissionRepository()
 	commentRepo := memory.NewCommentRepository()
+	fileRepo := memory.NewFileRepository()
 
 	createPostUC := usecase.NewCreatePost(memberRepo, postRepo)
 	createMaterialUC := usecase.NewCreateMaterial(memberRepo, materialRepo)
@@ -68,6 +69,9 @@ func main() {
 	createCommentUC := usecase.NewCreateComment(memberRepo, assignmentRepo, postRepo, commentRepo)
 	listPostCommentsUC := usecase.NewListPostComments(memberRepo, postRepo, commentRepo)
 	deleteCommentUC := usecase.NewDeleteComment(memberRepo, commentRepo)
+	uploadFileUC := usecase.NewUploadFile(fileRepo)
+	listUserFilesUC := usecase.NewListUserFiles(fileRepo)
+	getFileUC := usecase.NewGetFile(fileRepo)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -99,6 +103,10 @@ func main() {
 	mux.Handle("GET /api/v1/courses/{courseId}/posts/{postId}/comments", authWrap(httphandler.NewListPostCommentsHandler(listPostCommentsUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/posts/{postId}/comments", authWrap(httphandler.NewCreatePostCommentHandler(createCommentUC)))
 	mux.Handle("DELETE /api/v1/courses/{courseId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
+
+	mux.Handle("POST /api/v1/files", authWrap(httphandler.NewUploadFileHandler(uploadFileUC)))
+	mux.Handle("GET /api/v1/users/{userId}/files", authWrap(httphandler.NewListUserFilesHandler(listUserFilesUC)))
+	mux.Handle("GET /api/v1/files/{fileId}", authWrap(httphandler.NewGetFileHandler(getFileUC)))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

@@ -34,3 +34,9 @@ type CommentRepository interface {
 	ListByAssignment(assignmentID string) ([]*domain.Comment, error)
 	ListByPost(postID string) ([]*domain.Comment, error)
 }
+
+type FileRepository interface {
+	Create(f *domain.File) error
+	GetByID(id string) (*domain.File, error)
+	ListByUser(userID string) ([]*domain.File, error)
+}

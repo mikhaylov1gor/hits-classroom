@@ -2,6 +2,9 @@ package usecase
 
 import (
 	"errors"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -675,4 +678,149 @@ func collectDescendants(parentID string, all []*domain.Comment) []string {
 		}
 	}
 	return ids
+}
+
+// ── File usecases ────────────────────────────────────────────────────────────
+type UploadFileInput struct {
+	UserID   string
+	FileName string
+	FileSize int64
+	MimeType string
+	FileData []byte
+}
+
+type UploadFile struct {
+	fileRepo     repository.FileRepository
+	storageePath string
+}
+
+func NewUploadFile(fileRepo repository.FileRepository) *UploadFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &UploadFile{fileRepo: fileRepo, storageePath: storagePath}
+}
+
+func (uc *UploadFile) UploadFile(in UploadFileInput) (*domain.File, error) {
+	if in.UserID == "" {
+		return nil, ErrForbidden
+	}
+	if in.FileName == "" {
+		return nil, &ValidationError{Message: "file name is required"}
+	}
+	if in.FileSize <= 0 {
+		return nil, &ValidationError{Message: "file size must be greater than 0"}
+	}
+	const maxFileSize = 50 * 1024 * 1024 // 50 MB
+	if in.FileSize > maxFileSize {
+		return nil, &ValidationError{Message: "file is too large (max 50 MB)"}
+	}
+
+	f := &domain.File{
+		ID:        uuid.New().String(),
+		UserID:    in.UserID,
+		FileName:  in.FileName,
+		FileSize:  in.FileSize,
+		MimeType:  in.MimeType,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	// Сохраняем файл на диск
+	if err := uc.saveFile(f, in.FileData); err != nil {
+		return nil, err
+	}
+
+	// Сохраняем метаданные в БД
+	if err := uc.fileRepo.Create(f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (uc *UploadFile) saveFile(f *domain.File, data []byte) error {
+	// Создаём директорию для пользователя если её нет
+	userDir := filepath.Join(uc.storageePath, f.UserID)
+	if err := os.MkdirAll(userDir, 0755); err != nil {
+		return &ValidationError{Message: "failed to create storage directory"}
+	}
+
+	// Генерируем путь к файлу
+	filePath := filepath.Join(userDir, f.ID+"_"+f.FileName)
+
+	// Записываем файл на диск
+	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+		return &ValidationError{Message: "failed to save file"}
+	}
+
+	return nil
+}
+
+type ListUserFilesInput struct {
+	UserID string
+}
+
+type ListUserFiles struct {
+	fileRepo repository.FileRepository
+}
+
+func NewListUserFiles(fileRepo repository.FileRepository) *ListUserFiles {
+	return &ListUserFiles{fileRepo: fileRepo}
+}
+
+func (uc *ListUserFiles) ListUserFiles(in ListUserFilesInput) ([]*domain.File, error) {
+	if in.UserID == "" {
+		return nil, ErrForbidden
+	}
+	files, err := uc.fileRepo.ListByUser(in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if files == nil {
+		return []*domain.File{}, nil
+	}
+	return files, nil
+}
+
+type GetFileInput struct {
+	FileID string
+	UserID string
+}
+
+type GetFile struct {
+	fileRepo     repository.FileRepository
+	storageePath string
+}
+
+func NewGetFile(fileRepo repository.FileRepository) *GetFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &GetFile{fileRepo: fileRepo, storageePath: storagePath}
+}
+
+func (uc *GetFile) GetFile(in GetFileInput) (*domain.File, []byte, error) {
+	if in.FileID == "" || in.UserID == "" {
+		return nil, nil, ErrForbidden
+	}
+
+	f, err := uc.fileRepo.GetByID(in.FileID)
+	if err != nil || f == nil {
+		return nil, nil, ErrForbidden
+	}
+
+	// Проверяем что файл принадлежит пользователю или запрашивающий - учитель
+	if f.UserID != in.UserID {
+		return nil, nil, ErrForbidden
+	}
+
+	// Читаем файл с диска
+	filePath := filepath.Join(uc.storageePath, f.UserID, f.ID+"_"+f.FileName)
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, nil, &ValidationError{Message: "file not found"}
+	}
+
+	return f, data, nil
 }

@@ -14,7 +14,8 @@
 		{ "key": "courseId", "value": "" },
 		{ "key": "inviteCode", "value": "" },
 		{ "key": "assignmentId", "value": "" },
-		{ "key": "submissionId", "value": "" }
+		{ "key": "submissionId", "value": "" },
+		{ "key": "fileId", "value": "" }
 	],
 	"item": [
 		{
@@ -254,7 +255,22 @@
 					}
 				},
 				{
-					"name": "29 Delete course",
+					"name": "29 Upload file",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    if (b.id) pm.collectionVariables.set('fileId', b.id);", "    console.log('File uploaded:', { id: b.id, name: b.file_name });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": []}]},
+						"url": "{{baseUrl}}/api/v1/files"
+					}
+				},
+				{
+					"name": "30 List user files",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const arr = pm.response.json();", "    console.log('User files count:', Array.isArray(arr) ? arr.length : 0);", "    if (Array.isArray(arr) && arr.length && !pm.collectionVariables.get('fileId')) {", "        pm.collectionVariables.set('fileId', arr[0].id);", "    }", "}"], "type": "text/javascript"}}],
+					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/users/{{userId}}/files"}
+				},
+				{
+					"name": "31 Delete course",
 					"request": {"method": "DELETE", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/courses/{{courseId}}"}
 				}
 			]
@@ -327,8 +343,28 @@
 						"body": {"mode": "raw", "raw": "{\n  \"body\": \"Финальное решение.\",\n  \"file_ids\": [],\n  \"is_attached\": true\n}"},
 						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"
 					}
+				},
+				{
+					"name": "Upload file",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    console.log('File uploaded:', {", "        id: b.id,", "        file_name: b.file_name,", "        file_size: b.file_size,", "        mime_type: b.mime_type", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": []}]},
+						"url": "{{baseUrl}}/api/v1/files"
+					}
+				},
+				{
+					"name": "List user files",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const arr = pm.response.json();", "    const count = Array.isArray(arr) ? arr.length : 0;", "    console.log('User files:', count);", "    arr.forEach(f => {", "        console.log(`- ${f.file_name} (${f.file_size} bytes, ${f.mime_type})`);", "    });", "}"], "type": "text/javascript"}}],
+					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/users/{{userId}}/files"}
+				},
+				{
+					"name": "Download file",
+					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/files/{{fileId}}"}
 				}
 			]
 		}
 	]
 }
+					
