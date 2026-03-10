@@ -661,6 +661,7 @@ func submissionResponse(s *domain.Submission) map[string]interface{} {
 		"user_id":       s.UserID,
 		"body":          s.Body,
 		"submitted_at":  s.SubmittedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"is_attached":   s.IsAttached,
 	}
 	if s.Grade != nil {
 		out["grade"] = *s.Grade
@@ -1052,6 +1053,11 @@ func (h *CreateSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "already submitted"})
 			return
 		}
+		if errors.Is(err, usecase.ErrAssignmentClosed) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "assignment is closed"})
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
 		return
@@ -1165,6 +1171,67 @@ func (h *GradeSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		if errors.Is(err, usecase.ErrValidation) {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submissionResponse(s))
+}
+
+type DetachAssignmentHandler struct {
+	detachAssignment *usecase.DetachAssignment
+}
+
+func NewDetachAssignmentHandler(detachAssignment *usecase.DetachAssignment) *DetachAssignmentHandler {
+	return &DetachAssignmentHandler{detachAssignment: detachAssignment}
+}
+
+func (h *DetachAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	if courseID == "" || assignmentID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	s, err := h.detachAssignment.DetachAssignment(usecase.DetachAssignmentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		if errors.Is(err, usecase.ErrValidation) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			return
+		}
+		if errors.Is(err, usecase.ErrAssignmentClosed) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "assignment is closed"})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)

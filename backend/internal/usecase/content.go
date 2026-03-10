@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
+
+	"github.com/google/uuid"
 )
 
 type CreatePostInput struct {
@@ -243,9 +244,22 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 	if err != nil || a == nil || a.CourseID != in.CourseID {
 		return nil, ErrCourseNotFound
 	}
+
+	if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
+		return nil, ErrAssignmentClosed
+	}
+
 	existing, _ := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.UserID)
 	if existing != nil {
-		return nil, ErrAlreadySubmitted
+		// Если уже есть отпрепленная отправка, используем её и обновляем
+		existing.Body = in.Body
+		existing.FileIDs = in.FileIDs
+		existing.SubmittedAt = time.Now().UTC()
+		existing.IsAttached = true
+		if err := uc.submissionRepo.Update(existing); err != nil {
+			return nil, err
+		}
+		return existing, nil
 	}
 	s := &domain.Submission{
 		ID:           uuid.New().String(),
@@ -254,6 +268,7 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 		Body:         in.Body,
 		FileIDs:      in.FileIDs,
 		SubmittedAt:  time.Now().UTC(),
+		IsAttached:   true,
 	}
 	if err := uc.submissionRepo.Create(s); err != nil {
 		return nil, err
@@ -328,6 +343,53 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	if in.GradeComment != "" {
 		s.GradeComment = &in.GradeComment
 	}
+	if err := uc.submissionRepo.Update(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+type DetachAssignmentInput struct {
+	CourseID     string
+	AssignmentID string
+	UserID       string
+}
+
+type DetachAssignment struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+}
+
+func NewDetachAssignment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *DetachAssignment {
+	return &DetachAssignment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+}
+
+func (uc *DetachAssignment) DetachAssignment(in DetachAssignmentInput) (*domain.Submission, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
+	}
+	if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
+		return nil, ErrAssignmentClosed
+	}
+	s, err := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.UserID)
+	if err != nil || s == nil {
+		return nil, ErrCourseNotFound
+	}
+	if !s.IsAttached {
+		return nil, &ValidationError{Message: "submission is already detached"}
+	}
+	s.IsAttached = false
+	s.Grade = nil
+	s.GradeComment = nil
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
 	}

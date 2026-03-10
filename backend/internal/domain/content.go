@@ -41,6 +41,7 @@ type Submission struct {
 	SubmittedAt  time.Time
 	Grade        *int
 	GradeComment *string
+	IsAttached   bool
 }
 
 // Comment используется и для комментариев к заданиям, и к постам.
