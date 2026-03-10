@@ -223,6 +223,7 @@ type CreateSubmissionInput struct {
 	UserID       string
 	Body         string
 	FileIDs      []string
+	IsAttached   bool
 }
 
 type CreateSubmission struct {
@@ -245,17 +246,23 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 		return nil, ErrCourseNotFound
 	}
 
-	if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
-		return nil, ErrAssignmentClosed
+	if in.IsAttached {
+		if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
+			return nil, ErrAssignmentClosed
+		}
 	}
 
 	existing, _ := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.UserID)
 	if existing != nil {
-		// Если уже есть отпрепленная отправка, используем её и обновляем
+		// Если уже есть черновик или возвращённая отправка, обновляем её
 		existing.Body = in.Body
 		existing.FileIDs = in.FileIDs
 		existing.SubmittedAt = time.Now().UTC()
-		existing.IsAttached = true
+		existing.IsAttached = in.IsAttached
+		if in.IsAttached {
+			// При прикреплении очищаем флаг возврата
+			existing.IsReturned = false
+		}
 		if err := uc.submissionRepo.Update(existing); err != nil {
 			return nil, err
 		}
@@ -268,7 +275,7 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 		Body:         in.Body,
 		FileIDs:      in.FileIDs,
 		SubmittedAt:  time.Now().UTC(),
-		IsAttached:   true,
+		IsAttached:   in.IsAttached,
 	}
 	if err := uc.submissionRepo.Create(s); err != nil {
 		return nil, err
@@ -355,17 +362,17 @@ type DetachAssignmentInput struct {
 	UserID       string
 }
 
-type DetachAssignment struct {
+type DetachSubmission struct {
 	memberRepo     repository.CourseMemberRepository
 	assignmentRepo repository.AssignmentRepository
 	submissionRepo repository.SubmissionRepository
 }
 
-func NewDetachAssignment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *DetachAssignment {
-	return &DetachAssignment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+func NewDetachSubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *DetachSubmission {
+	return &DetachSubmission{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
 }
 
-func (uc *DetachAssignment) DetachAssignment(in DetachAssignmentInput) (*domain.Submission, error) {
+func (uc *DetachSubmission) DetachSubmission(in DetachAssignmentInput) (*domain.Submission, error) {
 	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
 	if err != nil || role == "" {
 		return nil, ErrForbidden
@@ -390,6 +397,49 @@ func (uc *DetachAssignment) DetachAssignment(in DetachAssignmentInput) (*domain.
 	s.IsAttached = false
 	s.Grade = nil
 	s.GradeComment = nil
+	if err := uc.submissionRepo.Update(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+type ReturnAssignmentInput struct {
+	CourseID     string
+	AssignmentID string
+	SubmissionID string
+	UserID       string
+}
+
+type ReturnAssignment struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+}
+
+func NewReturnAssignment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *ReturnAssignment {
+	return &ReturnAssignment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+}
+
+func (uc *ReturnAssignment) ReturnAssignment(in ReturnAssignmentInput) (*domain.Submission, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
+	}
+	s, err := uc.submissionRepo.GetByID(in.SubmissionID)
+	if err != nil || s == nil || s.AssignmentID != in.AssignmentID {
+		return nil, ErrCourseNotFound
+	}
+	if !s.IsAttached {
+		return nil, &ValidationError{Message: "can only return attached submissions"}
+	}
+	s.IsReturned = true
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
 	}

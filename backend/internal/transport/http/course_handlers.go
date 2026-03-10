@@ -662,6 +662,7 @@ func submissionResponse(s *domain.Submission) map[string]interface{} {
 		"body":          s.Body,
 		"submitted_at":  s.SubmittedAt.Format("2006-01-02T15:04:05Z07:00"),
 		"is_attached":   s.IsAttached,
+		"is_returned":   s.IsReturned,
 	}
 	if s.Grade != nil {
 		out["grade"] = *s.Grade
@@ -1033,15 +1034,16 @@ func (h *CreateSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		Body    string   `json:"body"`
-		FileIDs []string `json:"file_ids"`
+		Body       string   `json:"body"`
+		FileIDs    []string `json:"file_ids"`
+		IsAttached bool     `json:"is_attached"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	s, err := h.createSubmission.CreateSubmission(usecase.CreateSubmissionInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID, Body: req.Body, FileIDs: req.FileIDs})
+	s, err := h.createSubmission.CreateSubmission(usecase.CreateSubmissionInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID, Body: req.Body, FileIDs: req.FileIDs, IsAttached: req.IsAttached})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
@@ -1183,10 +1185,10 @@ func (h *GradeSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 type DetachAssignmentHandler struct {
-	detachAssignment *usecase.DetachAssignment
+	detachAssignment *usecase.DetachSubmission
 }
 
-func NewDetachAssignmentHandler(detachAssignment *usecase.DetachAssignment) *DetachAssignmentHandler {
+func NewDetachAssignmentHandler(detachAssignment *usecase.DetachSubmission) *DetachAssignmentHandler {
 	return &DetachAssignmentHandler{detachAssignment: detachAssignment}
 }
 
@@ -1206,7 +1208,7 @@ func (h *DetachAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	s, err := h.detachAssignment.DetachAssignment(usecase.DetachAssignmentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID})
+	s, err := h.detachAssignment.DetachSubmission(usecase.DetachAssignmentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1232,6 +1234,63 @@ func (h *DetachAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if errors.Is(err, usecase.ErrAssignmentClosed) {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "assignment is closed"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submissionResponse(s))
+}
+
+type ReturnAssignmentHandler struct {
+	returnAssignment *usecase.ReturnAssignment
+}
+
+func NewReturnAssignmentHandler(returnAssignment *usecase.ReturnAssignment) *ReturnAssignmentHandler {
+	return &ReturnAssignmentHandler{returnAssignment: returnAssignment}
+}
+
+func (h *ReturnAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	submissionID := r.PathValue("submissionId")
+	if courseID == "" || assignmentID == "" || submissionID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	s, err := h.returnAssignment.ReturnAssignment(usecase.ReturnAssignmentInput{CourseID: courseID, AssignmentID: assignmentID, SubmissionID: submissionID, UserID: userID})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		if errors.Is(err, usecase.ErrValidation) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)

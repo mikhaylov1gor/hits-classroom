@@ -42,6 +42,7 @@ type Submission struct {
 	Grade        *int
 	GradeComment *string
 	IsAttached   bool
+	IsReturned   bool
 }
 
 // Comment используется и для комментариев к заданиям, и к постам.
