@@ -120,6 +120,42 @@ func userResponse(u *domain.User) map[string]interface{} {
 	}
 }
 
+type CheckEmailHandler struct {
+	checkEmail *usecase.CheckEmailExists
+}
+
+func NewCheckEmailHandler(checkEmail *usecase.CheckEmailExists) *CheckEmailHandler {
+	return &CheckEmailHandler{checkEmail: checkEmail}
+}
+
+func (h *CheckEmailHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	email := r.URL.Query().Get("email")
+	if email == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email query parameter is required"})
+		return
+	}
+	exists, err := h.checkEmail.CheckEmailExists(email)
+	if err != nil {
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"exists": exists})
+}
+
 type GetMeHandler struct {
 	getMe *usecase.GetMe
 }

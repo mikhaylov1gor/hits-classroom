@@ -6,17 +6,21 @@ type PostRepository interface {
 	Create(post *domain.Post) error
 	GetByID(id string) (*domain.Post, error)
 	ListByCourse(courseID string) ([]*domain.Post, error)
+	Delete(id string) error
 }
 
 type MaterialRepository interface {
 	Create(material *domain.Material) error
+	GetByID(id string) (*domain.Material, error)
 	ListByCourse(courseID string) ([]*domain.Material, error)
+	Delete(id string) error
 }
 
 type AssignmentRepository interface {
 	Create(a *domain.Assignment) error
 	GetByID(id string) (*domain.Assignment, error)
 	ListByCourse(courseID string) ([]*domain.Assignment, error)
+	Delete(id string) error
 }
 
 type SubmissionRepository interface {
@@ -25,6 +29,7 @@ type SubmissionRepository interface {
 	GetByAssignmentAndUser(assignmentID, userID string) (*domain.Submission, error)
 	ListByAssignment(assignmentID string) ([]*domain.Submission, error)
 	Update(s *domain.Submission) error
+	DeleteByAssignment(assignmentID string) error
 }
 
 type CommentRepository interface {
@@ -33,6 +38,10 @@ type CommentRepository interface {
 	Delete(id string) error
 	ListByAssignment(assignmentID string) ([]*domain.Comment, error)
 	ListByPost(postID string) ([]*domain.Comment, error)
+	ListByMaterial(materialID string) ([]*domain.Comment, error)
+	DeleteByAssignment(assignmentID string) error
+	DeleteByPost(postID string) error
+	DeleteByMaterial(materialID string) error
 }
 
 type FileRepository interface {

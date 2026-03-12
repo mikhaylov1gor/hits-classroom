@@ -20,6 +20,7 @@ type CreatePostInput struct {
 	UserID   string
 	Title    string
 	Body     string
+	Links    []string
 	FileIDs  []string
 }
 
@@ -48,6 +49,7 @@ func (uc *CreatePost) CreatePost(in CreatePostInput) (*domain.Post, error) {
 		UserID:    in.UserID,
 		Title:     title,
 		Body:      in.Body,
+		Links:     in.Links,
 		FileIDs:   in.FileIDs,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -62,6 +64,7 @@ type CreateMaterialInput struct {
 	UserID   string
 	Title    string
 	Body     string
+	Links    []string
 	FileIDs  []string
 }
 
@@ -91,6 +94,7 @@ func (uc *CreateMaterial) CreateMaterial(in CreateMaterialInput) (*domain.Materi
 		CourseID:  in.CourseID,
 		Title:     title,
 		Body:      in.Body,
+		Links:     in.Links,
 		FileIDs:   in.FileIDs,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -105,6 +109,7 @@ type CreateAssignmentInput struct {
 	UserID   string
 	Title    string
 	Body     string
+	Links    []string
 	FileIDs  []string
 	Deadline *time.Time
 	MaxGrade int
@@ -140,6 +145,7 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 		CourseID:  in.CourseID,
 		Title:     title,
 		Body:      in.Body,
+		Links:     in.Links,
 		FileIDs:   in.FileIDs,
 		Deadline:  in.Deadline,
 		MaxGrade:  maxGrade,
@@ -301,14 +307,22 @@ func (uc *ListSubmissions) ListSubmissions(courseID, assignmentID, userID string
 	if err != nil || role == "" {
 		return nil, ErrForbidden
 	}
-	if role != domain.RoleOwner && role != domain.RoleTeacher {
-		return nil, ErrForbidden
-	}
 	a, err := uc.assignmentRepo.GetByID(assignmentID)
 	if err != nil || a == nil || a.CourseID != courseID {
 		return nil, ErrCourseNotFound
 	}
-	return uc.submissionRepo.ListByAssignment(assignmentID)
+	if role == domain.RoleOwner || role == domain.RoleTeacher {
+		return uc.submissionRepo.ListByAssignment(assignmentID)
+	}
+	// Студент видит только свой ответ
+	s, err := uc.submissionRepo.GetByAssignmentAndUser(assignmentID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return []*domain.Submission{}, nil
+	}
+	return []*domain.Submission{s}, nil
 }
 
 type GradeSubmissionInput struct {
@@ -527,7 +541,11 @@ func (uc *ListComments) ListComments(courseID, assignmentID, userID string) ([]*
 	if err != nil || a == nil || a.CourseID != courseID {
 		return nil, ErrCourseNotFound
 	}
-	return uc.commentRepo.ListByAssignment(assignmentID)
+	all, err := uc.commentRepo.ListByAssignment(assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	return filterPrivateComments(all, userID, role), nil
 }
 
 type ListPostComments struct {
@@ -549,15 +567,21 @@ func (uc *ListPostComments) ListPostComments(courseID, postID, userID string) ([
 	if err != nil || p == nil || p.CourseID != courseID {
 		return nil, ErrCourseNotFound
 	}
-	return uc.commentRepo.ListByPost(postID)
+	all, err := uc.commentRepo.ListByPost(postID)
+	if err != nil {
+		return nil, err
+	}
+	return filterPrivateComments(all, userID, role), nil
 }
 
 type CreateCommentInput struct {
 	CourseID     string
 	AssignmentID string
 	PostID       string
+	MaterialID   string
 	UserID       string
 	ParentID     *string
+	IsPrivate    bool
 	Body         string
 	FileIDs      []string
 }
@@ -566,11 +590,12 @@ type CreateComment struct {
 	memberRepo     repository.CourseMemberRepository
 	assignmentRepo repository.AssignmentRepository
 	postRepo       repository.PostRepository
+	materialRepo   repository.MaterialRepository
 	commentRepo    repository.CommentRepository
 }
 
-func NewCreateComment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, postRepo repository.PostRepository, commentRepo repository.CommentRepository) *CreateComment {
-	return &CreateComment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, postRepo: postRepo, commentRepo: commentRepo}
+func NewCreateComment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, postRepo repository.PostRepository, materialRepo repository.MaterialRepository, commentRepo repository.CommentRepository) *CreateComment {
+	return &CreateComment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, postRepo: postRepo, materialRepo: materialRepo, commentRepo: commentRepo}
 }
 
 func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, error) {
@@ -581,7 +606,6 @@ func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, 
 	if strings.TrimSpace(in.Body) == "" {
 		return nil, &ValidationError{Message: "body is required"}
 	}
-	// Validate target exists
 	if in.AssignmentID != "" {
 		a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
 		if err != nil || a == nil || a.CourseID != in.CourseID {
@@ -592,25 +616,36 @@ func (uc *CreateComment) CreateComment(in CreateCommentInput) (*domain.Comment, 
 		if err != nil || p == nil || p.CourseID != in.CourseID {
 			return nil, ErrCourseNotFound
 		}
+	} else if in.MaterialID != "" {
+		m, err := uc.materialRepo.GetByID(in.MaterialID)
+		if err != nil || m == nil || m.CourseID != in.CourseID {
+			return nil, ErrCourseNotFound
+		}
 	} else {
-		return nil, &ValidationError{Message: "assignment_id or post_id is required"}
+		return nil, &ValidationError{Message: "assignment_id, post_id, or material_id is required"}
 	}
-	// Validate parent comment if provided
+	isPrivate := in.IsPrivate
 	if in.ParentID != nil {
 		parent, err := uc.commentRepo.GetByID(*in.ParentID)
 		if err != nil || parent == nil {
 			return nil, ErrCourseNotFound
 		}
-		if parent.AssignmentID != in.AssignmentID || parent.PostID != in.PostID {
+		if parent.AssignmentID != in.AssignmentID || parent.PostID != in.PostID || parent.MaterialID != in.MaterialID {
 			return nil, ErrCourseNotFound
+		}
+		// Ответ на приватный комментарий автоматически приватный
+		if parent.IsPrivate {
+			isPrivate = true
 		}
 	}
 	c := &domain.Comment{
 		ID:           uuid.New().String(),
 		AssignmentID: in.AssignmentID,
 		PostID:       in.PostID,
+		MaterialID:   in.MaterialID,
 		UserID:       in.UserID,
 		ParentID:     in.ParentID,
+		IsPrivate:    isPrivate,
 		Body:         in.Body,
 		FileIDs:      in.FileIDs,
 		CreatedAt:    time.Now().UTC(),
@@ -651,12 +686,13 @@ func (uc *DeleteComment) DeleteComment(in DeleteCommentInput) error {
 	if comment.UserID != in.UserID && role != domain.RoleOwner && role != domain.RoleTeacher {
 		return ErrForbidden
 	}
-	// Каскадно удаляем все дочерние комментарии
 	var allComments []*domain.Comment
 	if comment.AssignmentID != "" {
 		allComments, _ = uc.commentRepo.ListByAssignment(comment.AssignmentID)
-	} else {
+	} else if comment.PostID != "" {
 		allComments, _ = uc.commentRepo.ListByPost(comment.PostID)
+	} else {
+		allComments, _ = uc.commentRepo.ListByMaterial(comment.MaterialID)
 	}
 	toDelete := collectDescendants(in.CommentID, allComments)
 	toDelete = append(toDelete, in.CommentID)
@@ -680,147 +716,231 @@ func collectDescendants(parentID string, all []*domain.Comment) []string {
 	return ids
 }
 
-// ── File usecases ────────────────────────────────────────────────────────────
-type UploadFileInput struct {
-	UserID   string
-	FileName string
-	FileSize int64
-	MimeType string
-	FileData []byte
+// ── GetPost ───────────────────────────────────────────────────────────────────
+
+type GetPost struct {
+	memberRepo repository.CourseMemberRepository
+	postRepo   repository.PostRepository
 }
 
-type UploadFile struct {
-	fileRepo     repository.FileRepository
-	storageePath string
+func NewGetPost(memberRepo repository.CourseMemberRepository, postRepo repository.PostRepository) *GetPost {
+	return &GetPost{memberRepo: memberRepo, postRepo: postRepo}
 }
 
-func NewUploadFile(fileRepo repository.FileRepository) *UploadFile {
-	storagePath := os.Getenv("FILES_STORAGE_PATH")
-	if storagePath == "" {
-		storagePath = "./storage/files"
-	}
-	return &UploadFile{fileRepo: fileRepo, storageePath: storagePath}
-}
-
-func (uc *UploadFile) UploadFile(in UploadFileInput) (*domain.File, error) {
-	if in.UserID == "" {
+func (uc *GetPost) GetPost(courseID, postID, userID string) (*domain.Post, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
 		return nil, ErrForbidden
 	}
-	if in.FileName == "" {
-		return nil, &ValidationError{Message: "file name is required"}
+	p, err := uc.postRepo.GetByID(postID)
+	if err != nil || p == nil || p.CourseID != courseID {
+		return nil, ErrCourseNotFound
 	}
-	if in.FileSize <= 0 {
-		return nil, &ValidationError{Message: "file size must be greater than 0"}
-	}
-	const maxFileSize = 50 * 1024 * 1024 // 50 MB
-	if in.FileSize > maxFileSize {
-		return nil, &ValidationError{Message: "file is too large (max 50 MB)"}
-	}
-
-	f := &domain.File{
-		ID:        uuid.New().String(),
-		UserID:    in.UserID,
-		FileName:  in.FileName,
-		FileSize:  in.FileSize,
-		MimeType:  in.MimeType,
-		CreatedAt: time.Now().UTC(),
-	}
-
-	// Сохраняем файл на диск
-	if err := uc.saveFile(f, in.FileData); err != nil {
-		return nil, err
-	}
-
-	// Сохраняем метаданные в БД
-	if err := uc.fileRepo.Create(f); err != nil {
-		return nil, err
-	}
-	return f, nil
+	return p, nil
 }
 
-func (uc *UploadFile) saveFile(f *domain.File, data []byte) error {
-	// Создаём директорию для пользователя если её нет
-	userDir := filepath.Join(uc.storageePath, f.UserID)
-	if err := os.MkdirAll(userDir, 0755); err != nil {
-		return &ValidationError{Message: "failed to create storage directory"}
-	}
+// ── GetMaterial ───────────────────────────────────────────────────────────────
 
-	// Генерируем путь к файлу
-	filePath := filepath.Join(userDir, f.ID+"_"+f.FileName)
-
-	// Записываем файл на диск
-	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
-		return &ValidationError{Message: "failed to save file"}
-	}
-
-	return nil
+type GetMaterial struct {
+	memberRepo   repository.CourseMemberRepository
+	materialRepo repository.MaterialRepository
 }
 
-type ListUserFilesInput struct {
-	UserID string
+func NewGetMaterial(memberRepo repository.CourseMemberRepository, materialRepo repository.MaterialRepository) *GetMaterial {
+	return &GetMaterial{memberRepo: memberRepo, materialRepo: materialRepo}
 }
 
-type ListUserFiles struct {
-	fileRepo repository.FileRepository
-}
-
-func NewListUserFiles(fileRepo repository.FileRepository) *ListUserFiles {
-	return &ListUserFiles{fileRepo: fileRepo}
-}
-
-func (uc *ListUserFiles) ListUserFiles(in ListUserFilesInput) ([]*domain.File, error) {
-	if in.UserID == "" {
+func (uc *GetMaterial) GetMaterial(courseID, materialID, userID string) (*domain.Material, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
 		return nil, ErrForbidden
 	}
-	files, err := uc.fileRepo.ListByUser(in.UserID)
+	m, err := uc.materialRepo.GetByID(materialID)
+	if err != nil || m == nil || m.CourseID != courseID {
+		return nil, ErrCourseNotFound
+	}
+	return m, nil
+}
+
+// ── GetMySubmission ───────────────────────────────────────────────────────────
+
+type GetMySubmission struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+}
+
+func NewGetMySubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *GetMySubmission {
+	return &GetMySubmission{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+}
+
+func (uc *GetMySubmission) GetMySubmission(courseID, assignmentID, userID string) (*domain.Submission, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(assignmentID)
+	if err != nil || a == nil || a.CourseID != courseID {
+		return nil, ErrCourseNotFound
+	}
+	s, err := uc.submissionRepo.GetByAssignmentAndUser(assignmentID, userID)
 	if err != nil {
 		return nil, err
 	}
-	if files == nil {
-		return []*domain.File{}, nil
+	if s == nil {
+		return nil, ErrCourseNotFound
 	}
-	return files, nil
+	return s, nil
 }
 
-type GetFileInput struct {
-	FileID string
-	UserID string
+// ── DeletePost ────────────────────────────────────────────────────────────────
+
+type DeletePost struct {
+	memberRepo  repository.CourseMemberRepository
+	postRepo    repository.PostRepository
+	commentRepo repository.CommentRepository
 }
 
-type GetFile struct {
-	fileRepo     repository.FileRepository
-	storageePath string
+func NewDeletePost(memberRepo repository.CourseMemberRepository, postRepo repository.PostRepository, commentRepo repository.CommentRepository) *DeletePost {
+	return &DeletePost{memberRepo: memberRepo, postRepo: postRepo, commentRepo: commentRepo}
 }
 
-func NewGetFile(fileRepo repository.FileRepository) *GetFile {
-	storagePath := os.Getenv("FILES_STORAGE_PATH")
-	if storagePath == "" {
-		storagePath = "./storage/files"
+func (uc *DeletePost) DeletePost(courseID, postID, userID string) error {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return ErrForbidden
 	}
-	return &GetFile{fileRepo: fileRepo, storageePath: storagePath}
+	p, err := uc.postRepo.GetByID(postID)
+	if err != nil || p == nil || p.CourseID != courseID {
+		return ErrCourseNotFound
+	}
+	if p.UserID != userID && role != domain.RoleOwner && role != domain.RoleTeacher {
+		return ErrForbidden
+	}
+	_ = uc.commentRepo.DeleteByPost(postID)
+	return uc.postRepo.Delete(postID)
 }
 
-func (uc *GetFile) GetFile(in GetFileInput) (*domain.File, []byte, error) {
-	if in.FileID == "" || in.UserID == "" {
-		return nil, nil, ErrForbidden
-	}
+// ── DeleteMaterial ────────────────────────────────────────────────────────────
 
-	f, err := uc.fileRepo.GetByID(in.FileID)
-	if err != nil || f == nil {
-		return nil, nil, ErrForbidden
-	}
+type DeleteMaterial struct {
+	memberRepo   repository.CourseMemberRepository
+	materialRepo repository.MaterialRepository
+	commentRepo  repository.CommentRepository
+}
 
-	// Проверяем что файл принадлежит пользователю или запрашивающий - учитель
-	if f.UserID != in.UserID {
-		return nil, nil, ErrForbidden
-	}
+func NewDeleteMaterial(memberRepo repository.CourseMemberRepository, materialRepo repository.MaterialRepository, commentRepo repository.CommentRepository) *DeleteMaterial {
+	return &DeleteMaterial{memberRepo: memberRepo, materialRepo: materialRepo, commentRepo: commentRepo}
+}
 
-	// Читаем файл с диска
-	filePath := filepath.Join(uc.storageePath, f.UserID, f.ID+"_"+f.FileName)
-	data, err := ioutil.ReadFile(filePath)
+func (uc *DeleteMaterial) DeleteMaterial(courseID, materialID, userID string) error {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return ErrForbidden
+	}
+	m, err := uc.materialRepo.GetByID(materialID)
+	if err != nil || m == nil || m.CourseID != courseID {
+		return ErrCourseNotFound
+	}
+	_ = uc.commentRepo.DeleteByMaterial(materialID)
+	return uc.materialRepo.Delete(materialID)
+}
+
+// ── DeleteAssignment ──────────────────────────────────────────────────────────
+
+type DeleteAssignment struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+	commentRepo    repository.CommentRepository
+}
+
+func NewDeleteAssignment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository, commentRepo repository.CommentRepository) *DeleteAssignment {
+	return &DeleteAssignment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo, commentRepo: commentRepo}
+}
+
+func (uc *DeleteAssignment) DeleteAssignment(courseID, assignmentID, userID string) error {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(assignmentID)
+	if err != nil || a == nil || a.CourseID != courseID {
+		return ErrCourseNotFound
+	}
+	_ = uc.commentRepo.DeleteByAssignment(assignmentID)
+	_ = uc.submissionRepo.DeleteByAssignment(assignmentID)
+	return uc.assignmentRepo.Delete(assignmentID)
+}
+
+// ── ListMaterialComments ──────────────────────────────────────────────────────
+
+type ListMaterialComments struct {
+	memberRepo   repository.CourseMemberRepository
+	materialRepo repository.MaterialRepository
+	commentRepo  repository.CommentRepository
+}
+
+func NewListMaterialComments(memberRepo repository.CourseMemberRepository, materialRepo repository.MaterialRepository, commentRepo repository.CommentRepository) *ListMaterialComments {
+	return &ListMaterialComments{memberRepo: memberRepo, materialRepo: materialRepo, commentRepo: commentRepo}
+}
+
+func (uc *ListMaterialComments) ListMaterialComments(courseID, materialID, userID string) ([]*domain.Comment, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	m, err := uc.materialRepo.GetByID(materialID)
+	if err != nil || m == nil || m.CourseID != courseID {
+		return nil, ErrCourseNotFound
+	}
+	all, err := uc.commentRepo.ListByMaterial(materialID)
 	if err != nil {
-		return nil, nil, &ValidationError{Message: "file not found"}
+		return nil, err
 	}
+	return filterPrivateComments(all, userID, role), nil
+}
 
-	return f, data, nil
+// filterPrivateComments для owner/teacher возвращает всё.
+// Для студента: публичные комментарии + его собственные приватные
+// (и все ответы в его приватных ветках).
+func filterPrivateComments(all []*domain.Comment, userID string, role domain.CourseRole) []*domain.Comment {
+	if role == domain.RoleOwner || role == domain.RoleTeacher {
+		return all
+	}
+	// Собираем ID приватных корней, начатых этим студентом
+	ownPrivateRoots := make(map[string]bool)
+	for _, c := range all {
+		if c.IsPrivate && c.UserID == userID && c.ParentID == nil {
+			ownPrivateRoots[c.ID] = true
+		}
+	}
+	// Расширяем: все потомки приватных корней студента тоже видимы
+	visible := make(map[string]bool)
+	for id := range ownPrivateRoots {
+		visible[id] = true
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, c := range all {
+			if c.ParentID != nil && visible[*c.ParentID] && !visible[c.ID] {
+				visible[c.ID] = true
+				changed = true
+			}
+		}
+	}
+	var out []*domain.Comment
+	for _, c := range all {
+		if !c.IsPrivate || visible[c.ID] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
