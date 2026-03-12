@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Box,
   Button,
   Dialog,
+  DialogActions,
   DialogContent,
+  DialogContentText,
   DialogTitle,
   IconButton,
   Menu,
@@ -12,21 +14,22 @@ import {
   Typography,
 } from '@mui/material'
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined'
-import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
 import {
   listAssignmentComments,
   createAssignmentComment,
-  uploadFiles,
+  deleteAssignment,
 } from '../../../api/coursesApi'
 import { useAuth } from '../../../../auth/model/AuthContext'
 import {
   type Comment,
   type FeedItem,
   type Member,
+  buildCommentTree,
   countCommentsRecursively,
   getGeneralComments,
   getNameByUserId,
@@ -39,6 +42,7 @@ type AssignmentCardProps = {
   onClick: () => void
   isTeacher?: boolean
   courseMembers?: Member[]
+  onDeleted?: () => void
 }
 
 function formatDateTime(dateStr?: string): string {
@@ -82,7 +86,15 @@ function GeneralCommentItem({
   const isReplyingToThis = replyToParentId === comment.id
   const isOwn = authUserId && comment.user_id === authUserId
   return (
-    <Box className="flex flex-col gap-1" sx={{ ml: depth * 2 }}>
+    <Box
+      className="flex flex-col gap-1"
+      sx={{
+        ml: depth > 0 ? 3 : 0,
+        pl: depth > 0 ? 2 : 0,
+        borderLeft: depth > 0 ? '2px solid' : 'none',
+        borderColor: 'grey.300',
+      }}
+    >
       <Box
         className="p-3 rounded-lg"
         sx={{
@@ -100,6 +112,11 @@ function GeneralCommentItem({
           {comment.body || '(без текста)'}
         </Typography>
         <Box className="flex items-center gap-2 mt-1 flex-wrap">
+          {comment.is_private && (
+            <Typography variant="caption" color="primary" sx={{ fontWeight: 500 }}>
+              Приватный
+            </Typography>
+          )}
           <Typography variant="caption" color="text.secondary">
             {authorName} · {formatDateTime(comment.created_at)}
           </Typography>
@@ -126,7 +143,7 @@ function GeneralCommentItem({
         </Box>
       )}
       {comment.replies && comment.replies.length > 0 && (
-        <Box className="flex flex-col gap-2 mt-1">
+        <Box className="flex flex-col gap-2 mt-2">
           {comment.replies.map((r) => (
             <GeneralCommentItem
               key={r.id}
@@ -172,6 +189,7 @@ export function AssignmentCard({
   onClick,
   isTeacher = false,
   courseMembers = [],
+  onDeleted,
 }: AssignmentCardProps) {
   const { user: authUser } = useAuth()
   const [comments, setComments] = useState<Comment[]>([])
@@ -179,10 +197,10 @@ export function AssignmentCard({
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [commentsModalOpen, setCommentsModalOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
-  const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [submittingComment, setSubmittingComment] = useState(false)
   const [replyToParentId, setReplyToParentId] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   useEffect(() => {
     if (!courseId) return
@@ -202,28 +220,20 @@ export function AssignmentCard({
     if (!trimmed || !courseId || submittingComment) return
     setSubmittingComment(true)
     try {
-      const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
       const payload: {
         body: string
-        file_ids: string[]
         parent_id?: string | null
-      } = { body: trimmed, file_ids: fileIds }
+        is_private?: boolean
+      } = { body: trimmed, is_private: false }
       if (opts?.parent_id != null) payload.parent_id = opts.parent_id
-      const created = await createAssignmentComment(courseId, item.id, payload)
+      await createAssignmentComment(courseId, item.id, payload)
       const refreshed = await listAssignmentComments(courseId, item.id)
       setComments(refreshed)
       setCommentText('')
-      setCommentFiles([])
       setReplyToParentId(null)
     } finally {
       setSubmittingComment(false)
     }
-  }
-
-  const handleCommentFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files
-    if (selected) setCommentFiles((prev) => [...prev, ...Array.from(selected)])
-    e.target.value = ''
   }
 
   const handleCloseCommentsModal = () => {
@@ -231,9 +241,23 @@ export function AssignmentCard({
     setReplyToParentId(null)
   }
 
+  const handleDeleteAssignment = async () => {
+    if (!courseId) return
+    setDeleteLoading(true)
+    try {
+      await deleteAssignment(courseId, item.id)
+      setDeleteDialogOpen(false)
+      onDeleted?.()
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  const commentsTree = buildCommentTree(comments)
   const displayDate = formatDate(item.created_at)
-  const generalCount = countCommentsRecursively(getGeneralComments(comments))
+  const generalCount = countCommentsRecursively(getGeneralComments(commentsTree))
   const hasComments = generalCount > 0
+  const canDelete = isTeacher
 
   return (
     <Box className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -343,7 +367,45 @@ export function AssignmentCard({
           <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
           Копировать ссылку
         </MenuItem>
+        {canDelete && (
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null)
+              setDeleteDialogOpen(true)
+            }}
+            sx={{ color: 'error.main' }}
+          >
+            <DeleteOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
+            Удалить задание
+          </MenuItem>
+        )}
       </Menu>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
+        aria-labelledby="delete-assignment-dialog-title"
+      >
+        <DialogTitle id="delete-assignment-dialog-title">Удалить задание?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Задание «{item.title}» будет удалено безвозвратно вместе со всеми ответами и комментариями.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+            Отмена
+          </Button>
+          <Button
+            onClick={handleDeleteAssignment}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? 'Удаление…' : 'Удалить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog
         open={commentsModalOpen}
@@ -362,7 +424,7 @@ export function AssignmentCard({
               Общие комментарии
             </Typography>
                 {(() => {
-                  const generalComments = getGeneralComments(comments).sort(
+                  const generalComments = getGeneralComments(commentsTree).sort(
                     (a, b) =>
                       new Date(a.created_at ?? 0).getTime() -
                       new Date(b.created_at ?? 0).getTime(),
@@ -384,23 +446,6 @@ export function AssignmentCard({
                         inputProps={{ 'aria-label': 'Текст комментария' }}
                       />
                       <Box className="flex items-center gap-2">
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={handleCommentFileChange}
-                          aria-label="Прикрепить файл"
-                        />
-                        <Button
-                          component="span"
-                          variant="outlined"
-                          size="small"
-                          startIcon={<AttachFileOutlinedIcon />}
-                          onClick={() => fileInputRef.current?.click()}
-                        >
-                          Файл
-                        </Button>
                         <Button
                           type="submit"
                           variant="contained"
@@ -446,23 +491,6 @@ export function AssignmentCard({
                             inputProps={{ 'aria-label': 'Текст комментария' }}
                           />
                           <Box className="flex items-center gap-2">
-                            <input
-                              ref={fileInputRef}
-                              type="file"
-                              multiple
-                              className="hidden"
-                              onChange={handleCommentFileChange}
-                              aria-label="Прикрепить файл"
-                            />
-                            <Button
-                              component="span"
-                              variant="outlined"
-                              size="small"
-                              startIcon={<AttachFileOutlinedIcon />}
-                              onClick={() => fileInputRef.current?.click()}
-                            >
-                              Файл
-                            </Button>
                             <Button
                               type="submit"
                               variant="contained"

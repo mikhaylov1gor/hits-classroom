@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Avatar,
   Box,
@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  DialogContentText,
   DialogTitle,
   Divider,
   FormControl,
@@ -24,6 +25,7 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import UndoOutlinedIcon from '@mui/icons-material/UndoOutlined'
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined'
@@ -32,13 +34,10 @@ import CloseIcon from '@mui/icons-material/Close'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
-import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
 import LinkIcon from '@mui/icons-material/Link'
-import EmailOutlinedIcon from '@mui/icons-material/EmailOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline'
-import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
 import SlideshowOutlinedIcon from '@mui/icons-material/SlideshowOutlined'
 import TableChartOutlinedIcon from '@mui/icons-material/TableChartOutlined'
@@ -48,27 +47,44 @@ import {
   getAssignment,
   getCourse,
   listSubmissions,
+  getMySubmission,
   submitAssignment,
-  updateSubmission,
   gradeSubmission,
   returnSubmission,
   listAssignmentComments,
   createAssignmentComment,
   listCourseMembers,
   uploadFiles,
+  deleteAssignment,
 } from '../../../features/courses/api/coursesApi'
 import { useAuth } from '../../../features/auth/model/AuthContext'
+import {
+  isValidUrl,
+  parseSubmissionBodyLinks,
+  getLinkHref,
+} from '../../../features/courses/utils/urlValidation'
+import {
+  formatGradeDisplay,
+  isPassFailGrading,
+} from '../../../features/courses/utils/gradeUtils'
 import {
   type Assignment,
   type Comment,
   type Member,
   type Submission,
+  buildCommentTree,
   getGeneralComments,
-  filterStudentComments,
+  getPersonalCommentsTreeForStudent,
+  getPersonalCommentsTreeForTeacher,
   filterTeacherDialogComments,
   getNameByUserId,
   getInitialsFromMember,
+  isSubmissionDraft,
+  isSubmissionReturned,
 } from '../../../features/courses/model/types'
+import { SubmitAssignmentConfirmDialog } from '../../../features/courses/ui/SubmitAssignmentConfirmDialog/SubmitAssignmentConfirmDialog'
+import { ReturnSubmissionConfirmDialog } from '../../../features/courses/ui/ReturnSubmissionConfirmDialog/ReturnSubmissionConfirmDialog'
+import { FileAttachmentLink } from '../../../features/courses/ui/FileAttachmentLink/FileAttachmentLink'
 
 const DRAFT_STORAGE_KEY = 'assignment-draft'
 
@@ -112,7 +128,7 @@ function saveDraft(
   }
 }
 
-function GeneralCommentItem({
+function PersonalCommentItem({
   comment,
   depth,
   replyToParentId,
@@ -134,10 +150,18 @@ function GeneralCommentItem({
   formatDate: (s?: string) => string
 }) {
   const authorName = getNameByUserId(courseMembers, comment.user_id, comment.author)
-  const isReplyingToThis = replyToParentId === comment.id
   const isOwn = authUserId && comment.user_id === authUserId
+  const isReplyingToThis = replyToParentId === comment.id
   return (
-    <Box className="flex flex-col gap-1" sx={{ ml: depth * 2 }}>
+    <Box
+      className="flex flex-col gap-1"
+      sx={{
+        ml: depth > 0 ? 3 : 0,
+        pl: depth > 0 ? 2 : 0,
+        borderLeft: depth > 0 ? '2px solid' : 'none',
+        borderColor: 'grey.300',
+      }}
+    >
       <Box
         className="p-3 rounded-lg"
         sx={{
@@ -181,7 +205,110 @@ function GeneralCommentItem({
         </Box>
       )}
       {comment.replies && comment.replies.length > 0 && (
-        <Box className="flex flex-col gap-2 mt-1">
+        <Box className="flex flex-col gap-2 mt-2">
+          {comment.replies.map((r) => (
+            <PersonalCommentItem
+              key={r.id}
+              comment={r}
+              depth={depth + 1}
+              replyToParentId={replyToParentId}
+              onReply={onReply}
+              onCancelReply={onCancelReply}
+              renderReplyForm={renderReplyForm}
+              courseMembers={courseMembers}
+              authUserId={authUserId}
+              formatDate={formatDate}
+            />
+          ))}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+function GeneralCommentItem({
+  comment,
+  depth,
+  replyToParentId,
+  onReply,
+  onCancelReply,
+  renderReplyForm,
+  courseMembers,
+  authUserId,
+  formatDate,
+}: {
+  comment: Comment
+  depth: number
+  replyToParentId: string | null
+  onReply: (parentId: string) => void
+  onCancelReply: () => void
+  renderReplyForm: (parentId: string) => React.ReactNode
+  courseMembers: Member[]
+  authUserId?: string
+  formatDate: (s?: string) => string
+}) {
+  const authorName = getNameByUserId(courseMembers, comment.user_id, comment.author)
+  const isReplyingToThis = replyToParentId === comment.id
+  const isOwn = authUserId && comment.user_id === authUserId
+  return (
+    <Box
+      className="flex flex-col gap-1"
+      sx={{
+        ml: depth > 0 ? 3 : 0,
+        pl: depth > 0 ? 2 : 0,
+        borderLeft: depth > 0 ? '2px solid' : 'none',
+        borderColor: 'grey.300',
+      }}
+    >
+      <Box
+        className="p-3 rounded-lg"
+        sx={{
+          bgcolor: 'grey.50',
+          border: '1px solid',
+          borderColor: 'grey.200',
+          ...(isOwn && {
+            borderLeft: '4px solid',
+            borderLeftColor: 'primary.main',
+            pl: 2.5,
+          }),
+        }}
+      >
+        <Typography variant="body2" className="text-slate-700">
+          {comment.body || '(без текста)'}
+        </Typography>
+        <Box className="flex items-center gap-2 mt-1 flex-wrap">
+          {comment.is_private && (
+            <Typography variant="caption" color="primary" sx={{ fontWeight: 500 }}>
+              Приватный
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            {authorName} · {formatDate(comment.created_at)}
+          </Typography>
+          <Button
+            size="small"
+            variant="text"
+            startIcon={<ReplyOutlinedIcon sx={{ fontSize: 14 }} />}
+            onClick={() => onReply(comment.id)}
+            sx={{ minWidth: 'auto', p: 0, fontSize: '0.75rem' }}
+          >
+            Ответить
+          </Button>
+        </Box>
+      </Box>
+      {isReplyingToThis && (
+        <Box className="mt-2 pl-2" sx={{ borderLeft: '2px solid', borderColor: 'primary.light' }}>
+          <Typography variant="caption" color="text.secondary" className="block mb-1">
+            Ответ на комментарий {authorName}
+          </Typography>
+          {renderReplyForm(comment.id)}
+          <Button size="small" variant="text" onClick={onCancelReply} sx={{ mt: 0.5 }}>
+            Отмена
+          </Button>
+        </Box>
+      )}
+      {comment.replies && comment.replies.length > 0 && (
+        <Box className="flex flex-col gap-2 mt-2">
           {comment.replies.map((r) => (
             <GeneralCommentItem
               key={r.id}
@@ -221,14 +348,17 @@ function formatDate(dateStr?: string): string {
 function getStatusLabel(
   submission: Submission | null,
   deadline: string | null | undefined,
+  maxGrade: number = 100,
 ): string {
   if (!submission) {
     if (deadline && new Date(deadline) < new Date()) return 'Просрочено'
     return 'Не сдано'
   }
-  if (submission.status === 'returned') return 'Возвращено на доработку'
+  if (isSubmissionReturned(submission)) return 'Возвращено на доработку'
+  if (isSubmissionDraft(submission)) return 'Черновик'
   if (submission.submitted_at) {
-    if (submission.grade != null) return `Сдано · Оценка: ${submission.grade}`
+    if (submission.grade != null)
+      return `Сдано · ${formatGradeDisplay(submission.grade, maxGrade)}`
     return 'Сдано · Проверяется'
   }
   return 'Не сдано'
@@ -253,16 +383,15 @@ export function AssignmentPage() {
   const [gradeLoading, setGradeLoading] = useState<Record<string, boolean>>({})
   const [returnLoading, setReturnLoading] = useState<Record<string, boolean>>({})
   const [editingGradeFor, setEditingGradeFor] = useState<string | null>(null)
-  const [showAddComment, setShowAddComment] = useState(false)
   const [showAddGeneralComment, setShowAddGeneralComment] = useState(false)
   const [addMenuAnchor, setAddMenuAnchor] = useState<HTMLElement | null>(null)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
+  const [linkUrlError, setLinkUrlError] = useState<string | null>(null)
   const [courseMembers, setCourseMembers] = useState<Member[]>([])
   const [replyToStudent, setReplyToStudent] = useState<string | null>(null)
   const [replyToParentId, setReplyToParentId] = useState<string | null>(null)
   const [commentText, setCommentText] = useState('')
-  const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [submittingComment, setSubmittingComment] = useState(false)
   const [dialogOpenUserId, setDialogOpenUserId] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -272,8 +401,12 @@ export function AssignmentPage() {
   const [studentSortBy, setStudentSortBy] = useState<string>('name')
   const [commentsTab, setCommentsTab] = useState<'general' | 'personal'>('general')
   const [assignmentMenuAnchor, setAssignmentMenuAnchor] = useState<HTMLElement | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
+  const [showReturnConfirm, setShowReturnConfirm] = useState(false)
+  const [draftSaving, setDraftSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const commentFileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!courseId || !assignmentId) {
@@ -298,15 +431,9 @@ export function AssignmentPage() {
         if (isTeacher) {
           return listSubmissions(courseId, assignmentId).then((s) => setSubmissions(s))
         }
-        return listSubmissions(courseId, assignmentId)
-          .then((s) => setSubmissions(s.filter((x) => x.user_id === authUser?.id)))
-          .catch((err) => {
-            if (err instanceof Error && err.message === 'FORBIDDEN') {
-              setSubmissions([])
-            } else {
-              throw err
-            }
-          })
+        return getMySubmission(courseId, assignmentId).then((my) =>
+          setSubmissions(my ? [my] : []),
+        )
       })
       .catch(() => {
         setCourse(null)
@@ -316,15 +443,14 @@ export function AssignmentPage() {
         setCourseMembers([])
       })
       .finally(() => setLoading(false))
-  }, [courseId, assignmentId, authUser?.id, navigate])
+  }, [courseId, assignmentId])
 
   const mySubmission = submissions.find((s) => s.user_id === authUser?.id)
   const [restoredFileNames, setRestoredFileNames] = useState<string[]>([])
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const canEditSubmission =
-    !mySubmission || mySubmission.status === 'returned' || mySubmission.status === 'draft'
+    !mySubmission || isSubmissionReturned(mySubmission) || isSubmissionDraft(mySubmission)
 
   useEffect(() => {
     if (!courseId || !assignmentId || mySubmission) return
@@ -335,18 +461,14 @@ export function AssignmentPage() {
     }
   }, [courseId, assignmentId, mySubmission])
 
-  const returnedInitRef = useRef<string | null>(null)
+  const submissionBodyInitRef = useRef<string | null>(null)
   useEffect(() => {
-    if (
-      mySubmission?.status === 'returned' &&
-      mySubmission.body &&
-      returnedInitRef.current !== mySubmission.id
-    ) {
-      returnedInitRef.current = mySubmission.id
-      const links = mySubmission.body.split('\n').map((s) => s.trim()).filter(Boolean)
+    if (mySubmission?.body && submissionBodyInitRef.current !== mySubmission.id) {
+      submissionBodyInitRef.current = mySubmission.id
+      const links = parseSubmissionBodyLinks(mySubmission.body)
       if (links.length > 0) setAnswerLinks(links)
     }
-  }, [mySubmission?.id, mySubmission?.status, mySubmission?.body])
+  }, [mySubmission])
 
   useEffect(() => {
     if (!courseId || !assignmentId || mySubmission) return
@@ -357,53 +479,17 @@ export function AssignmentPage() {
     })
   }, [courseId, assignmentId, mySubmission, answerLinks, answerFiles])
 
-  const performAutoSave = useCallback(async () => {
-    if (
-      !courseId ||
-      !assignmentId ||
-      !mySubmission ||
-      mySubmission.status !== 'returned' ||
-      submitting
-    )
-      return
-    setAutoSaveStatus('saving')
-    try {
-      const fileIds = answerFiles.length > 0 ? await uploadFiles(answerFiles) : []
-      await updateSubmission(courseId, assignmentId, mySubmission.id, {
-        body: answerLinks.length > 0 ? answerLinks.join('\n') : undefined,
-        file_ids: fileIds,
-      })
-      setAutoSaveStatus('saved')
-      setTimeout(() => setAutoSaveStatus('idle'), 2000)
-    } catch {
-      setAutoSaveStatus('error')
-    }
-  }, [
-    courseId,
-    assignmentId,
-    mySubmission,
-    answerLinks,
-    answerFiles,
-    submitting,
-  ])
-
-  useEffect(() => {
-    if (!canEditSubmission || !mySubmission?.id || mySubmission.status !== 'returned') return
-    if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
-    autoSaveTimeoutRef.current = setTimeout(() => {
-      performAutoSave()
-      autoSaveTimeoutRef.current = null
-    }, 1500)
-    return () => {
-      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
-    }
-  }, [canEditSubmission, mySubmission?.id, mySubmission?.status, answerLinks, answerFiles, performAutoSave])
   const courseWithRole = course as { title?: string; role?: string } | null
   const isTeacher = courseWithRole?.role === 'teacher' || courseWithRole?.role === 'owner'
-  const statusLabel = getStatusLabel(mySubmission ?? null, assignment?.deadline ?? null)
+  const maxGrade = (assignment as { max_grade?: number } | null)?.max_grade ?? 100
+  const statusLabel = getStatusLabel(
+    mySubmission ?? null,
+    assignment?.deadline ?? null,
+    maxGrade,
+  )
 
   const students = courseMembers.filter((m) => m.role === 'student')
-  const submittedCount = submissions.filter((s) => s.submitted_at).length
+  const submittedCount = submissions.filter((s) => s.is_attached === true).length
   const gradedCount = submissions.filter((s) => s.grade != null).length
   const assignedCount = students.filter(
     (s) => !submissions.some((sub) => sub.user_id === s.user_id),
@@ -415,7 +501,7 @@ export function AssignmentPage() {
   const getStudentStatus = (userId: string): 'graded' | 'submitted' | 'assigned' => {
     const sub = getSubmissionForStudent(userId)
     if (sub?.grade != null) return 'graded'
-    if (sub?.submitted_at) return 'submitted'
+    if (sub && sub.is_attached === true) return 'submitted'
     return 'assigned'
   }
 
@@ -456,9 +542,7 @@ export function AssignmentPage() {
       })
     }
   }, [activeTab, isTeacher, filteredStudents])
-  const assignmentExt = assignment as Assignment & {
-    attachments?: { id: string; name: string }[]
-  }
+  const assignmentFileIds = (assignment as { file_ids?: string[] })?.file_ids ?? []
   const displayAuthor =
     (assignment?.user_id
       ? getNameByUserId(courseMembers, assignment.user_id, assignment.author)
@@ -466,28 +550,25 @@ export function AssignmentPage() {
         ? `${assignment.author.first_name} ${assignment.author.last_name}`.trim()
         : null) || 'Преподаватель'
 
-  const handleSubmitAnswer = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const performSubmit = async () => {
     if (!assignmentId || !courseId || submitting) return
     setSubmitError(null)
     setSubmitting(true)
+    setShowSubmitConfirm(false)
     try {
-      const fileIds = answerFiles.length > 0 ? await uploadFiles(answerFiles) : []
-      if (mySubmission?.status === 'returned' && mySubmission.id) {
-        const updated = await updateSubmission(courseId, assignmentId, mySubmission.id, {
-          body: answerLinks.length > 0 ? answerLinks.join('\n') : undefined,
-          file_ids: fileIds,
-        })
-        setSubmissions((prev) =>
-          prev.map((s) => (s.id === mySubmission.id ? updated : s)),
-        )
-      } else {
-        const created = await submitAssignment(courseId, assignmentId, {
-          body: answerLinks.length > 0 ? answerLinks.join('\n') : undefined,
-          file_ids: fileIds,
-        })
-        setSubmissions([created])
-      }
+      const newFileIds = answerFiles.length > 0 ? await uploadFiles(answerFiles) : []
+      const existingIds = mySubmission?.file_ids ?? []
+      const fileIds = [...existingIds, ...newFileIds]
+      const created = await submitAssignment(courseId, assignmentId, {
+        body: answerLinks.length > 0 ? answerLinks.join('\n') : undefined,
+        file_ids: fileIds,
+        is_attached: true,
+      })
+      setSubmissions((prev) =>
+        mySubmission
+          ? prev.map((s) => (s.id === mySubmission.id ? created : s))
+          : [created],
+      )
       setAnswerFiles([])
       setAnswerLinks([])
       setRestoredFileNames([])
@@ -496,16 +577,51 @@ export function AssignmentPage() {
       }
     } catch (err) {
       setSubmitError(
-        err instanceof Error && err.message === 'ALREADY_SUBMITTED'
-          ? 'Ответ уже отправлен'
-          : 'Не удалось отправить ответ',
+        err instanceof Error && err.message === 'DEADLINE_EXCEEDED'
+          ? 'Дедлайн истёк, сдача невозможна'
+          : err instanceof Error && err.message === 'ALREADY_SUBMITTED'
+            ? 'Ответ уже отправлен'
+            : 'Не удалось отправить ответ',
       )
     } finally {
       setSubmitting(false)
     }
   }
 
-  const maxGrade = (assignment as { max_grade?: number } | null)?.max_grade ?? 100
+  const handleSubmitAnswer = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!assignmentId || !courseId || submitting) return
+    if (assignment?.deadline && new Date(assignment.deadline) < new Date()) {
+      setSubmitError('Дедлайн истёк, сдача невозможна')
+      return
+    }
+    setSubmitError(null)
+    setShowSubmitConfirm(true)
+  }
+
+  const handleRemoveDraftFile = async (fileId: string) => {
+    if (!assignmentId || !courseId || submitting || draftSaving) return
+    const currentIds = mySubmission?.file_ids ?? []
+    const newIds = currentIds.filter((id) => id !== fileId)
+    setDraftSaving(true)
+    setSubmitError(null)
+    try {
+      const created = await submitAssignment(courseId, assignmentId, {
+        body: answerLinks.length > 0 ? answerLinks.join('\n') : undefined,
+        file_ids: newIds,
+        is_attached: false,
+      })
+      setSubmissions((prev) =>
+        mySubmission
+          ? prev.map((s) => (s.id === mySubmission.id ? created : s))
+          : [created],
+      )
+    } catch {
+      setSubmitError('Не удалось удалить файл')
+    } finally {
+      setDraftSaving(false)
+    }
+  }
 
   const isGradeValid = (val: string, status: 'passed' | 'failed' | null): boolean => {
     if (status === 'passed' || status === 'failed') return true
@@ -542,8 +658,6 @@ export function AssignmentPage() {
     if (!courseId || !assignmentId) return
 
     const commentParts: string[] = []
-    if (status === 'passed') commentParts.push('Зачтено')
-    else if (status === 'failed') commentParts.push('Не зачтено')
     const customComment = (gradeComments[submissionId] ?? '').trim()
     if (customComment) commentParts.push(customComment)
     const grade_comment = commentParts.length > 0 ? commentParts.join('\n') : undefined
@@ -559,16 +673,34 @@ export function AssignmentPage() {
     }
   }
 
-  const handleReturnSubmission = async (submissionId: string) => {
+  const performReturnSubmission = async (submissionId: string) => {
     if (!courseId || !assignmentId) return
     setReturnLoading((prev) => ({ ...prev, [submissionId]: true }))
     try {
       await returnSubmission(courseId, assignmentId, submissionId)
       const updated = await listSubmissions(courseId, assignmentId)
       setSubmissions(updated)
+      setShowReturnConfirm(false)
     } catch {
+      setShowReturnConfirm(false)
     } finally {
       setReturnLoading((prev) => ({ ...prev, [submissionId]: false }))
+    }
+  }
+
+  const handleReturnSubmission = () => {
+    if (selectedSubmission) setShowReturnConfirm(true)
+  }
+
+  const handleDeleteAssignment = async () => {
+    if (!courseId || !assignmentId) return
+    setDeleteLoading(true)
+    try {
+      await deleteAssignment(courseId, assignmentId)
+      setDeleteDialogOpen(false)
+      navigate(`/course/${courseId}`)
+    } finally {
+      setDeleteLoading(false)
     }
   }
 
@@ -582,52 +714,98 @@ export function AssignmentPage() {
 
     setSubmittingComment(true)
     try {
-      const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
+      const isPersonal = !opts?.isGeneral
       const payload: {
         body: string
-        file_ids: string[]
-        reply_to_user_id?: string
         parent_id?: string | null
-      } = { body: trimmed, file_ids: fileIds }
-      if (opts?.isGeneral) {
-        if (opts.parent_id != null) payload.parent_id = opts.parent_id
-      } else if (replyToStudent) {
-        payload.reply_to_user_id = replyToStudent
+        is_private?: boolean
+      } = {
+        body: trimmed,
+        is_private: isPersonal,
       }
+      if (opts?.parent_id != null) payload.parent_id = opts.parent_id
       await createAssignmentComment(courseId, assignmentId, payload)
       const refreshed = await listAssignmentComments(courseId, assignmentId)
       setComments(refreshed)
       setCommentText('')
-      setCommentFiles([])
       setReplyToParentId(null)
-      setShowAddComment(false)
       setShowAddGeneralComment(false)
     } finally {
       setSubmittingComment(false)
     }
   }
 
+  const saveDraftToServer = async (files: File[], links: string[]) => {
+    if (courseWithRole?.role === 'teacher' || courseWithRole?.role === 'owner') return
+    if (!canEditSubmission || !courseId || !assignmentId || submitting || draftSaving) return
+    if (isSubmissionReturned(mySubmission)) {
+      if (!mySubmission) return
+      setAutoSaveStatus('saving')
+      try {
+        const newFileIds = files.length > 0 ? await uploadFiles(files) : []
+        const existingIds = mySubmission.file_ids ?? []
+        const fileIds = [...existingIds, ...newFileIds]
+        const created = await submitAssignment(courseId, assignmentId, {
+          body: links.length > 0 ? links.join('\n') : undefined,
+          file_ids: fileIds,
+          is_attached: false,
+        })
+        setSubmissions((prev) =>
+          prev.map((s) => (s.id === mySubmission.id ? created : s)),
+        )
+        setAnswerFiles([])
+        setAutoSaveStatus('saved')
+        setTimeout(() => setAutoSaveStatus('idle'), 2000)
+      } catch {
+        setAutoSaveStatus('error')
+      }
+    } else {
+      setDraftSaving(true)
+      setSubmitError(null)
+      try {
+        const newFileIds = files.length > 0 ? await uploadFiles(files) : []
+        const existingIds = mySubmission?.file_ids ?? []
+        const fileIds = [...existingIds, ...newFileIds]
+        const created = await submitAssignment(courseId, assignmentId, {
+          body: links.length > 0 ? links.join('\n') : undefined,
+          file_ids: fileIds,
+          is_attached: false,
+        })
+        setSubmissions((prev) =>
+          mySubmission
+            ? prev.map((s) => (s.id === mySubmission.id ? created : s))
+            : [created],
+        )
+        setAnswerFiles([])
+      } catch {
+        setSubmitError('Не удалось сохранить черновик')
+      } finally {
+        setDraftSaving(false)
+      }
+    }
+  }
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files
     if (selected) {
-      setAnswerFiles((prev) => [...prev, ...Array.from(selected)])
+      const newFiles = [...answerFiles, ...Array.from(selected)]
+      setAnswerFiles(newFiles)
       setRestoredFileNames([])
+      void saveDraftToServer(newFiles, answerLinks)
     }
     e.target.value = ''
   }
 
   const removeAnswerFile = (index: number) => {
-    setAnswerFiles((prev) => prev.filter((_, i) => i !== index))
+    const newFiles = answerFiles.filter((_, i) => i !== index)
+    setAnswerFiles(newFiles)
+    void saveDraftToServer(newFiles, answerLinks)
   }
 
   const removeAnswerLink = (index: number) => {
-    setAnswerLinks((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const handleCommentFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files
-    if (selected) setCommentFiles((prev) => [...prev, ...Array.from(selected)])
-    e.target.value = ''
+    const newLinks = answerLinks.filter((_, i) => i !== index)
+    setAnswerLinks(newLinks)
+    void saveDraftToServer(answerFiles, newLinks)
   }
 
   const handleBack = () => {
@@ -636,11 +814,17 @@ export function AssignmentPage() {
 
   const handleAddLink = () => {
     const trimmed = linkUrl.trim()
-    if (trimmed) {
-      setAnswerLinks((prev) => [...prev, trimmed])
-      setLinkUrl('')
-      setShowLinkDialog(false)
+    if (!trimmed) return
+    if (!isValidUrl(trimmed)) {
+      setLinkUrlError('Некорректная ссылка')
+      return
     }
+    setLinkUrlError(null)
+    const newLinks = [...answerLinks, trimmed]
+    setAnswerLinks(newLinks)
+    setLinkUrl('')
+    setShowLinkDialog(false)
+    void saveDraftToServer(answerFiles, newLinks)
   }
 
   if (!courseId || !assignmentId) return null
@@ -749,6 +933,18 @@ export function AssignmentPage() {
                     <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
                     Копировать ссылку
                   </MenuItem>
+                  {isTeacher && (
+                    <MenuItem
+                      onClick={() => {
+                        setAssignmentMenuAnchor(null)
+                        setDeleteDialogOpen(true)
+                      }}
+                      sx={{ color: 'error.main' }}
+                    >
+                      <DeleteOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
+                      Удалить задание
+                    </MenuItem>
+                  )}
                 </Menu>
               </Box>
               {assignment.deadline && (
@@ -765,21 +961,32 @@ export function AssignmentPage() {
             </Typography>
           </Box>
 
-          {assignmentExt?.attachments && assignmentExt.attachments.length > 0 && (
+          {(((assignment as { links?: string[] }).links ?? []).length > 0 || assignmentFileIds.length > 0) && (
             <Box className="mb-6">
               <Typography variant="subtitle2" className="text-slate-600 mb-2">
-                Вложения
+                Вложения ({((assignment as { links?: string[] }).links ?? []).length + assignmentFileIds.length})
               </Typography>
-              <Box className="flex flex-wrap gap-2">
-                {assignmentExt.attachments.map((a) => (
-                  <Box
-                    key={a.id}
-                    className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
-                  >
-                    <InsertDriveFileOutlinedIcon fontSize="small" color="action" />
-                    <Typography variant="body2" className="font-medium">
-                      {a.name}
+              <Box className="flex flex-col gap-2 w-full">
+                {((assignment as { links?: string[] }).links ?? []).map((url, i) => (
+                  <Box key={i} className="w-full">
+                    <Typography
+                      component="a"
+                      href={getLinkHref(url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="body2"
+                      className="text-primary-600 hover:underline break-all"
+                      sx={{ display: 'block' }}
+                    >
+                      {url}
                     </Typography>
+                  </Box>
+                ))}
+                {assignmentFileIds.map((fileId, i) => (
+                  <Box key={fileId} className="w-full">
+                    <FileAttachmentLink
+                      attachment={{ id: fileId, name: `Файл ${i + 1}` }}
+                    />
                   </Box>
                 ))}
               </Box>
@@ -799,7 +1006,8 @@ export function AssignmentPage() {
             {commentsTab === 'general' && (
             <Box>
               {(() => {
-                const generalComments = getGeneralComments(comments).sort(
+                const commentsTree = buildCommentTree(comments)
+                const generalComments = getGeneralComments(commentsTree).sort(
                   (a, b) =>
                     new Date(a.created_at ?? 0).getTime() -
                     new Date(b.created_at ?? 0).getTime(),
@@ -821,23 +1029,6 @@ export function AssignmentPage() {
                       inputProps={{ 'aria-label': 'Текст комментария' }}
                     />
                     <Box className="flex items-center gap-2">
-                      <input
-                        ref={commentFileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={handleCommentFileChange}
-                        aria-label="Прикрепить файл к комментарию"
-                      />
-                      <Button
-                        component="span"
-                        variant="outlined"
-                        size="small"
-                        startIcon={<AttachFileOutlinedIcon />}
-                        onClick={() => commentFileInputRef.current?.click()}
-                      >
-                        Файл
-                      </Button>
                       <Button
                         type="submit"
                         variant="contained"
@@ -905,23 +1096,6 @@ export function AssignmentPage() {
                               inputProps={{ 'aria-label': 'Текст комментария' }}
                             />
                             <Box className="flex items-center gap-2">
-                              <input
-                                ref={commentFileInputRef}
-                                type="file"
-                                multiple
-                                className="hidden"
-                                onChange={handleCommentFileChange}
-                                aria-label="Прикрепить файл к комментарию"
-                              />
-                              <Button
-                                component="span"
-                                variant="outlined"
-                                size="small"
-                                startIcon={<AttachFileOutlinedIcon />}
-                                onClick={() => commentFileInputRef.current?.click()}
-                              >
-                                Файл
-                              </Button>
                               <Button
                                 type="submit"
                                 variant="contained"
@@ -1012,108 +1186,114 @@ export function AssignmentPage() {
                   const teacherIds = courseMembers
                     .filter((m) => m.role === 'teacher' || m.role === 'owner')
                     .map((m) => m.user_id)
-                  const myConvComments = filterStudentComments(
+                  const myConvTree = getPersonalCommentsTreeForStudent(
                     comments,
                     authUser?.id,
                     teacherIds,
-                  ).sort(
-                      (a, b) =>
-                        new Date(a.created_at ?? 0).getTime() -
-                        new Date(b.created_at ?? 0).getTime(),
-                    )
+                  )
                   return (
                     <Box className="flex flex-col gap-2">
-                      {myConvComments.length === 0 && !showAddComment ? (
-                        <Box
-                          component="button"
-                          className="flex items-center gap-2 border-0 bg-transparent p-0 cursor-pointer text-left"
-                          onClick={() => setShowAddComment(true)}
-                        >
-                          <Typography variant="body2" color="primary" className="font-medium">
-                            Написать преподавателю
-                          </Typography>
-                        </Box>
+                      {myConvTree.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">
+                          Нет сообщений
+                        </Typography>
                       ) : (
-                        <>
-                          {myConvComments.map((c) => {
-                            const isOwn = c.user_id === authUser?.id
-                            return (
-                              <Box
+                        <Box className="flex flex-col gap-2">
+                            {myConvTree.map((c) => (
+                              <PersonalCommentItem
                                 key={c.id}
-                                className="p-3 rounded-lg"
-                                sx={{
-                                  bgcolor: 'grey.50',
-                                  border: '1px solid',
-                                  borderColor: 'grey.200',
-                                  ...(isOwn && {
-                                    borderLeft: '4px solid',
-                                    borderLeftColor: 'primary.main',
-                                    pl: 2.5,
-                                  }),
-                                }}
-                              >
-                                <Typography variant="body2" className="text-slate-700">
-                                  {c.body || '(без текста)'}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {getNameByUserId(courseMembers, c.user_id, c.author)}{' '}
-                                  · {formatDate(c.created_at)}
-                                </Typography>
-                              </Box>
-                            )
-                          })}
-                          {showAddComment && (
-                            <Box
-                              component="form"
-                              onSubmit={(e) => handleAddComment(e)}
-                              className="flex flex-col gap-2 mt-2"
-                            >
-                              <TextField
-                                label="Текст комментария"
-                                fullWidth
-                                multiline
-                                minRows={2}
-                                size="small"
-                                value={commentText}
-                                onChange={(e) => setCommentText(e.target.value)}
-                                inputProps={{ 'aria-label': 'Текст комментария' }}
-                              />
-                              <Box className="flex items-center gap-2">
-                                <input
-                                  ref={commentFileInputRef}
-                                  type="file"
-                                  multiple
-                                  className="hidden"
-                                  onChange={handleCommentFileChange}
-                                  aria-label="Прикрепить файл к комментарию"
-                                />
-                                <Button
-                                  component="span"
-                                  variant="outlined"
-                                  size="small"
-                                  startIcon={<AttachFileOutlinedIcon />}
-                                  onClick={() => commentFileInputRef.current?.click()}
-                                >
-                                  Файл
-                                </Button>
-                                {commentFiles.length > 0 && (
-                                  <Typography variant="caption" color="text.secondary">
-                                    {commentFiles.map((f) => f.name).join(', ')}
-                                  </Typography>
+                                comment={c}
+                                depth={0}
+                                replyToParentId={replyToParentId}
+                                onReply={setReplyToParentId}
+                                onCancelReply={() => setReplyToParentId(null)}
+                                renderReplyForm={(parentId) => (
+                                  <Box
+                                    component="form"
+                                    onSubmit={(e) => handleAddComment(e, { parent_id: parentId })}
+                                    className="flex flex-col gap-2"
+                                  >
+                                    <TextField
+                                      label="Текст ответа"
+                                      fullWidth
+                                      multiline
+                                      minRows={2}
+                                      size="small"
+                                      value={commentText}
+                                      onChange={(e) => setCommentText(e.target.value)}
+                                      inputProps={{ 'aria-label': 'Текст комментария' }}
+                                    />
+                                    <Box className="flex items-center gap-2">
+                                      <Button
+                                        type="submit"
+                                        variant="contained"
+                                        size="small"
+                                        disabled={submittingComment || !commentText.trim()}
+                                      >
+                                        Отправить
+                                      </Button>
+                                    </Box>
+                                  </Box>
                                 )}
-                                <Button
-                                  type="submit"
-                                  variant="contained"
-                                  size="small"
-                                  disabled={submittingComment || !commentText.trim()}
-                                >
-                                  Отправить
-                                </Button>
-                              </Box>
-                            </Box>
-                          )}
-                        </>
+                                courseMembers={courseMembers}
+                                authUserId={authUser?.id}
+                                formatDate={formatDate}
+                              />
+                            ))}
+                        </Box>
                       )}
+                      <Box className="flex flex-col gap-2 mt-4">
+                        {replyToParentId && (
+                          <Box className="flex items-center gap-2">
+                            <Typography variant="caption" color="text.secondary">
+                              Ответ на комментарий
+                            </Typography>
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => setReplyToParentId(null)}
+                              sx={{ minWidth: 'auto', p: 0 }}
+                            >
+                              Отмена
+                            </Button>
+                          </Box>
+                        )}
+                        <Box
+                          component="form"
+                          onSubmit={(e) =>
+                            handleAddComment(
+                              e,
+                              replyToParentId
+                                ? { parent_id: replyToParentId }
+                                : myConvTree[0]
+                                  ? { parent_id: myConvTree[0].id }
+                                  : undefined,
+                            )
+                          }
+                          className="flex flex-col gap-2"
+                        >
+                          <TextField
+                            label="Текст ответа"
+                            fullWidth
+                            multiline
+                            minRows={2}
+                            size="small"
+                            value={commentText}
+                            onChange={(e) => setCommentText(e.target.value)}
+                            inputProps={{ 'aria-label': 'Текст ответа' }}
+                          />
+                          <Box className="flex items-center gap-2">
+                            <Button
+                              type="submit"
+                              variant="contained"
+                              size="small"
+                              disabled={submittingComment || !commentText.trim()}
+                            >
+                              Отправить
+                            </Button>
+                          </Box>
+                        </Box>
+                      </Box>
                     </Box>
                   )
                 })()
@@ -1137,26 +1317,54 @@ export function AssignmentPage() {
 
               {mySubmission && !canEditSubmission ? (
                 <>
-                  <Box
-                    sx={{
-                      display: 'inline-block',
-                      px: 1.5,
-                      py: 0.5,
-                      borderRadius: '9999px',
-                      bgcolor: 'success.main',
-                      color: 'white',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      mb: 2,
-                    }}
-                  >
-                    {mySubmission.grade != null ? `Оценка: ${mySubmission.grade}` : 'Сдано'}
-                  </Box>
-                  <Typography variant="body2" className="whitespace-pre-wrap text-slate-600">
-                    {mySubmission.body || '—'}
-                  </Typography>
+                  {(mySubmission.file_ids ?? []).length > 0 && (
+                    <Box className="flex flex-col gap-2 mt-2">
+                      {(mySubmission.file_ids ?? []).map((fileId, i) => (
+                        <FileAttachmentLink
+                          key={fileId}
+                          attachment={{ id: fileId, name: `Файл ${i + 1}` }}
+                          fileSource={
+                            courseId && assignmentId
+                              ? {
+                                  type: 'submission',
+                                  courseId,
+                                  assignmentId,
+                                  submissionId: mySubmission.id,
+                                }
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </Box>
+                  )}
+                  {(() => {
+                    const links = parseSubmissionBodyLinks(mySubmission.body)
+                    if (links.length === 0) return null
+                    return (
+                      <Box className="mt-2 flex min-w-0 w-full flex-col gap-1">
+                        {links.map((url: string, i: number) => (
+                          <Typography
+                            key={`my-link-${i}`}
+                            component="a"
+                            href={getLinkHref(url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="body2"
+                            className="w-full text-primary-600 hover:underline break-all"
+                            sx={{ display: 'block' }}
+                          >
+                            {url}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )
+                  })()}
                   {mySubmission.grade_comment && (
-                    <Typography variant="body2" color="text.secondary" className="mt-2">
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mt: 3, pl: 2, borderLeft: '3px solid', borderColor: 'divider' }}
+                    >
                       Комментарий преподавателя: {mySubmission.grade_comment}
                     </Typography>
                   )}
@@ -1341,18 +1549,54 @@ export function AssignmentPage() {
                       </Box>
                     </MenuItem>
                   </Menu>
-                  {(answerFiles.length > 0 || answerLinks.length > 0 || restoredFileNames.length > 0) && (
+                  {((mySubmission?.file_ids ?? []).length > 0 ||
+                    answerFiles.length > 0 ||
+                    answerLinks.length > 0 ||
+                    restoredFileNames.length > 0) && (
                     <Box className="flex flex-col gap-2">
+                      {(mySubmission?.file_ids ?? []).length > 0 && (
+                        <Box className="flex flex-col gap-2">
+                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                            Прикреплённые файлы черновика
+                          </Typography>
+                          {(mySubmission?.file_ids ?? []).map((fileId) => (
+                            <Box key={fileId} className="flex w-full items-center gap-2">
+                              <FileAttachmentLink
+                                attachment={{ id: fileId, name: '' }}
+                                showDownload={true}
+                                fileSource={
+                                  courseId && assignmentId && mySubmission
+                                    ? {
+                                        type: 'submission',
+                                        courseId,
+                                        assignmentId,
+                                        submissionId: mySubmission.id,
+                                      }
+                                    : undefined
+                                }
+                              />
+                              <IconButton
+                                size="small"
+                                aria-label="Удалить файл"
+                                onClick={() => handleRemoveDraftFile(fileId)}
+                                disabled={draftSaving}
+                              >
+                                <CloseIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          ))}
+                        </Box>
+                      )}
                       {restoredFileNames.length > 0 && (
                         <Typography variant="caption" color="text.secondary">
                           Сохранённый прогресс (добавьте заново): {restoredFileNames.join(', ')}
                         </Typography>
                       )}
-                      <Box className="flex flex-wrap gap-2">
+                      <Box className="flex flex-col gap-2 w-full">
                       {answerFiles.map((f, i) => (
                         <Box
                           key={`file-${f.name}-${i}`}
-                          className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm"
+                          className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm w-full"
                         >
                           <AttachFileOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
                           <Typography variant="body2" className="truncate max-w-[120px]">
@@ -1370,10 +1614,17 @@ export function AssignmentPage() {
                       {answerLinks.map((url, i) => (
                         <Box
                           key={`link-${i}`}
-                          className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm"
+                          className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm w-full"
                         >
                           <LinkIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography variant="body2" className="truncate max-w-[120px]">
+                          <Typography
+                            variant="body2"
+                            component="a"
+                            href={getLinkHref(url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="truncate max-w-[120px] text-primary-600 hover:underline"
+                          >
                             {url}
                           </Typography>
                           <IconButton
@@ -1388,7 +1639,7 @@ export function AssignmentPage() {
                       </Box>
                     </Box>
                   )}
-                  {mySubmission?.status === 'returned' && (
+                  {isSubmissionReturned(mySubmission) && (
                     <Typography variant="caption" color="text.secondary">
                       {autoSaveStatus === 'saving' && 'Сохранение…'}
                       {autoSaveStatus === 'saved' && 'Сохранено'}
@@ -1493,7 +1744,7 @@ export function AssignmentPage() {
                           </Typography>
                           {sectionStatus === 'graded' && sub?.grade != null && (
                             <Typography variant="body2" fontWeight={600}>
-                              {sub.grade}
+                              {formatGradeDisplay(sub.grade, maxGrade)}
                             </Typography>
                           )}
                         </Box>
@@ -1506,31 +1757,6 @@ export function AssignmentPage() {
           </Box>
 
           <Box className="flex-1 min-w-0 flex flex-col gap-4">
-            <Box className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="contained"
-                size="small"
-                endIcon={<UndoOutlinedIcon />}
-                onClick={() =>
-                  selectedSubmission && handleReturnSubmission(selectedSubmission.id)
-                }
-                disabled={!selectedSubmission || returnLoading[selectedSubmission?.id ?? '']}
-              >
-                Вернуть
-              </Button>
-              <IconButton size="small" aria-label="Письмо">
-                <EmailOutlinedIcon />
-              </IconButton>
-              <FormControl size="small" sx={{ minWidth: 80 }}>
-                <Select value={`${maxGrade}`} displayEmpty size="small" sx={{ bgcolor: 'grey.50' }}>
-                  <MenuItem value={`${maxGrade}`}>{maxGrade} балл</MenuItem>
-                </Select>
-              </FormControl>
-              <IconButton size="small" aria-label="Настройки">
-                <SettingsOutlinedIcon />
-              </IconButton>
-            </Box>
-
             <Typography variant="h6" className="font-semibold">
               {assignment?.title}
             </Typography>
@@ -1593,12 +1819,55 @@ export function AssignmentPage() {
                               selectedSubmission.author,
                             ) || 'Студент'}
                           </Typography>
-                          <Typography
-                            variant="body2"
-                            className="mt-2 whitespace-pre-wrap text-slate-600"
-                          >
-                            {selectedSubmission.body || '—'}
-                          </Typography>
+                          {(() => {
+                            const links = parseSubmissionBodyLinks(selectedSubmission.body)
+                            if (links.length === 0) {
+                              return (
+                                <Typography variant="body2" className="mt-2 text-slate-600">
+                                  —
+                                </Typography>
+                              )
+                            }
+                            return (
+                              <Box className="mt-2 flex min-w-0 w-full flex-col gap-1">
+                                {links.map((url: string, i: number) => (
+                                  <Typography
+                                    key={`${selectedSubmission.id}-link-${i}`}
+                                    component="a"
+                                    href={getLinkHref(url)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    variant="body2"
+                                    className="w-full text-primary-600 hover:underline break-all"
+                                    sx={{ display: 'block' }}
+                                  >
+                                    {url}
+                                  </Typography>
+                                ))}
+                              </Box>
+                            )
+                          })()}
+                          {(selectedSubmission.file_ids ?? []).length > 0 && (
+                            <Box className="flex flex-col gap-2 mt-2 w-full">
+                              {(selectedSubmission.file_ids ?? []).map((fileId, i) => (
+                                <Box key={fileId} className="w-full">
+                                  <FileAttachmentLink
+                                    attachment={{ id: fileId, name: `Файл ${i + 1}` }}
+                                    fileSource={
+                                      courseId && assignmentId
+                                        ? {
+                                            type: 'submission',
+                                            courseId,
+                                            assignmentId,
+                                            submissionId: selectedSubmission.id,
+                                          }
+                                        : undefined
+                                    }
+                                  />
+                                </Box>
+                              ))}
+                            </Box>
+                          )}
                         </Box>
                       </Box>
                       {selectedSubmission.grade != null && (
@@ -1607,25 +1876,41 @@ export function AssignmentPage() {
                             px: 1.5,
                             py: 0.5,
                             borderRadius: 1,
-                            bgcolor: 'success.main',
+                            bgcolor:
+                              maxGrade === 1 && selectedSubmission.grade < 1
+                                ? 'error.main'
+                                : 'success.main',
                             color: 'white',
                             fontSize: '0.875rem',
                             fontWeight: 600,
                             flexShrink: 0,
                           }}
                         >
-                          {selectedSubmission.grade}
+                          {formatGradeDisplay(selectedSubmission.grade, maxGrade)}
                         </Box>
                       )}
                     </Box>
                     {selectedSubmission.grade_comment && (
-                      <Typography variant="body2" color="text.secondary" className="mb-4">
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ mt: 3, mb: 4, pl: 2, borderLeft: '3px solid', borderColor: 'divider' }}
+                      >
                         {selectedSubmission.grade_comment}
                       </Typography>
                     )}
                     <Divider sx={{ my: 2 }} />
+                    {selectedSubmission.is_attached !== true ? (
+                      <Typography variant="body2" color="text.secondary">
+                        Работа не сдана. Оценить можно только после сдачи.
+                      </Typography>
+                    ) : (
                     <Box className="flex flex-wrap items-start gap-2">
-                      {selectedSubmission.grade != null && editingGradeFor !== selectedSubmission.id ? (
+                      {selectedSubmission.is_returned === true ? (
+                        <Typography variant="body2" color="text.secondary">
+                          Работа возвращена на доработку. Оценку изменить нельзя.
+                        </Typography>
+                      ) : selectedSubmission.grade != null && editingGradeFor !== selectedSubmission.id ? (
                         <>
                           <Button
                             size="small"
@@ -1640,6 +1925,16 @@ export function AssignmentPage() {
                                 ...prev,
                                 [selectedSubmission.id]: selectedSubmission.grade_comment ?? '',
                               }))
+                              if (
+                                isPassFailGrading(maxGrade) &&
+                                selectedSubmission.grade != null
+                              ) {
+                                setGradeStatuses((prev) => ({
+                                  ...prev,
+                                  [selectedSubmission.id]:
+                                    selectedSubmission.grade! >= 1 ? 'passed' : 'failed',
+                                }))
+                              }
                             }}
                           >
                             Изменить оценку
@@ -1649,7 +1944,7 @@ export function AssignmentPage() {
                             variant="outlined"
                             color="secondary"
                             startIcon={<UndoOutlinedIcon />}
-                            onClick={() => handleReturnSubmission(selectedSubmission.id)}
+                            onClick={handleReturnSubmission}
                             disabled={returnLoading[selectedSubmission.id]}
                           >
                             {returnLoading[selectedSubmission.id] ? '…' : 'Вернуть'}
@@ -1657,57 +1952,58 @@ export function AssignmentPage() {
                         </>
                       ) : (
                         <>
-                          <FormControl size="small" sx={{ minWidth: 140 }}>
-                            <InputLabel>Статус</InputLabel>
-                            <Select
-                              value={gradeStatuses[selectedSubmission.id] ?? ''}
-                              label="Статус"
+                          {isPassFailGrading(maxGrade) && (
+                            <FormControl size="small" sx={{ minWidth: 140 }}>
+                              <InputLabel>Статус</InputLabel>
+                              <Select
+                                value={gradeStatuses[selectedSubmission.id] ?? ''}
+                                label="Статус"
+                                onChange={(e) =>
+                                  handleGradeStatusChange(
+                                    selectedSubmission.id,
+                                    (e.target.value as 'passed' | 'failed' | '') || null,
+                                  )
+                                }
+                              >
+                                <MenuItem value="passed">Зачёт</MenuItem>
+                                <MenuItem value="failed">Не зачёт</MenuItem>
+                              </Select>
+                            </FormControl>
+                          )}
+                          {!isPassFailGrading(maxGrade) && (
+                            <TextField
+                              size="small"
+                              type="number"
+                              label={`Оценка (0–${maxGrade})`}
+                              value={
+                                gradeStatuses[selectedSubmission.id]
+                                  ? gradeStatuses[selectedSubmission.id] === 'passed'
+                                    ? maxGrade
+                                    : 0
+                                  : gradeValues[selectedSubmission.id] ??
+                                      selectedSubmission.grade ??
+                                      ''
+                              }
                               onChange={(e) =>
-                                handleGradeStatusChange(
-                                  selectedSubmission.id,
-                                  (e.target.value as 'passed' | 'failed' | '') || null,
+                                handleGradeChange(selectedSubmission.id, e.target.value)
+                              }
+                              error={
+                                !gradeStatuses[selectedSubmission.id] &&
+                                (gradeValues[selectedSubmission.id] ?? '') !== '' &&
+                                !isGradeValid(
+                                  gradeValues[selectedSubmission.id] ?? '',
+                                  gradeStatuses[selectedSubmission.id] ?? null,
                                 )
                               }
-                            >
-                              <MenuItem value="">
-                                <em>Числовая оценка</em>
-                              </MenuItem>
-                              <MenuItem value="passed">Зачтено</MenuItem>
-                              <MenuItem value="failed">Не зачтено</MenuItem>
-                            </Select>
-                          </FormControl>
-                          <TextField
-                            size="small"
-                            type="number"
-                            label={`Оценка (0–${maxGrade})`}
-                            value={
-                              gradeStatuses[selectedSubmission.id]
-                                ? gradeStatuses[selectedSubmission.id] === 'passed'
-                                  ? maxGrade
-                                  : 0
-                                : gradeValues[selectedSubmission.id] ??
-                                    selectedSubmission.grade ??
-                                    ''
-                            }
-                            onChange={(e) =>
-                              handleGradeChange(selectedSubmission.id, e.target.value)
-                            }
-                            error={
-                              !gradeStatuses[selectedSubmission.id] &&
-                              (gradeValues[selectedSubmission.id] ?? '') !== '' &&
-                              !isGradeValid(
-                                gradeValues[selectedSubmission.id] ?? '',
-                                gradeStatuses[selectedSubmission.id] ?? null,
-                              )
-                            }
-                            inputProps={{
-                              min: 0,
-                              max: maxGrade,
-                              'aria-label': 'Оценка',
-                              readOnly: !!gradeStatuses[selectedSubmission.id],
-                            }}
-                            sx={{ width: 130 }}
-                          />
+                              inputProps={{
+                                min: 0,
+                                max: maxGrade,
+                                'aria-label': 'Оценка',
+                                readOnly: !!gradeStatuses[selectedSubmission.id],
+                              }}
+                              sx={{ width: 130 }}
+                            />
+                          )}
                           <TextField
                             size="small"
                             label="Комментарий к оценке"
@@ -1750,7 +2046,7 @@ export function AssignmentPage() {
                             variant="outlined"
                             color="secondary"
                             startIcon={<UndoOutlinedIcon />}
-                            onClick={() => handleReturnSubmission(selectedSubmission.id)}
+                            onClick={handleReturnSubmission}
                             disabled={returnLoading[selectedSubmission.id]}
                           >
                             {returnLoading[selectedSubmission.id] ? '…' : 'Вернуть'}
@@ -1758,6 +2054,7 @@ export function AssignmentPage() {
                         </>
                       )}
                     </Box>
+                    )}
                   </>
                 ) : (
                   <Typography variant="body2" color="text.secondary">
@@ -1784,6 +2081,7 @@ export function AssignmentPage() {
         onClose={() => {
           setShowLinkDialog(false)
           setLinkUrl('')
+          setLinkUrlError(null)
         }}
         maxWidth="sm"
         fullWidth
@@ -1796,7 +2094,12 @@ export function AssignmentPage() {
             label="URL"
             placeholder="https://..."
             value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
+            onChange={(e) => {
+              setLinkUrl(e.target.value)
+              setLinkUrlError(null)
+            }}
+            error={Boolean(linkUrlError)}
+            helperText={linkUrlError}
             sx={{ mt: 1 }}
           />
         </DialogContent>
@@ -1813,6 +2116,7 @@ export function AssignmentPage() {
         onClose={() => {
           setDialogOpenUserId(null)
           setReplyToStudent(null)
+          setReplyToParentId(null)
         }}
         maxWidth="sm"
         fullWidth
@@ -1833,6 +2137,7 @@ export function AssignmentPage() {
             onClick={() => {
               setDialogOpenUserId(null)
               setReplyToStudent(null)
+              setReplyToParentId(null)
             }}
             aria-label="Закрыть"
           >
@@ -1845,69 +2150,109 @@ export function AssignmentPage() {
               const teacherIds = courseMembers
                 .filter((m) => m.role === 'teacher' || m.role === 'owner')
                 .map((m) => m.user_id)
-              const dialogComments =
+              const dialogTree =
                 isTeacher && dialogOpenUserId
-                  ? filterTeacherDialogComments(
+                  ? getPersonalCommentsTreeForTeacher(
                       comments,
                       authUser?.id,
                       dialogOpenUserId,
-                    ).sort(
-                      (a, b) =>
-                        new Date(a.created_at ?? 0).getTime() -
-                        new Date(b.created_at ?? 0).getTime(),
                     )
-                  : filterStudentComments(
-                      comments,
-                      authUser?.id,
-                      teacherIds,
-                    ).sort(
-                      (a, b) =>
-                        new Date(a.created_at ?? 0).getTime() -
-                        new Date(b.created_at ?? 0).getTime(),
-                    )
-              return dialogComments.length === 0 ? (
+                  : getPersonalCommentsTreeForStudent(comments, authUser?.id, teacherIds)
+              return dialogTree.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
                   Нет сообщений
                 </Typography>
               ) : (
-                dialogComments.map((c) => {
-                  const isOwn = c.user_id === authUser?.id
-                  return (
-                    <Box
+                <Box className="flex flex-col gap-2">
+                  {dialogTree.map((c) => (
+                    <PersonalCommentItem
                       key={c.id}
-                      className="p-3 rounded-lg"
-                      sx={{
-                        bgcolor: 'grey.50',
-                        border: '1px solid',
-                        borderColor: 'grey.200',
-                        ...(isOwn && {
-                          borderLeft: '4px solid',
-                          borderLeftColor: 'primary.main',
-                          pl: 2.5,
-                        }),
-                      }}
-                    >
-                      <Typography variant="body2" className="text-slate-700">
-                        {c.body || '(без текста)'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {getNameByUserId(courseMembers, c.user_id, c.author)}{' '}
-                        · {formatDate(c.created_at)}
-                      </Typography>
-                    </Box>
-                  )
-                })
+                      comment={c}
+                      depth={0}
+                      replyToParentId={replyToParentId}
+                      onReply={setReplyToParentId}
+                      onCancelReply={() => setReplyToParentId(null)}
+                      renderReplyForm={(parentId) => (
+                        <Box
+                          component="form"
+                          onSubmit={(e) => handleAddComment(e, { parent_id: parentId })}
+                          className="flex flex-col gap-2"
+                        >
+                          <TextField
+                            label="Текст ответа"
+                fullWidth
+                multiline
+                minRows={2}
+                size="small"
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                inputProps={{ 'aria-label': 'Текст ответа' }}
+              />
+                          <Box className="flex items-center gap-2">
+                            <Button
+                              type="submit"
+                              variant="contained"
+                              size="small"
+                              disabled={submittingComment || !commentText.trim()}
+                            >
+                              Отправить
+                            </Button>
+                          </Box>
+                        </Box>
+                      )}
+                      courseMembers={courseMembers}
+                      authUserId={authUser?.id}
+                      formatDate={formatDate}
+                    />
+                  ))}
+                </Box>
               )
             })()}
           </Box>
-          <Box
-            component="form"
-            onSubmit={handleAddComment}
-            className="flex flex-col gap-2 mt-4"
-          >
-            <TextField
-              label="Текст ответа"
-              fullWidth
+          <Box className="flex flex-col gap-2 mt-4">
+            {replyToParentId && (
+              <Box className="flex items-center gap-2">
+                <Typography variant="caption" color="text.secondary">
+                  Ответ на комментарий
+                </Typography>
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => setReplyToParentId(null)}
+                  sx={{ minWidth: 'auto', p: 0 }}
+                >
+                  Отмена
+                </Button>
+              </Box>
+            )}
+            <Box
+              component="form"
+              onSubmit={(e) => {
+                const teacherIds = courseMembers
+                  .filter((m) => m.role === 'teacher' || m.role === 'owner')
+                  .map((m) => m.user_id)
+                const dialogTree =
+                  isTeacher && dialogOpenUserId
+                    ? getPersonalCommentsTreeForTeacher(
+                        comments,
+                        authUser?.id,
+                        dialogOpenUserId,
+                      )
+                    : getPersonalCommentsTreeForStudent(comments, authUser?.id, teacherIds)
+                handleAddComment(
+                  e,
+                  replyToParentId
+                    ? { parent_id: replyToParentId }
+                    : dialogTree[0]
+                      ? { parent_id: dialogTree[0].id }
+                      : undefined,
+                )
+              }}
+              className="flex flex-col gap-2"
+            >
+              <TextField
+                label="Текст ответа"
+                fullWidth
               multiline
               minRows={2}
               size="small"
@@ -1916,28 +2261,6 @@ export function AssignmentPage() {
               inputProps={{ 'aria-label': 'Текст комментария' }}
             />
             <Box className="flex items-center gap-2">
-              <input
-                ref={commentFileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleCommentFileChange}
-                aria-label="Прикрепить файл"
-              />
-              <Button
-                component="span"
-                variant="outlined"
-                size="small"
-                startIcon={<AttachFileOutlinedIcon />}
-                onClick={() => commentFileInputRef.current?.click()}
-              >
-                Файл
-              </Button>
-              {commentFiles.length > 0 && (
-                <Typography variant="caption" color="text.secondary">
-                  {commentFiles.map((f) => f.name).join(', ')}
-                </Typography>
-              )}
               <Button
                 type="submit"
                 variant="contained"
@@ -1947,9 +2270,61 @@ export function AssignmentPage() {
                 Отправить
               </Button>
             </Box>
+            </Box>
           </Box>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
+        aria-labelledby="delete-assignment-dialog-title"
+      >
+        <DialogTitle id="delete-assignment-dialog-title">Удалить задание?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Задание «{assignment?.title}» будет удалено безвозвратно вместе со всеми ответами и комментариями.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+            Отмена
+          </Button>
+          <Button
+            onClick={handleDeleteAssignment}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? 'Удаление…' : 'Удалить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {assignment && isTeacher && selectedSubmission && (
+        <ReturnSubmissionConfirmDialog
+          open={showReturnConfirm}
+          onClose={() => setShowReturnConfirm(false)}
+          onConfirm={() => performReturnSubmission(selectedSubmission.id)}
+          studentName={
+            getNameByUserId(courseMembers, selectedSubmission.user_id, selectedSubmission.author) ||
+            'Студент'
+          }
+          loading={returnLoading[selectedSubmission.id]}
+        />
+      )}
+      {assignment && !isTeacher && (
+        <SubmitAssignmentConfirmDialog
+          open={showSubmitConfirm}
+          onClose={() => setShowSubmitConfirm(false)}
+          onConfirm={performSubmit}
+          assignmentTitle={assignment.title}
+          assignmentDeadline={assignment.deadline}
+          fileNames={answerFiles.map((f) => f.name)}
+          linkUrls={answerLinks}
+          draftFileIds={mySubmission?.file_ids ?? []}
+          submitting={submitting}
+        />
+      )}
     </Box>
     </Container>
   )

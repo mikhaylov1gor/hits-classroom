@@ -35,21 +35,39 @@ export function RegisterForm() {
 
   const validate = (): boolean => {
     const nextErrors: RegisterErrors = {}
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
     if (!form.email.trim()) {
       nextErrors.email = 'Укажите email'
+    } else if (!emailPattern.test(form.email.trim())) {
+      nextErrors.email = 'Введите корректный email'
     }
 
     if (!form.password) {
       nextErrors.password = 'Укажите пароль'
     }
 
-    if (!form.fullName.trim()) {
+    const trimmedFullName = form.fullName.trim()
+    const words = trimmedFullName.split(/\s+/).filter(Boolean)
+    if (!trimmedFullName) {
       nextErrors.fullName = 'Укажите ФИО'
+    } else if (words.length < 2) {
+      nextErrors.fullName = 'Введите имя и фамилию (минимум два слова)'
     }
 
     if (!form.birthDate) {
       nextErrors.birthDate = 'Укажите дату рождения'
+    } else {
+      const birthDate = new Date(form.birthDate + 'T00:00:00')
+      const today = new Date()
+      const minBirthDate = new Date(
+        today.getFullYear() - 14,
+        today.getMonth(),
+        today.getDate(),
+      )
+      if (birthDate > minBirthDate) {
+        nextErrors.birthDate = 'Вам должно быть не менее 14 лет'
+      }
     }
 
     if (form.password && form.confirmPassword && form.password !== form.confirmPassword) {
@@ -143,6 +161,7 @@ export function RegisterForm() {
               onChange={handleChange('fullName')}
               error={Boolean(errors.fullName)}
               helperText={errors.fullName}
+              placeholder="Имя Фамилия"
             />
 
             <TextField

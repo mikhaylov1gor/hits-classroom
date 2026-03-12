@@ -21,14 +21,19 @@ export type FeedItem = {
   user_id?: string | null
   author?: { first_name: string; last_name: string } | null
   attachments?: { id: string; name: string; type?: string; url?: string }[] | null
+  file_ids?: string[]
 }
 
 export type Post = {
   id: string
   course_id: string
+  user_id?: string
   title: string
   body?: string | null
+  links?: string[]
+  file_ids?: string[]
   created_at?: string
+  author?: { first_name: string; last_name: string } | null
   attachments?: { id: string; name: string; type?: string; url?: string }[] | null
 }
 
@@ -39,8 +44,10 @@ export type Comment = {
   material_id?: string
   user_id: string
   parent_id?: string | null
+  is_private?: boolean
   reply_to_user_id?: string | null
   body?: string | null
+  file_ids?: string[]
   created_at?: string
   author?: { first_name: string; last_name: string } | null
   replies?: Comment[]
@@ -57,35 +64,156 @@ export function flattenComments(comments: Comment[]): Comment[] {
   return comments.flatMap((c) => [c, ...(c.replies ? flattenComments(c.replies) : [])])
 }
 
-export function getGeneralComments(comments: Comment[]): Comment[] {
-  return comments.filter((c) => c.reply_to_user_id == null)
+/** Строит дерево комментариев из плоского списка по parent_id */
+export function buildCommentTree(comments: Comment[]): Comment[] {
+  const flat = flattenComments(comments)
+  const seen = new Set<string>()
+  const uniqueFlat = flat.filter((c) => {
+    if (seen.has(c.id)) return false
+    seen.add(c.id)
+    return true
+  })
+  const byId = new Map<string, Comment & { replies?: Comment[] }>()
+  uniqueFlat.forEach((c) => byId.set(c.id, { ...c, replies: [] }))
+  const roots: Comment[] = []
+  uniqueFlat.forEach((c) => {
+    const node = byId.get(c.id)!
+    if (!c.parent_id) {
+      roots.push(node)
+    } else {
+      const parent = byId.get(c.parent_id)
+      if (parent) {
+        parent.replies = parent.replies ?? []
+        parent.replies.push(node)
+      } else {
+        roots.push(node)
+      }
+    }
+  })
+  const sortByDate = (a: Comment, b: Comment) =>
+    new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+  roots.sort(sortByDate)
+  const sortReplies = (nodes: Comment[]) => {
+    nodes.forEach((n) => {
+      if (n.replies?.length) sortReplies(n.replies)
+    })
+    nodes.sort(sortByDate)
+  }
+  sortReplies(roots)
+  return roots
 }
 
+function filterPrivateFromTree(comments: Comment[]): Comment[] {
+  return comments
+    .filter((c) => !c.is_private)
+    .map((c) => ({
+      ...c,
+      replies: c.replies ? filterPrivateFromTree(c.replies) : undefined,
+    }))
+}
+
+export function getGeneralComments(comments: Comment[]): Comment[] {
+  const roots = comments.filter((c) => !c.is_private)
+  return filterPrivateFromTree(roots)
+}
+
+/** Проверка, что комментарий в личной ветке студент–преподаватель */
+function passesStudentPrivateFilter(
+  c: Comment,
+  authUserId: string | undefined,
+  teacherIds: string[],
+): boolean {
+  if (!authUserId) return false
+  return !!(c.is_private && (c.user_id === authUserId || teacherIds.includes(c.user_id)))
+}
+
+/** Личные комментарии студента (диалог с преподавателем). Включает всю ветку целиком. */
 export function filterStudentComments(
   comments: Comment[],
   authUserId: string | undefined,
   teacherIds: string[],
 ): Comment[] {
   if (!authUserId) return []
-  return comments.filter((c) => {
-    if (c.user_id === authUserId) return true
-    if (!teacherIds.includes(c.user_id)) return false
-    return c.reply_to_user_id == null || c.reply_to_user_id === authUserId
+  const flat = flattenComments(comments)
+  const kept = new Set<string>()
+  // Корни, проходящие фильтр
+  flat.forEach((c) => {
+    if (!c.parent_id && passesStudentPrivateFilter(c, authUserId, teacherIds)) kept.add(c.id)
   })
+  // Любые комментарии, проходящие фильтр (в т.ч. ответы)
+  flat.forEach((c) => {
+    if (passesStudentPrivateFilter(c, authUserId, teacherIds)) kept.add(c.id)
+  })
+  // Все потомки уже в kept (вся ветка)
+  let changed = true
+  while (changed) {
+    changed = false
+    flat.forEach((c) => {
+      if (c.parent_id && kept.has(c.parent_id) && !kept.has(c.id)) {
+        kept.add(c.id)
+        changed = true
+      }
+    })
+  }
+  return flat.filter((c) => kept.has(c.id))
 }
 
+/** Проверка, что комментарий в личной ветке преподаватель–студент */
+function passesTeacherDialogFilter(
+  c: Comment,
+  authUserId: string | undefined,
+  studentId: string,
+): boolean {
+  if (!authUserId) return false
+  return !!(c.is_private && (c.user_id === studentId || c.user_id === authUserId))
+}
+
+/** Личные комментарии преподавателя в диалоге со студентом. Включает всю ветку целиком. */
 export function filterTeacherDialogComments(
   comments: Comment[],
   authUserId: string | undefined,
   studentId: string,
 ): Comment[] {
   if (!authUserId) return []
-  return comments.filter((c) => {
-    if (c.user_id === studentId) return true
-    if (c.user_id === authUserId)
-      return c.reply_to_user_id == null || c.reply_to_user_id === studentId
-    return false
+  const flat = flattenComments(comments)
+  const kept = new Set<string>()
+  flat.forEach((c) => {
+    if (!c.parent_id && passesTeacherDialogFilter(c, authUserId, studentId)) kept.add(c.id)
   })
+  flat.forEach((c) => {
+    if (passesTeacherDialogFilter(c, authUserId, studentId)) kept.add(c.id)
+  })
+  let changed = true
+  while (changed) {
+    changed = false
+    flat.forEach((c) => {
+      if (c.parent_id && kept.has(c.parent_id) && !kept.has(c.id)) {
+        kept.add(c.id)
+        changed = true
+      }
+    })
+  }
+  return flat.filter((c) => kept.has(c.id))
+}
+
+/** Дерево личных комментариев для студента */
+export function getPersonalCommentsTreeForStudent(
+  comments: Comment[],
+  authUserId: string | undefined,
+  teacherIds: string[],
+): Comment[] {
+  const flat = filterStudentComments(comments, authUserId, teacherIds)
+  return buildCommentTree(flat)
+}
+
+/** Дерево личных комментариев для диалога преподаватель–студент */
+export function getPersonalCommentsTreeForTeacher(
+  comments: Comment[],
+  authUserId: string | undefined,
+  studentId: string,
+): Comment[] {
+  const flat = filterTeacherDialogComments(comments, authUserId, studentId)
+  return buildCommentTree(flat)
 }
 
 export type Member = {
@@ -108,7 +236,6 @@ export function getNameByUserId(
   userId: string,
   fallback?: { first_name?: string; last_name?: string } | null,
 ): string {
-  console.error(12312, members)
   const m = members.find((x) => x.user_id === userId)
   if (m) {
     const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim()
@@ -150,6 +277,8 @@ export type Assignment = {
   course_id: string
   title: string
   body?: string | null
+  links?: string[]
+  file_ids?: string[]
   deadline?: string | null
   max_grade?: number
   created_at?: string
@@ -164,11 +293,28 @@ export type Submission = {
   assignment_id: string
   user_id: string
   body?: string | null
+  file_ids?: string[]
   submitted_at?: string
   grade: number | null
   grade_comment?: string | null
   status?: SubmissionStatus | null
+  /** false или отсутствует — черновик; true — сдача прикреплена к заданию */
+  is_attached?: boolean | null
+  /** true — задание вернули на доработку */
+  is_returned?: boolean | null
   author?: { first_name: string; last_name: string } | null
+}
+
+/** Черновик: is_attached === false или отсутствует */
+export function isSubmissionDraft(submission: Submission | null | undefined): boolean {
+  if (!submission) return true
+  return submission.is_attached !== true
+}
+
+/** Вернули на доработку: is_returned === true */
+export function isSubmissionReturned(submission: Submission | null | undefined): boolean {
+  if (!submission) return false
+  return submission.is_returned === true || submission.status === 'returned'
 }
 
 export type SubmissionWithAssignment = {
@@ -183,6 +329,7 @@ export type SubmissionWithAssignment = {
     id: string
     title: string
     deadline?: string | null
+    max_grade?: number
   }
 }
 
