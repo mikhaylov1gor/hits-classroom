@@ -908,34 +908,61 @@ func (uc *ListMaterialComments) ListMaterialComments(courseID, materialID, userI
 }
 
 // filterPrivateComments для owner/teacher возвращает всё.
-// Для студента: публичные комментарии + его собственные приватные
-// (и все ответы в его приватных ветках).
+// Для студента: публичные комментарии + все приватные ветки, в которых студент
+// является участником (автором хотя бы одного сообщения в ветке).
+// Это позволяет преподу инициировать приватный диалог, и студент его увидит.
 func filterPrivateComments(all []*domain.Comment, userID string, role domain.CourseRole) []*domain.Comment {
 	if role == domain.RoleOwner || role == domain.RoleTeacher {
 		return all
 	}
-	// Собираем ID приватных корней, начатых этим студентом
-	ownPrivateRoots := make(map[string]bool)
+	// Строим карту: parentID → дочерние комментарии
+	byParent := make(map[string][]string)
 	for _, c := range all {
-		if c.IsPrivate && c.UserID == userID && c.ParentID == nil {
-			ownPrivateRoots[c.ID] = true
+		key := ""
+		if c.ParentID != nil {
+			key = *c.ParentID
 		}
+		byParent[key] = append(byParent[key], c.ID)
 	}
-	// Расширяем: все потомки приватных корней студента тоже видимы
-	visible := make(map[string]bool)
-	for id := range ownPrivateRoots {
-		visible[id] = true
+	byID := make(map[string]*domain.Comment, len(all))
+	for _, c := range all {
+		byID[c.ID] = c
 	}
-	changed := true
-	for changed {
-		changed = false
-		for _, c := range all {
-			if c.ParentID != nil && visible[*c.ParentID] && !visible[c.ID] {
-				visible[c.ID] = true
-				changed = true
+
+	// Для каждого приватного корня проверяем, есть ли в его ветке сообщение студента.
+	// Если да — вся ветка видима студенту.
+	var branchContainsUser func(rootID string) bool
+	branchContainsUser = func(rootID string) bool {
+		c, ok := byID[rootID]
+		if !ok {
+			return false
+		}
+		if c.UserID == userID {
+			return true
+		}
+		for _, childID := range byParent[rootID] {
+			if branchContainsUser(childID) {
+				return true
 			}
 		}
+		return false
 	}
+
+	// Собираем ID всех видимых приватных веток
+	visible := make(map[string]bool)
+	var markVisible func(id string)
+	markVisible = func(id string) {
+		visible[id] = true
+		for _, childID := range byParent[id] {
+			markVisible(childID)
+		}
+	}
+	for _, c := range all {
+		if c.IsPrivate && c.ParentID == nil && branchContainsUser(c.ID) {
+			markVisible(c.ID)
+		}
+	}
+
 	var out []*domain.Comment
 	for _, c := range all {
 		if !c.IsPrivate || visible[c.ID] {
