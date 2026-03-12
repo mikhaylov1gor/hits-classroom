@@ -416,6 +416,7 @@ func (s *stubCourseMemberRepo) ListByUser(userID string) ([]*domain.CourseMember
 	return nil, nil
 }
 func (s *stubCourseMemberRepo) DeleteByCourse(courseID string) error { return nil }
+func (s *stubCourseMemberRepo) Delete(courseID, userID string) error { return nil }
 
 type stubJoinCourseRepo struct {
 	courses map[string]*domain.Course
@@ -472,6 +473,7 @@ func (s *stubJoinMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, 
 	return nil, nil
 }
 func (s *stubJoinMemberRepo) DeleteByCourse(courseID string) error { return nil }
+func (s *stubJoinMemberRepo) Delete(courseID, userID string) error { return nil }
 
 type stubListCourseRepo struct {
 	courses map[string]*domain.Course
@@ -506,6 +508,7 @@ func (s *stubListMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, 
 	return s.members, nil
 }
 func (s *stubListMemberRepo) DeleteByCourse(courseID string) error { return nil }
+func (s *stubListMemberRepo) Delete(courseID, userID string) error { return nil }
 
 type stubGetCourseRepo struct {
 	courses map[string]*domain.Course
@@ -540,6 +543,7 @@ func (s *stubGetCourseMemberRepo) ListByUser(userID string) ([]*domain.CourseMem
 	return nil, nil
 }
 func (s *stubGetCourseMemberRepo) DeleteByCourse(courseID string) error { return nil }
+func (s *stubGetCourseMemberRepo) Delete(courseID, userID string) error { return nil }
 
 type stubInviteCourseRepo struct {
 	courses map[string]*domain.Course
@@ -574,6 +578,7 @@ func (s *stubInviteMemberRepo) ListByUser(userID string) ([]*domain.CourseMember
 	return nil, nil
 }
 func (s *stubInviteMemberRepo) DeleteByCourse(courseID string) error { return nil }
+func (s *stubInviteMemberRepo) Delete(courseID, userID string) error { return nil }
 
 type stubDeleteCourseRepo struct {
 	courses map[string]*domain.Course
@@ -615,3 +620,4 @@ func (s *stubDeleteMemberRepo) DeleteByCourse(courseID string) error {
 	s.deletedCourses = append(s.deletedCourses, courseID)
 	return nil
 }
+func (s *stubDeleteMemberRepo) Delete(courseID, userID string) error { return nil }

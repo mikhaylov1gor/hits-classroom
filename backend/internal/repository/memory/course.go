@@ -150,4 +150,17 @@ func (r *CourseMemberRepository) DeleteByCourse(courseID string) error {
 	return nil
 }
 
+func (r *CourseMemberRepository) Delete(courseID, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*domain.CourseMember
+	for _, m := range r.members {
+		if !(m.CourseID == courseID && m.UserID == userID) {
+			out = append(out, m)
+		}
+	}
+	r.members = out
+	return nil
+}
+
 var _ repository.CourseMemberRepository = (*CourseMemberRepository)(nil)

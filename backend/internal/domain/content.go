@@ -8,6 +8,7 @@ type Post struct {
 	UserID    string
 	Title     string
 	Body      string
+	Links     []string
 	FileIDs   []string
 	CreatedAt time.Time
 }
@@ -17,6 +18,7 @@ type Material struct {
 	CourseID  string
 	Title     string
 	Body      string
+	Links     []string
 	FileIDs   []string
 	CreatedAt time.Time
 }
@@ -26,6 +28,7 @@ type Assignment struct {
 	CourseID  string
 	Title     string
 	Body      string
+	Links     []string
 	FileIDs   []string
 	Deadline  *time.Time
 	MaxGrade  int
@@ -43,14 +46,17 @@ type Submission struct {
 	GradeComment *string
 }
 
-// Comment используется и для комментариев к заданиям, и к постам.
-// Ровно одно из AssignmentID / PostID непусто.
+// Comment используется для комментариев к заданиям, постам и материалам.
+// Ровно одно из AssignmentID / PostID / MaterialID непусто.
+// IsPrivate = true означает личный комментарий: виден только автору и owner/teacher.
 type Comment struct {
 	ID           string
 	AssignmentID string
 	PostID       string
+	MaterialID   string
 	UserID       string
 	ParentID     *string
+	IsPrivate    bool
 	Body         string
 	FileIDs      []string
 	CreatedAt    time.Time

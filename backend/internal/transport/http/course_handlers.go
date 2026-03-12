@@ -608,12 +608,22 @@ func postResponse(p *domain.Post) map[string]interface{} {
 	if p == nil {
 		return nil
 	}
+	links := p.Links
+	if links == nil {
+		links = []string{}
+	}
+	fileIDs := p.FileIDs
+	if fileIDs == nil {
+		fileIDs = []string{}
+	}
 	return map[string]interface{}{
 		"id":         p.ID,
 		"course_id":  p.CourseID,
 		"user_id":    p.UserID,
 		"title":      p.Title,
 		"body":       p.Body,
+		"links":      links,
+		"file_ids":   fileIDs,
 		"created_at": p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
@@ -622,11 +632,21 @@ func materialResponse(m *domain.Material) map[string]interface{} {
 	if m == nil {
 		return nil
 	}
+	links := m.Links
+	if links == nil {
+		links = []string{}
+	}
+	fileIDs := m.FileIDs
+	if fileIDs == nil {
+		fileIDs = []string{}
+	}
 	return map[string]interface{}{
 		"id":         m.ID,
 		"course_id":  m.CourseID,
 		"title":      m.Title,
 		"body":       m.Body,
+		"links":      links,
+		"file_ids":   fileIDs,
 		"created_at": m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
@@ -635,11 +655,21 @@ func assignmentResponse(a *domain.Assignment) map[string]interface{} {
 	if a == nil {
 		return nil
 	}
+	links := a.Links
+	if links == nil {
+		links = []string{}
+	}
+	fileIDs := a.FileIDs
+	if fileIDs == nil {
+		fileIDs = []string{}
+	}
 	out := map[string]interface{}{
 		"id":         a.ID,
 		"course_id":  a.CourseID,
 		"title":      a.Title,
 		"body":       a.Body,
+		"links":      links,
+		"file_ids":   fileIDs,
 		"max_grade":  a.MaxGrade,
 		"created_at": a.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -655,11 +685,16 @@ func submissionResponse(s *domain.Submission) map[string]interface{} {
 	if s == nil {
 		return nil
 	}
+	fileIDs := s.FileIDs
+	if fileIDs == nil {
+		fileIDs = []string{}
+	}
 	out := map[string]interface{}{
 		"id":            s.ID,
 		"assignment_id": s.AssignmentID,
 		"user_id":       s.UserID,
 		"body":          s.Body,
+		"file_ids":      fileIDs,
 		"submitted_at":  s.SubmittedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if s.Grade != nil {
@@ -679,13 +714,20 @@ func commentNodeResponse(c *domain.Comment, replies []map[string]interface{}) ma
 	if c == nil {
 		return nil
 	}
+	fileIDs := c.FileIDs
+	if fileIDs == nil {
+		fileIDs = []string{}
+	}
 	out := map[string]interface{}{
 		"id":            c.ID,
 		"assignment_id": c.AssignmentID,
 		"post_id":       c.PostID,
+		"material_id":   c.MaterialID,
 		"user_id":       c.UserID,
 		"parent_id":     nil,
+		"is_private":    c.IsPrivate,
 		"body":          c.Body,
+		"file_ids":      fileIDs,
 		"created_at":    c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		"replies":       replies,
 	}
@@ -813,6 +855,7 @@ func (h *CreatePostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title   string   `json:"title"`
 		Body    string   `json:"body"`
+		Links   []string `json:"links"`
 		FileIDs []string `json:"file_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -820,7 +863,7 @@ func (h *CreatePostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	p, err := h.createPost.CreatePost(usecase.CreatePostInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, FileIDs: req.FileIDs})
+	p, err := h.createPost.CreatePost(usecase.CreatePostInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, Links: req.Links, FileIDs: req.FileIDs})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
@@ -868,6 +911,7 @@ func (h *CreateMaterialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Title   string   `json:"title"`
 		Body    string   `json:"body"`
+		Links   []string `json:"links"`
 		FileIDs []string `json:"file_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -875,7 +919,7 @@ func (h *CreateMaterialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	m, err := h.createMaterial.CreateMaterial(usecase.CreateMaterialInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, FileIDs: req.FileIDs})
+	m, err := h.createMaterial.CreateMaterial(usecase.CreateMaterialInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, Links: req.Links, FileIDs: req.FileIDs})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
@@ -922,6 +966,7 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	var req struct {
 		Title    string   `json:"title"`
 		Body     string   `json:"body"`
+		Links    []string `json:"links"`
 		FileIDs  []string `json:"file_ids"`
 		Deadline *string  `json:"deadline"`
 		MaxGrade int      `json:"max_grade"`
@@ -941,7 +986,7 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			deadline = &t
 		}
 	}
-	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, FileIDs: req.FileIDs, Deadline: deadline, MaxGrade: req.MaxGrade})
+	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, Links: req.Links, FileIDs: req.FileIDs, Deadline: deadline, MaxGrade: req.MaxGrade})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
@@ -1298,16 +1343,17 @@ func (h *CreateCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		ParentID *string  `json:"parent_id"`
-		Body     string   `json:"body"`
-		FileIDs  []string `json:"file_ids"`
+		ParentID  *string  `json:"parent_id"`
+		IsPrivate bool     `json:"is_private"`
+		Body      string   `json:"body"`
+		FileIDs   []string `json:"file_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID, ParentID: req.ParentID, Body: req.Body, FileIDs: req.FileIDs})
+	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, AssignmentID: assignmentID, UserID: userID, ParentID: req.ParentID, IsPrivate: req.IsPrivate, Body: req.Body, FileIDs: req.FileIDs})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1406,16 +1452,17 @@ func (h *CreatePostCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
-		ParentID *string  `json:"parent_id"`
-		Body     string   `json:"body"`
-		FileIDs  []string `json:"file_ids"`
+		ParentID  *string  `json:"parent_id"`
+		IsPrivate bool     `json:"is_private"`
+		Body      string   `json:"body"`
+		FileIDs   []string `json:"file_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
-	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, PostID: postID, UserID: userID, ParentID: req.ParentID, Body: req.Body, FileIDs: req.FileIDs})
+	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, PostID: postID, UserID: userID, ParentID: req.ParentID, IsPrivate: req.IsPrivate, Body: req.Body, FileIDs: req.FileIDs})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1442,7 +1489,7 @@ func (h *CreatePostCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(commentResponse(c))
 }
 
-// ── Delete comment (unified for both assignment and post comments) ─────────────
+// ── Delete comment (unified for assignment, post, and material comments) ──────
 
 type DeleteCommentHandler struct {
 	deleteComment *usecase.DeleteComment
@@ -1485,4 +1532,562 @@ func (h *DeleteCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── GetPost ───────────────────────────────────────────────────────────────────
+
+type GetPostHandler struct {
+	getPost *usecase.GetPost
+}
+
+func NewGetPostHandler(getPost *usecase.GetPost) *GetPostHandler {
+	return &GetPostHandler{getPost: getPost}
+}
+
+func (h *GetPostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	postID := r.PathValue("postId")
+	if courseID == "" || postID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	p, err := h.getPost.GetPost(courseID, postID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(postResponse(p))
+}
+
+// ── GetMaterial ───────────────────────────────────────────────────────────────
+
+type GetMaterialHandler struct {
+	getMaterial *usecase.GetMaterial
+}
+
+func NewGetMaterialHandler(getMaterial *usecase.GetMaterial) *GetMaterialHandler {
+	return &GetMaterialHandler{getMaterial: getMaterial}
+}
+
+func (h *GetMaterialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	materialID := r.PathValue("materialId")
+	if courseID == "" || materialID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	m, err := h.getMaterial.GetMaterial(courseID, materialID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(materialResponse(m))
+}
+
+// ── GetMySubmission ───────────────────────────────────────────────────────────
+
+type GetMySubmissionHandler struct {
+	getMySubmission *usecase.GetMySubmission
+}
+
+func NewGetMySubmissionHandler(getMySubmission *usecase.GetMySubmission) *GetMySubmissionHandler {
+	return &GetMySubmissionHandler{getMySubmission: getMySubmission}
+}
+
+func (h *GetMySubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	if courseID == "" || assignmentID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	s, err := h.getMySubmission.GetMySubmission(courseID, assignmentID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submissionResponse(s))
+}
+
+// ── LeaveCourse ───────────────────────────────────────────────────────────────
+
+type LeaveCourseHandler struct {
+	leaveCourse *usecase.LeaveCourse
+}
+
+func NewLeaveCourseHandler(leaveCourse *usecase.LeaveCourse) *LeaveCourseHandler {
+	return &LeaveCourseHandler{leaveCourse: leaveCourse}
+}
+
+func (h *LeaveCourseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	if courseID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := h.leaveCourse.LeaveCourse(usecase.LeaveCourseInput{CourseID: courseID, UserID: userID})
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not a member of this course"})
+			return
+		}
+		if errors.Is(err, usecase.ErrLastOwner) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot leave: you are the last owner"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── RemoveMember ──────────────────────────────────────────────────────────────
+
+type RemoveMemberHandler struct {
+	removeMember *usecase.RemoveMember
+	userRepo     repository.UserRepository
+}
+
+func NewRemoveMemberHandler(removeMember *usecase.RemoveMember, userRepo repository.UserRepository) *RemoveMemberHandler {
+	return &RemoveMemberHandler{removeMember: removeMember, userRepo: userRepo}
+}
+
+func (h *RemoveMemberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	targetUserID := r.PathValue("userId")
+	if courseID == "" || targetUserID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := h.removeMember.RemoveMember(usecase.RemoveMemberInput{CourseID: courseID, UserID: userID, TargetUserID: targetUserID})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "member not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── ChangeMemberRole ──────────────────────────────────────────────────────────
+
+type ChangeMemberRoleHandler struct {
+	changeMemberRole *usecase.ChangeMemberRole
+	userRepo         repository.UserRepository
+}
+
+func NewChangeMemberRoleHandler(changeMemberRole *usecase.ChangeMemberRole, userRepo repository.UserRepository) *ChangeMemberRoleHandler {
+	return &ChangeMemberRoleHandler{changeMemberRole: changeMemberRole, userRepo: userRepo}
+}
+
+func (h *ChangeMemberRoleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	targetUserID := r.PathValue("userId")
+	if courseID == "" || targetUserID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	member, err := h.changeMemberRole.ChangeMemberRole(usecase.ChangeMemberRoleInput{
+		CourseID:     courseID,
+		UserID:       userID,
+		TargetUserID: targetUserID,
+		NewRole:      domain.CourseRole(req.Role),
+	})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "member not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		if errors.Is(err, usecase.ErrLastOwner) {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot demote the last owner"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	u, _ := h.userRepo.GetByID(targetUserID)
+	m := usecase.MemberWithUser{UserID: member.UserID, Role: member.Role}
+	if u != nil {
+		m.Email, m.FirstName, m.LastName = u.Email, u.FirstName, u.LastName
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(memberResponse(m))
+}
+
+// ── DeletePost ────────────────────────────────────────────────────────────────
+
+type DeletePostHandler struct {
+	deletePost *usecase.DeletePost
+}
+
+func NewDeletePostHandler(deletePost *usecase.DeletePost) *DeletePostHandler {
+	return &DeletePostHandler{deletePost: deletePost}
+}
+
+func (h *DeletePostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	postID := r.PathValue("postId")
+	if courseID == "" || postID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := h.deletePost.DeletePost(courseID, postID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── DeleteMaterial ────────────────────────────────────────────────────────────
+
+type DeleteMaterialHandler struct {
+	deleteMaterial *usecase.DeleteMaterial
+}
+
+func NewDeleteMaterialHandler(deleteMaterial *usecase.DeleteMaterial) *DeleteMaterialHandler {
+	return &DeleteMaterialHandler{deleteMaterial: deleteMaterial}
+}
+
+func (h *DeleteMaterialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	materialID := r.PathValue("materialId")
+	if courseID == "" || materialID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := h.deleteMaterial.DeleteMaterial(courseID, materialID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── DeleteAssignment ──────────────────────────────────────────────────────────
+
+type DeleteAssignmentHandler struct {
+	deleteAssignment *usecase.DeleteAssignment
+}
+
+func NewDeleteAssignmentHandler(deleteAssignment *usecase.DeleteAssignment) *DeleteAssignmentHandler {
+	return &DeleteAssignmentHandler{deleteAssignment: deleteAssignment}
+}
+
+func (h *DeleteAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	if courseID == "" || assignmentID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	err := h.deleteAssignment.DeleteAssignment(courseID, assignmentID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Material comments ─────────────────────────────────────────────────────────
+
+type ListMaterialCommentsHandler struct {
+	listMaterialComments *usecase.ListMaterialComments
+}
+
+func NewListMaterialCommentsHandler(lmc *usecase.ListMaterialComments) *ListMaterialCommentsHandler {
+	return &ListMaterialCommentsHandler{listMaterialComments: lmc}
+}
+
+func (h *ListMaterialCommentsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	materialID := r.PathValue("materialId")
+	if courseID == "" || materialID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	list, err := h.listMaterialComments.ListMaterialComments(courseID, materialID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(buildCommentTree(list))
+}
+
+type CreateMaterialCommentHandler struct {
+	createComment *usecase.CreateComment
+}
+
+func NewCreateMaterialCommentHandler(createComment *usecase.CreateComment) *CreateMaterialCommentHandler {
+	return &CreateMaterialCommentHandler{createComment: createComment}
+}
+
+func (h *CreateMaterialCommentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	materialID := r.PathValue("materialId")
+	if courseID == "" || materialID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		ParentID  *string  `json:"parent_id"`
+		IsPrivate bool     `json:"is_private"`
+		Body      string   `json:"body"`
+		FileIDs   []string `json:"file_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	c, err := h.createComment.CreateComment(usecase.CreateCommentInput{CourseID: courseID, MaterialID: materialID, UserID: userID, ParentID: req.ParentID, IsPrivate: req.IsPrivate, Body: req.Body, FileIDs: req.FileIDs})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(commentResponse(c))
 }

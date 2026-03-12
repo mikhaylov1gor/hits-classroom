@@ -204,6 +204,26 @@ func (uc *Login) Login(in LoginInput) (*domain.User, string, error) {
 	return user, token, nil
 }
 
+type CheckEmailExists struct {
+	repo repository.UserRepository
+}
+
+func NewCheckEmailExists(repo repository.UserRepository) *CheckEmailExists {
+	return &CheckEmailExists{repo: repo}
+}
+
+func (uc *CheckEmailExists) CheckEmailExists(email string) (bool, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return false, &ValidationError{Message: "email is required"}
+	}
+	u, err := uc.repo.ByEmail(email)
+	if err != nil {
+		return false, err
+	}
+	return u != nil, nil
+}
+
 type GetMe struct {
 	repo repository.UserRepository
 }

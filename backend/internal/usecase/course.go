@@ -426,6 +426,135 @@ func (uc *InviteTeacher) InviteTeacher(in InviteTeacherInput) (*domain.CourseMem
 	return member, nil
 }
 
+var ErrLastOwner = errors.New("cannot remove the last owner")
+
+type LeaveCourseInput struct {
+	CourseID string
+	UserID   string
+}
+
+type LeaveCourse struct {
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewLeaveCourse(memberRepo repository.CourseMemberRepository) *LeaveCourse {
+	return &LeaveCourse{memberRepo: memberRepo}
+}
+
+func (uc *LeaveCourse) LeaveCourse(in LeaveCourseInput) error {
+	member, err := uc.memberRepo.Get(in.CourseID, in.UserID)
+	if err != nil || member == nil {
+		return ErrForbidden
+	}
+	if member.Role == domain.RoleOwner {
+		if err := checkNotLastOwner(uc.memberRepo, in.CourseID, in.UserID); err != nil {
+			return err
+		}
+	}
+	return uc.memberRepo.Delete(in.CourseID, in.UserID)
+}
+
+type RemoveMemberInput struct {
+	CourseID     string
+	UserID       string
+	TargetUserID string
+}
+
+type RemoveMember struct {
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewRemoveMember(memberRepo repository.CourseMemberRepository) *RemoveMember {
+	return &RemoveMember{memberRepo: memberRepo}
+}
+
+func (uc *RemoveMember) RemoveMember(in RemoveMemberInput) error {
+	callerRole, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || callerRole == "" {
+		return ErrForbidden
+	}
+	if in.UserID == in.TargetUserID {
+		return &ValidationError{Message: "use leave endpoint to remove yourself"}
+	}
+	target, err := uc.memberRepo.Get(in.CourseID, in.TargetUserID)
+	if err != nil || target == nil {
+		return ErrCourseNotFound
+	}
+	switch callerRole {
+	case domain.RoleOwner:
+		if target.Role == domain.RoleOwner {
+			return &ValidationError{Message: "cannot remove another owner"}
+		}
+	case domain.RoleTeacher:
+		if target.Role != domain.RoleStudent {
+			return ErrForbidden
+		}
+	default:
+		return ErrForbidden
+	}
+	return uc.memberRepo.Delete(in.CourseID, in.TargetUserID)
+}
+
+type ChangeMemberRoleInput struct {
+	CourseID     string
+	UserID       string
+	TargetUserID string
+	NewRole      domain.CourseRole
+}
+
+type ChangeMemberRole struct {
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewChangeMemberRole(memberRepo repository.CourseMemberRepository) *ChangeMemberRole {
+	return &ChangeMemberRole{memberRepo: memberRepo}
+}
+
+func (uc *ChangeMemberRole) ChangeMemberRole(in ChangeMemberRoleInput) (*domain.CourseMember, error) {
+	callerRole, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || callerRole != domain.RoleOwner {
+		return nil, ErrForbidden
+	}
+	if in.NewRole != domain.RoleOwner && in.NewRole != domain.RoleTeacher && in.NewRole != domain.RoleStudent {
+		return nil, &ValidationError{Message: "invalid role"}
+	}
+	target, err := uc.memberRepo.Get(in.CourseID, in.TargetUserID)
+	if err != nil || target == nil {
+		return nil, ErrCourseNotFound
+	}
+	if target.Role == in.NewRole {
+		return target, nil
+	}
+	// If demoting an owner, verify another owner exists
+	if target.Role == domain.RoleOwner && in.NewRole != domain.RoleOwner {
+		if err := checkNotLastOwner(uc.memberRepo, in.CourseID, in.TargetUserID); err != nil {
+			return nil, err
+		}
+	}
+	target.Role = in.NewRole
+	if err := uc.memberRepo.Update(target); err != nil {
+		return nil, err
+	}
+	return target, nil
+}
+
+func checkNotLastOwner(memberRepo repository.CourseMemberRepository, courseID, excludeUserID string) error {
+	members, err := memberRepo.ListByCourse(courseID)
+	if err != nil {
+		return err
+	}
+	ownerCount := 0
+	for _, m := range members {
+		if m.Role == domain.RoleOwner && m.UserID != excludeUserID {
+			ownerCount++
+		}
+	}
+	if ownerCount == 0 {
+		return ErrLastOwner
+	}
+	return nil
+}
+
 type RegenerateInviteCode struct {
 	courseRepo repository.CourseRepository
 	memberRepo repository.CourseMemberRepository
