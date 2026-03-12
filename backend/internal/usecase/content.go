@@ -2,13 +2,17 @@ package usecase
 
 import (
 	"errors"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
+
+	"github.com/google/uuid"
 )
 
 type CreatePostInput struct {
@@ -222,6 +226,7 @@ type CreateSubmissionInput struct {
 	UserID       string
 	Body         string
 	FileIDs      []string
+	IsAttached   bool
 }
 
 type CreateSubmission struct {
@@ -243,9 +248,28 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 	if err != nil || a == nil || a.CourseID != in.CourseID {
 		return nil, ErrCourseNotFound
 	}
+
+	if in.IsAttached {
+		if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
+			return nil, ErrAssignmentClosed
+		}
+	}
+
 	existing, _ := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.UserID)
 	if existing != nil {
-		return nil, ErrAlreadySubmitted
+		// Если уже есть черновик или возвращённая отправка, обновляем её
+		existing.Body = in.Body
+		existing.FileIDs = in.FileIDs
+		existing.SubmittedAt = time.Now().UTC()
+		existing.IsAttached = in.IsAttached
+		if in.IsAttached {
+			// При прикреплении очищаем флаг возврата
+			existing.IsReturned = false
+		}
+		if err := uc.submissionRepo.Update(existing); err != nil {
+			return nil, err
+		}
+		return existing, nil
 	}
 	s := &domain.Submission{
 		ID:           uuid.New().String(),
@@ -254,6 +278,7 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 		Body:         in.Body,
 		FileIDs:      in.FileIDs,
 		SubmittedAt:  time.Now().UTC(),
+		IsAttached:   in.IsAttached,
 	}
 	if err := uc.submissionRepo.Create(s); err != nil {
 		return nil, err
@@ -328,6 +353,96 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	if in.GradeComment != "" {
 		s.GradeComment = &in.GradeComment
 	}
+	if err := uc.submissionRepo.Update(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+type DetachAssignmentInput struct {
+	CourseID     string
+	AssignmentID string
+	UserID       string
+}
+
+type DetachSubmission struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+}
+
+func NewDetachSubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *DetachSubmission {
+	return &DetachSubmission{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+}
+
+func (uc *DetachSubmission) DetachSubmission(in DetachAssignmentInput) (*domain.Submission, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
+	}
+	if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
+		return nil, ErrAssignmentClosed
+	}
+	s, err := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.UserID)
+	if err != nil || s == nil {
+		return nil, ErrCourseNotFound
+	}
+	if !s.IsAttached {
+		return nil, &ValidationError{Message: "submission is already detached"}
+	}
+	s.IsAttached = false
+	s.Grade = nil
+	s.GradeComment = nil
+	if err := uc.submissionRepo.Update(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+type ReturnAssignmentInput struct {
+	CourseID     string
+	AssignmentID string
+	SubmissionID string
+	UserID       string
+}
+
+type ReturnAssignment struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+}
+
+func NewReturnAssignment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *ReturnAssignment {
+	return &ReturnAssignment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+}
+
+func (uc *ReturnAssignment) ReturnAssignment(in ReturnAssignmentInput) (*domain.Submission, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
+	}
+	s, err := uc.submissionRepo.GetByID(in.SubmissionID)
+	if err != nil || s == nil || s.AssignmentID != in.AssignmentID {
+		return nil, ErrCourseNotFound
+	}
+	if !s.IsAttached {
+		return nil, &ValidationError{Message: "can only return attached submissions"}
+	}
+	s.IsReturned = true
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
 	}
@@ -563,4 +678,149 @@ func collectDescendants(parentID string, all []*domain.Comment) []string {
 		}
 	}
 	return ids
+}
+
+// ── File usecases ────────────────────────────────────────────────────────────
+type UploadFileInput struct {
+	UserID   string
+	FileName string
+	FileSize int64
+	MimeType string
+	FileData []byte
+}
+
+type UploadFile struct {
+	fileRepo     repository.FileRepository
+	storageePath string
+}
+
+func NewUploadFile(fileRepo repository.FileRepository) *UploadFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &UploadFile{fileRepo: fileRepo, storageePath: storagePath}
+}
+
+func (uc *UploadFile) UploadFile(in UploadFileInput) (*domain.File, error) {
+	if in.UserID == "" {
+		return nil, ErrForbidden
+	}
+	if in.FileName == "" {
+		return nil, &ValidationError{Message: "file name is required"}
+	}
+	if in.FileSize <= 0 {
+		return nil, &ValidationError{Message: "file size must be greater than 0"}
+	}
+	const maxFileSize = 50 * 1024 * 1024 // 50 MB
+	if in.FileSize > maxFileSize {
+		return nil, &ValidationError{Message: "file is too large (max 50 MB)"}
+	}
+
+	f := &domain.File{
+		ID:        uuid.New().String(),
+		UserID:    in.UserID,
+		FileName:  in.FileName,
+		FileSize:  in.FileSize,
+		MimeType:  in.MimeType,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	// Сохраняем файл на диск
+	if err := uc.saveFile(f, in.FileData); err != nil {
+		return nil, err
+	}
+
+	// Сохраняем метаданные в БД
+	if err := uc.fileRepo.Create(f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (uc *UploadFile) saveFile(f *domain.File, data []byte) error {
+	// Создаём директорию для пользователя если её нет
+	userDir := filepath.Join(uc.storageePath, f.UserID)
+	if err := os.MkdirAll(userDir, 0755); err != nil {
+		return &ValidationError{Message: "failed to create storage directory"}
+	}
+
+	// Генерируем путь к файлу
+	filePath := filepath.Join(userDir, f.ID+"_"+f.FileName)
+
+	// Записываем файл на диск
+	if err := ioutil.WriteFile(filePath, data, 0644); err != nil {
+		return &ValidationError{Message: "failed to save file"}
+	}
+
+	return nil
+}
+
+type ListUserFilesInput struct {
+	UserID string
+}
+
+type ListUserFiles struct {
+	fileRepo repository.FileRepository
+}
+
+func NewListUserFiles(fileRepo repository.FileRepository) *ListUserFiles {
+	return &ListUserFiles{fileRepo: fileRepo}
+}
+
+func (uc *ListUserFiles) ListUserFiles(in ListUserFilesInput) ([]*domain.File, error) {
+	if in.UserID == "" {
+		return nil, ErrForbidden
+	}
+	files, err := uc.fileRepo.ListByUser(in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if files == nil {
+		return []*domain.File{}, nil
+	}
+	return files, nil
+}
+
+type GetFileInput struct {
+	FileID string
+	UserID string
+}
+
+type GetFile struct {
+	fileRepo     repository.FileRepository
+	storageePath string
+}
+
+func NewGetFile(fileRepo repository.FileRepository) *GetFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &GetFile{fileRepo: fileRepo, storageePath: storagePath}
+}
+
+func (uc *GetFile) GetFile(in GetFileInput) (*domain.File, []byte, error) {
+	if in.FileID == "" || in.UserID == "" {
+		return nil, nil, ErrForbidden
+	}
+
+	f, err := uc.fileRepo.GetByID(in.FileID)
+	if err != nil || f == nil {
+		return nil, nil, ErrForbidden
+	}
+
+	// Проверяем что файл принадлежит пользователю или запрашивающий - учитель
+	if f.UserID != in.UserID {
+		return nil, nil, ErrForbidden
+	}
+
+	// Читаем файл с диска
+	filePath := filepath.Join(uc.storageePath, f.UserID, f.ID+"_"+f.FileName)
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, nil, &ValidationError{Message: "file not found"}
+	}
+
+	return f, data, nil
 }

@@ -8,3 +8,18 @@ services:
     restart: unless-stopped
     environment:
       - PORT=8080
+      - FILES_STORAGE_PATH=/app/storage/files
+    volumes:
+      - file_storage:/app/storage/files
+    depends_on:
+      - file-storage
+
+  file-storage:
+    image: busybox
+    volumes:
+      - file_storage:/storage
+    command: sh -c "mkdir -p /storage && sleep infinity"
+
+volumes:
+  file_storage:
+    driver: local
