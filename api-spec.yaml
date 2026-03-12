@@ -17,6 +17,7 @@ tags:
   - name: assignments
   - name: submissions
   - name: comments
+  - name: files
 
 paths:
   /health:
@@ -566,6 +567,67 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /courses/{courseId}/assignments/{assignmentId}/detach:
+    put:
+      tags: [submissions]
+      summary: Отсоединение (отмена is_attached), преподаватель
+      operationId: detachSubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/return:
+    put:
+      tags: [submissions]
+      summary: Возврат работы на переработку (F-25)
+      operationId: returnSubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json: {}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /courses/{courseId}/assignments/{assignmentId}/comments:
     get:
       tags: [comments]
@@ -646,6 +708,97 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SubmissionWithAssignment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /files:
+    post:
+      tags: [files]
+      summary: Загрузка файла
+      operationId: uploadFile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: File too large
+
+  /files/{fileId}:
+    get:
+      tags: [files]
+      summary: Скачивание файла
+      operationId: downloadFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{userId}/files:
+    get:
+      tags: [files]
+      summary: Список загруженных файлов пользователя
+      operationId: listUserFiles
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/File"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1015,6 +1168,12 @@ components:
           minimum: 0
           maximum: 100
           nullable: true
+        is_attached:
+          type: boolean
+          description: Финальная ли отправка
+        is_returned:
+          type: boolean
+          description: Возвращена ли на переработку
 
     GradeRequest:
       type: object
@@ -1057,6 +1216,26 @@ components:
           type: string
           format: uuid
         body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    File:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        file_name:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
           type: string
         created_at:
           type: string
