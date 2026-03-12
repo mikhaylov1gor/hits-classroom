@@ -2,21 +2,32 @@ import {
   Box,
   Button,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   IconButton,
+  Menu,
+  MenuItem,
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
-import LinkIcon from '@mui/icons-material/Link'
-import { useNavigate, useParams, useLocation } from 'react-router-dom'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import {
-  getCourseFeed,
+  getMaterial,
   getCourse,
   listCourseMembers,
+  deleteMaterial,
 } from '../../../features/courses/api/coursesApi'
+import type { Material } from '../../../features/courses/api/coursesApi'
+import { FileAttachmentLink } from '../../../features/courses/ui/FileAttachmentLink/FileAttachmentLink'
 import {
-  type FeedItem,
   type Member,
   getNameByUserId,
 } from '../../../features/courses/model/types'
@@ -40,49 +51,52 @@ function formatDate(dateStr?: string): string {
 export function MaterialPage() {
   const { courseId, materialId } = useParams<{ courseId: string; materialId: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
-  const [material, setMaterial] = useState<FeedItem | null>(null)
-  const [courseTitle, setCourseTitle] = useState('')
+  const [material, setMaterial] = useState<Material | null>(null)
+  const [course, setCourse] = useState<{ title: string; role?: string } | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
-
-  const stateItem = (location.state as { material?: FeedItem })?.material
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false)
 
   useEffect(() => {
     if (!courseId || !materialId) {
       navigate('/')
       return
     }
-    if (stateItem && stateItem.type === 'material' && stateItem.id === materialId) {
-      setMaterial(stateItem)
-      setLoading(false)
-      Promise.all([
-        getCourse(courseId).then((c) => setCourseTitle(c.title)),
-        listCourseMembers(courseId).then(setMembers).catch(() => setMembers([])),
-      ]).catch(() => {})
-      return
-    }
     setLoading(true)
     Promise.all([
       getCourse(courseId),
-      getCourseFeed(courseId),
+      getMaterial(courseId, materialId),
       listCourseMembers(courseId),
     ])
-      .then(([c, feed, m]) => {
-        setCourseTitle(c.title)
-        setMembers(m ?? [])
-        const found = feed.find(
-          (f) => f.type === 'material' && f.id === materialId,
-        ) ?? null
-        setMaterial(found)
+      .then(([c, m, mem]) => {
+        setCourse(c)
+        setMaterial(m)
+        setMembers(mem ?? [])
       })
       .catch(() => setMaterial(null))
       .finally(() => setLoading(false))
-  }, [courseId, materialId, stateItem, navigate])
+  }, [courseId, materialId, navigate])
 
   const handleBack = () => {
     navigate(courseId ? `/course/${courseId}` : '/')
   }
+
+  const handleDeleteMaterial = async () => {
+    if (!courseId || !materialId) return
+    setDeleteLoading(true)
+    try {
+      await deleteMaterial(courseId, materialId)
+      setDeleteDialogOpen(false)
+      navigate(`/course/${courseId}`)
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  const canDelete = course?.role === 'owner' || course?.role === 'teacher'
 
   if (!courseId || !materialId) return null
 
@@ -107,7 +121,9 @@ export function MaterialPage() {
     )
   }
 
-  const attachments = material.attachments ?? []
+  const links = material.links ?? []
+  const fileIds = material.file_ids ?? []
+  const attachments = fileIds.map((id, i) => ({ id, name: `Файл ${i + 1}` }))
   const authorName =
     (material.user_id
       ? getNameByUserId(members, material.user_id, material.author)
@@ -123,53 +139,134 @@ export function MaterialPage() {
             <ArrowBackIcon />
           </IconButton>
           <Typography variant="body2" color="text.secondary">
-            {courseTitle}
+            {course?.title}
           </Typography>
         </Box>
 
         <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-          <Typography variant="h5" className="font-semibold text-slate-800 mb-2">
-            {material.title}
-          </Typography>
+          <Box className="flex items-center justify-between gap-2 mb-2">
+            <Typography variant="h5" className="font-semibold text-slate-800">
+              {material.title}
+            </Typography>
+            {canDelete && (
+              <IconButton
+                size="small"
+                aria-label="Меню"
+                onClick={(e) => setMenuAnchor(e.currentTarget)}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            )}
+          </Box>
+          <Menu
+            anchorEl={menuAnchor}
+            open={Boolean(menuAnchor)}
+            onClose={() => setMenuAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <MenuItem
+              onClick={() => {
+                setMenuAnchor(null)
+                setDeleteDialogOpen(true)
+              }}
+              sx={{ color: 'error.main' }}
+            >
+              <DeleteOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
+              Удалить материал
+            </MenuItem>
+          </Menu>
           <Typography variant="body2" color="text.secondary" className="mb-4">
             {authorName} · {formatDate(material.created_at)}
           </Typography>
-          <Typography variant="body1" className="whitespace-pre-wrap text-slate-700 mb-6">
-            {material.body || '—'}
-          </Typography>
-          {attachments.length > 0 && (
-            <Box>
+          {material.body && material.body.trim() && (
+            <Typography variant="body1" className="whitespace-pre-wrap text-slate-700 mb-6">
+              {material.body}
+            </Typography>
+          )}
+          {links.length > 0 && (
+            <Box className="mb-4">
               <Typography variant="subtitle2" className="text-slate-600 mb-2">
-                Прикреплённые материалы
+                Ссылки
               </Typography>
-              <Box className="flex flex-wrap gap-2">
-                {attachments.map((a) => (
-                  <Box
-                    key={a.id}
-                    className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
+              <Box className="flex flex-col gap-1">
+                {links.map((url, i) => (
+                  <Typography
+                    key={i}
+                    component="a"
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    variant="body2"
+                    className="text-primary-600 hover:underline break-all"
                   >
-                    <InsertDriveFileOutlinedIcon fontSize="small" color="action" />
-                    <Typography variant="body2" className="font-medium">
-                      {a.name}
-                    </Typography>
-                    {a.url && (
-                      <IconButton
-                        size="small"
-                        component="a"
-                        href={a.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`Открыть ${a.name}`}
-                      >
-                        <LinkIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Box>
+                    {url}
+                  </Typography>
                 ))}
               </Box>
             </Box>
           )}
+          {attachments.length > 0 && (
+            <Box>
+              <Button
+                size="small"
+                variant="text"
+                startIcon={
+                  attachmentsExpanded ? (
+                    <ExpandLessIcon fontSize="small" />
+                  ) : (
+                    <ExpandMoreIcon fontSize="small" />
+                  )
+                }
+                onClick={() => setAttachmentsExpanded((v) => !v)}
+                sx={{ textTransform: 'none' }}
+              >
+                Прикреплённые материалы ({attachments.length})
+              </Button>
+              {attachmentsExpanded && (
+                <Box className="flex flex-wrap gap-2 mt-2">
+                  {attachments.map((a) => (
+                    <FileAttachmentLink
+                      key={a.id}
+                      attachment={a}
+                      fileSource={
+                        courseId && materialId
+                          ? { type: 'material', courseId, materialId }
+                          : undefined
+                      }
+                    />
+                  ))}
+                </Box>
+              )}
+            </Box>
+          )}
         </Box>
+
+        <Dialog
+          open={deleteDialogOpen}
+          onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
+          aria-labelledby="delete-material-dialog-title"
+        >
+          <DialogTitle id="delete-material-dialog-title">Удалить материал?</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              Материал «{material.title}» будет удалён безвозвратно.
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+              Отмена
+            </Button>
+            <Button
+              onClick={handleDeleteMaterial}
+              color="error"
+              variant="contained"
+              disabled={deleteLoading}
+            >
+              {deleteLoading ? 'Удаление…' : 'Удалить'}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     </Container>
   )

@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Avatar,
   Box,
   Button,
   Dialog,
+  DialogActions,
   DialogContent,
+  DialogContentText,
   DialogTitle,
   IconButton,
   Menu,
@@ -12,25 +14,31 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
-import CloseIcon from '@mui/icons-material/Close'
-import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
-import LinkIcon from '@mui/icons-material/Link'
+import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
 import {
   listPostComments,
   createPostComment,
-  uploadFiles,
+  deletePost,
+  getPost,
 } from '../../../api/coursesApi'
+import { FileAttachmentLink } from '../../FileAttachmentLink/FileAttachmentLink'
+import { getLinkHref } from '../../../utils/urlValidation'
+import LinkIcon from '@mui/icons-material/Link'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../../auth/model/AuthContext'
 import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
 import {
   type Comment,
   type FeedItem,
   type Member,
+  type Post,
+  buildCommentTree,
   countCommentsRecursively,
   getNameByUserId,
 } from '../../../model/types'
@@ -41,6 +49,9 @@ type PostCardProps = {
   authorName: string
   authorInitial: string
   courseMembers?: Member[]
+  isTeacher?: boolean
+  isAuthor?: boolean
+  onDeleted?: () => void
 }
 
 function formatDate(dateStr?: string): string {
@@ -62,21 +73,13 @@ function formatDate(dateStr?: string): string {
 function CommentForm({
   commentText,
   setCommentText,
-  commentFiles,
-  handleFileChange,
-  removeCommentFile,
   handleSubmitComment,
   submittingComment,
-  fileInputRef,
 }: {
   commentText: string
   setCommentText: (v: string) => void
-  commentFiles: File[]
-  handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  removeCommentFile: (i: number) => void
   handleSubmitComment: (e: React.FormEvent) => void
   submittingComment: boolean
-  fileInputRef: React.RefObject<HTMLInputElement | null>
 }) {
   return (
     <Box component="form" onSubmit={handleSubmitComment} className="flex flex-col gap-2">
@@ -92,45 +95,6 @@ function CommentForm({
         inputProps={{ 'aria-label': 'Текст комментария' }}
       />
       <Box className="flex items-center gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileChange}
-          aria-label="Прикрепить файл к комментарию"
-        />
-        <Button
-          component="span"
-          variant="outlined"
-          size="small"
-          startIcon={<AttachFileOutlinedIcon />}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          Файл
-        </Button>
-        {commentFiles.length > 0 && (
-          <Box className="flex flex-wrap gap-1">
-            {commentFiles.map((f, i) => (
-              <Box
-                key={`${f.name}-${i}`}
-                className="flex items-center gap-0.5 px-2 py-0.5 bg-slate-100 rounded text-xs"
-              >
-                <Typography variant="caption" className="truncate max-w-[80px]">
-                  {f.name}
-                </Typography>
-                <IconButton
-                  size="small"
-                  sx={{ p: 0.25 }}
-                  aria-label={`Удалить ${f.name}`}
-                  onClick={() => removeCommentFile(i)}
-                >
-                  <CloseIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Box>
-            ))}
-          </Box>
-        )}
         <Button
           type="submit"
           variant="contained"
@@ -170,7 +134,15 @@ function CommentItem({
   const isReplyingToThis = replyToParentId === comment.id
   const isOwn = authUserId && comment.user_id === authUserId
   return (
-    <Box className="flex flex-col gap-1" sx={{ ml: depth * 2 }}>
+    <Box
+      className="flex flex-col gap-1"
+      sx={{
+        ml: depth > 0 ? 3 : 0,
+        pl: depth > 0 ? 2 : 0,
+        borderLeft: depth > 0 ? '2px solid' : 'none',
+        borderColor: 'grey.300',
+      }}
+    >
       <Box
         className="p-3 rounded-lg"
         sx={{
@@ -214,7 +186,7 @@ function CommentItem({
         </Box>
       )}
       {comment.replies && comment.replies.length > 0 && (
-        <Box className="flex flex-col gap-2 mt-1">
+        <Box className="flex flex-col gap-2 mt-2">
           {comment.replies.map((r) => (
             <CommentItem
               key={r.id}
@@ -241,20 +213,36 @@ export function PostCard({
   authorName,
   authorInitial,
   courseMembers = [],
+  isTeacher = false,
+  isAuthor = false,
+  onDeleted,
 }: PostCardProps) {
+  const navigate = useNavigate()
   const { user: authUser } = useAuth()
   const getName = (userId: string, fallback?: { first_name?: string; last_name?: string } | null) =>
     getNameByUserId(courseMembers, userId, fallback)
   const [comments, setComments] = useState<Comment[]>([])
   const [commentText, setCommentText] = useState('')
-  const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [replyToParentId, setReplyToParentId] = useState<string | null>(null)
   const [loadingComments, setLoadingComments] = useState(false)
   const [submittingComment, setSubmittingComment] = useState(false)
   const [showAddCommentInput, setShowAddCommentInput] = useState(false)
   const [commentsModalOpen, setCommentsModalOpen] = useState(false)
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [fullPost, setFullPost] = useState<Post | null>(null)
+  const [bodyExpanded, setBodyExpanded] = useState(false)
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false)
+
+  const canDelete = isTeacher || isAuthor
+
+  useEffect(() => {
+    if (!courseId || item.type !== 'post') return
+    getPost(courseId, item.id)
+      .then(setFullPost)
+      .catch(() => setFullPost(null))
+  }, [courseId, item.id, item.type])
 
   useEffect(() => {
     if (!courseId) return
@@ -272,14 +260,11 @@ export function PostCard({
 
     setSubmittingComment(true)
     try {
-      const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
       await createPostComment(courseId, item.id, {
         body: trimmed,
         parent_id: replyToParentId,
-        file_ids: fileIds,
       })
       setCommentText('')
-      setCommentFiles([])
       setReplyToParentId(null)
       setShowAddCommentInput(false)
       const list = await listPostComments(courseId, item.id)
@@ -290,23 +275,36 @@ export function PostCard({
     }
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files
-    if (selected) {
-      setCommentFiles((prev) => [...prev, ...Array.from(selected)])
+  const handleDeletePost = async () => {
+    if (!courseId) return
+    setDeleteLoading(true)
+    try {
+      await deletePost(courseId, item.id)
+      setDeleteDialogOpen(false)
+      onDeleted?.()
+    } finally {
+      setDeleteLoading(false)
     }
-    e.target.value = ''
   }
 
-  const removeCommentFile = (index: number) => {
-    setCommentFiles((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const content = item.body || item.title
-  const displayDate = formatDate(item.created_at)
-  const attachments = item.attachments ?? []
+  const data = fullPost ?? item
+  const content = data.body || data.title
+  const displayDate = formatDate(data.created_at ?? item.created_at)
+  const links = (fullPost?.links ?? item.links) ?? []
+  const fileIds = fullPost?.file_ids ?? item.file_ids ?? []
+  const attachments =
+    (fullPost?.attachments ?? item.attachments) && (fullPost?.attachments ?? item.attachments)!.length > 0
+      ? (fullPost?.attachments ?? item.attachments)!
+      : fileIds.map((id, i) => ({ id, name: `Файл ${i + 1}` }))
   const totalCommentsCount = countCommentsRecursively(comments)
   const hasComments = totalCommentsCount > 0
+
+  const BODY_PREVIEW_LENGTH = 300
+  const isBodyLong = (content?.length ?? 0) > BODY_PREVIEW_LENGTH
+  const displayContent =
+    isBodyLong && !bodyExpanded
+      ? `${content!.slice(0, BODY_PREVIEW_LENGTH)}…`
+      : content
 
   return (
     <Box className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
@@ -356,7 +354,15 @@ export function PostCard({
                 >
                   <MenuItem
                     onClick={() => {
-                      const url = `${window.location.origin}/course/${courseId}?tab=posts#post-${item.id}`
+                      setMenuAnchor(null)
+                      navigate(`/course/${courseId}/post/${item.id}`)
+                    }}
+                  >
+                    Открыть пост
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      const url = `${window.location.origin}/course/${courseId}/post/${item.id}`
                       navigator.clipboard.writeText(url)
                       setMenuAnchor(null)
                     }}
@@ -364,51 +370,99 @@ export function PostCard({
                     <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
                     Копировать ссылку
                   </MenuItem>
+                  {canDelete && (
+                    <MenuItem
+                      onClick={() => {
+                        setMenuAnchor(null)
+                        setDeleteDialogOpen(true)
+                      }}
+                      sx={{ color: 'error.main' }}
+                    >
+                      <DeleteOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
+                      Удалить пост
+                    </MenuItem>
+                  )}
                 </Menu>
               </Box>
             </Box>
-            <Typography
-              variant="body2"
-              className="text-slate-600 whitespace-pre-wrap"
-              sx={{ lineHeight: 1.6 }}
-            >
-              {content}
-            </Typography>
+            {(content || data.title) && (
+              <>
+                <Typography
+                  variant="body2"
+                  className="text-slate-600 whitespace-pre-wrap"
+                  sx={{
+                    lineHeight: 1.6,
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                  }}
+                >
+                  {displayContent}
+                </Typography>
+                {isBodyLong && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => setBodyExpanded((v) => !v)}
+                    startIcon={bodyExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    sx={{ mt: 0.5, textTransform: 'none' }}
+                  >
+                    {bodyExpanded ? 'Свернуть' : 'Развернуть'}
+                  </Button>
+                )}
+              </>
+            )}
           </Box>
         </Box>
       </Box>
 
       <Box className="px-4 pb-4 pt-0 border-t border-slate-100">
-          {attachments.length > 0 && (
+          {(links.length > 0 || attachments.length > 0) && (
             <Box className="flex flex-col gap-2 mb-4">
-              <Typography variant="subtitle2" className="text-slate-600">
-                Вложения
-              </Typography>
-              <Box className="flex flex-wrap gap-2">
-                {attachments.map((a) => (
-                  <Box
-                    key={a.id}
-                    className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
-                  >
-                    <InsertDriveFileOutlinedIcon fontSize="small" color="action" />
-                    <Typography variant="body2" className="font-medium">
-                      {a.name}
-                    </Typography>
-                    {a.url && (
-                      <IconButton
-                        size="small"
+              <Button
+                size="small"
+                variant="text"
+                startIcon={
+                  attachmentsExpanded ? (
+                    <ExpandLessIcon fontSize="small" />
+                  ) : (
+                    <ExpandMoreIcon fontSize="small" />
+                  )
+                }
+                onClick={() => setAttachmentsExpanded((v) => !v)}
+                sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+              >
+                Вложения ({links.length + attachments.length})
+              </Button>
+              {attachmentsExpanded && (
+                <Box className="flex flex-col gap-2 w-full">
+                  {links.map((url, i) => (
+                    <Box
+                      key={`link-${i}`}
+                      className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm w-full"
+                    >
+                      <LinkIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      <Typography
+                        variant="body2"
                         component="a"
-                        href={a.url}
+                        href={getLinkHref(url)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        aria-label={`Открыть ${a.name}`}
+                        sx={{ color: 'primary.main', wordBreak: 'break-all' }}
                       >
-                        <LinkIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Box>
-                ))}
-              </Box>
+                        {url}
+                      </Typography>
+                    </Box>
+                  ))}
+                  {attachments.map((a) => (
+                    <Box key={a.id} className="w-full">
+                      <FileAttachmentLink
+                        attachment={{ id: a.id, name: a.name || 'Файл' }}
+                        fileSource={{ type: 'post', courseId, postId: item.id }}
+                      />
+                    </Box>
+                  ))}
+                </Box>
+              )}
             </Box>
           )}
 
@@ -434,12 +488,8 @@ export function PostCard({
                   <CommentForm
                     commentText={commentText}
                     setCommentText={setCommentText}
-                    commentFiles={commentFiles}
-                    handleFileChange={handleFileChange}
-                    removeCommentFile={removeCommentFile}
                     handleSubmitComment={handleSubmitComment}
                     submittingComment={submittingComment}
-                    fileInputRef={fileInputRef}
                   />
                 )}
               </>
@@ -468,7 +518,7 @@ export function PostCard({
                   <DialogTitle id="comments-dialog-title">Комментарии</DialogTitle>
                   <DialogContent className="flex flex-col gap-4">
                     <Box className="flex flex-col gap-3">
-                      {comments.map((c) => (
+                      {buildCommentTree(comments).map((c) => (
                         <CommentItem
                           key={c.id}
                           comment={c}
@@ -477,7 +527,6 @@ export function PostCard({
                           onCancelReply={() => {
                     setReplyToParentId(null)
                     setCommentText('')
-                    setCommentFiles([])
                   }}
                           depth={0}
                           replyToParentId={replyToParentId}
@@ -486,12 +535,8 @@ export function PostCard({
                             <CommentForm
                               commentText={commentText}
                               setCommentText={setCommentText}
-                              commentFiles={commentFiles}
-                              handleFileChange={handleFileChange}
-                              removeCommentFile={removeCommentFile}
                               handleSubmitComment={handleSubmitComment}
                               submittingComment={submittingComment}
-                              fileInputRef={fileInputRef}
                             />
                           )}
                           getName={getName}
@@ -502,12 +547,8 @@ export function PostCard({
                       <CommentForm
                         commentText={commentText}
                         setCommentText={setCommentText}
-                        commentFiles={commentFiles}
-                        handleFileChange={handleFileChange}
-                        removeCommentFile={removeCommentFile}
                         handleSubmitComment={handleSubmitComment}
                         submittingComment={submittingComment}
-                        fileInputRef={fileInputRef}
                       />
                     )}
                   </DialogContent>
@@ -516,6 +557,32 @@ export function PostCard({
             )}
           </Box>
         </Box>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
+        aria-labelledby="delete-post-dialog-title"
+      >
+        <DialogTitle id="delete-post-dialog-title">Удалить пост?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Пост «{item.title}» будет удалён безвозвратно.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+            Отмена
+          </Button>
+          <Button
+            onClick={handleDeletePost}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? 'Удаление…' : 'Удалить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

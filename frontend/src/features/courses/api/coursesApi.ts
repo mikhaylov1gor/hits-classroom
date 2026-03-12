@@ -41,11 +41,30 @@ function getAuthHeaders(): HeadersInit {
   return headers
 }
 
+/** Схема File из API (POST /files, GET /users/{userId}/files) */
+export type ApiFile = {
+  id: string
+  user_id: string
+  file_name: string
+  file_size: number
+  mime_type: string
+  created_at: string
+}
+
+/** Результат загрузки файла (совместимость с существующим кодом) */
 export type UploadedFile = {
   id: string
   name: string
   url?: string | null
   type?: string | null
+}
+
+function apiFileToUploadedFile(api: ApiFile): UploadedFile {
+  return {
+    id: api.id,
+    name: api.file_name,
+    type: api.mime_type,
+  }
 }
 
 export async function uploadFile(file: File): Promise<UploadedFile> {
@@ -62,9 +81,25 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
 
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 413) throw new Error('FILE_TOO_LARGE')
   if (!response.ok) throw new Error('UPLOAD_FAILED')
 
-  return (await response.json()) as UploadedFile
+  const apiFile = (await response.json()) as ApiFile
+  return apiFileToUploadedFile(apiFile)
+}
+
+export async function listUserFiles(userId: string): Promise<ApiFile[]> {
+  const response = await fetch(`${API_BASE}/users/${userId}/files`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_FILES_FAILED')
+
+  return (await response.json()) as ApiFile[]
 }
 
 export async function uploadFiles(files: File[]): Promise<string[]> {
@@ -74,6 +109,126 @@ export async function uploadFiles(files: File[]): Promise<string[]> {
     ids.push(uploaded.id)
   }
   return ids
+}
+
+/** Получение информации о файле (GET /files/{fileId}/info) */
+export async function getFileInfo(fileId: string): Promise<ApiFile> {
+  const response = await fetch(`${API_BASE}/files/${fileId}/info`, {
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_FILE_INFO_FAILED')
+  return (await response.json()) as ApiFile
+}
+
+function triggerBlobDownload(blob: Blob, suggestedName: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = suggestedName
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function getSuggestedFileName(
+  response: Response,
+  fileName?: string,
+  fileId?: string,
+): string {
+  return (
+    fileName ??
+    response.headers
+      .get('Content-Disposition')
+      ?.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)?.[1]
+      ?.replace(/['"]/g, '') ??
+    (fileId ? `file-${fileId.slice(0, 8)}` : 'download')
+  )
+}
+
+/** Скачивание файла по ID (GET /files/{fileId}). Для файлов заданий и общих файлов. */
+export async function downloadFile(fileId: string, fileName?: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/files/${fileId}`, {
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DOWNLOAD_FAILED')
+  const blob = await response.blob()
+  const suggestedName = getSuggestedFileName(response, fileName, fileId)
+  triggerBlobDownload(blob, suggestedName)
+}
+
+/** Скачивание файла поста (GET /courses/{courseId}/posts/{postId}/files/{fileId}) */
+export async function downloadPostFile(
+  courseId: string,
+  postId: string,
+  fileId: string,
+  fileName?: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/posts/${postId}/files/${fileId}`,
+    { headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DOWNLOAD_FAILED')
+  const blob = await response.blob()
+  const suggestedName = getSuggestedFileName(response, fileName, fileId)
+  triggerBlobDownload(blob, suggestedName)
+}
+
+/** Скачивание файла материала (GET /courses/{courseId}/materials/{materialId}/files/{fileId}) */
+export async function downloadMaterialFile(
+  courseId: string,
+  materialId: string,
+  fileId: string,
+  fileName?: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/materials/${materialId}/files/${fileId}`,
+    { headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DOWNLOAD_FAILED')
+  const blob = await response.blob()
+  const suggestedName = getSuggestedFileName(response, fileName, fileId)
+  triggerBlobDownload(blob, suggestedName)
+}
+
+/**
+ * Скачивание файла решения.
+ * GET /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/files/{fileId}
+ *
+ * Логика доступа:
+ * - Owner/Teacher: любой файл из любого решения в своём курсе
+ * - Student: только файлы из своего решения
+ *
+ * Проверки: участник курса, задание в курсе, решение в задании, fileId в file_ids решения.
+ */
+export async function downloadSubmissionFile(
+  courseId: string,
+  assignmentId: string,
+  submissionId: string,
+  fileId: string,
+  fileName?: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/files/${fileId}`,
+    { headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DOWNLOAD_FAILED')
+  const blob = await response.blob()
+  const suggestedName = getSuggestedFileName(response, fileName, fileId)
+  triggerBlobDownload(blob, suggestedName)
 }
 
 export async function createCourse(payload: { title: string }): Promise<CourseWithRole> {
@@ -229,17 +384,51 @@ export async function getCourseFeed(courseId: string): Promise<FeedItem[]> {
   return (await response.json()) as FeedItem[]
 }
 
+export async function getPost(courseId: string, postId: string): Promise<Post> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/posts/${postId}`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_POST_FAILED')
+
+  return (await response.json()) as Post
+}
+
+export async function deletePost(courseId: string, postId: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/posts/${postId}`,
+    { method: 'DELETE', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DELETE_POST_FAILED')
+}
+
 export async function createPost(
   courseId: string,
-  payload: { title: string; body?: string; file_ids?: string[] },
+  payload: { title: string; body?: string; links?: string[]; file_ids?: string[] },
 ): Promise<Post> {
+  const body: Record<string, unknown> = {
+    title: payload.title,
+    body: payload.body,
+    links: payload.links,
+  }
+  if (payload.file_ids && payload.file_ids.length > 0) {
+    body.file_ids = payload.file_ids
+  }
   const response = await fetch(`${API_BASE}/courses/${courseId}/posts`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...getAuthHeaders(),
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   })
 
   if (response.status === 401) throw new Error('UNAUTHORIZED')
@@ -267,11 +456,44 @@ export async function getAssignment(
   return (await response.json()) as Assignment
 }
 
+export async function deleteAssignment(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}`,
+    { method: 'DELETE', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DELETE_ASSIGNMENT_FAILED')
+}
+
+export async function getMySubmission(
+  courseId: string,
+  assignmentId: string,
+): Promise<Submission | null> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/my`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error('FETCH_MY_SUBMISSION_FAILED')
+
+  return (await response.json()) as Submission
+}
+
 export async function createAssignment(
   courseId: string,
   payload: {
     title: string
     body?: string
+    links?: string[]
     file_ids?: string[]
     deadline?: string
     max_grade?: number
@@ -280,8 +502,11 @@ export async function createAssignment(
   const body: Record<string, unknown> = {
     title: payload.title,
     body: payload.body,
-    file_ids: payload.file_ids,
+    links: payload.links,
     max_grade: payload.max_grade,
+  }
+  if (payload.file_ids && payload.file_ids.length > 0) {
+    body.file_ids = payload.file_ids
   }
   if (payload.deadline != null && payload.deadline !== '') {
     body.deadline = payload.deadline
@@ -321,11 +546,18 @@ export async function listSubmissions(
   return (await response.json()) as Submission[]
 }
 
+/** CreateSubmissionRequest: body, file_ids, is_attached (false=черновик, true=финальная сдача) */
 export async function submitAssignment(
   courseId: string,
   assignmentId: string,
-  payload: { body?: string; file_ids?: string[] },
+  payload: { body?: string; file_ids?: string[]; is_attached?: boolean },
 ): Promise<Submission> {
+  const body: Record<string, unknown> = {
+    body: payload.body ?? '',
+    file_ids: payload.file_ids ?? [],
+    is_attached: payload.is_attached ?? false,
+  }
+
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions`,
     {
@@ -334,7 +566,7 @@ export async function submitAssignment(
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     },
   )
 
@@ -342,7 +574,13 @@ export async function submitAssignment(
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('NOT_FOUND')
-  if (response.status === 409) throw new Error('ALREADY_SUBMITTED')
+  if (response.status === 409) {
+    const err = (await response.json().catch(() => ({}))) as { code?: string; error?: string }
+    if (err.code === 'DEADLINE_EXCEEDED' || /дедлайн|deadline/i.test(err.error ?? '')) {
+      throw new Error('DEADLINE_EXCEEDED')
+    }
+    throw new Error('ALREADY_SUBMITTED')
+  }
   if (!response.ok) throw new Error('SUBMIT_ASSIGNMENT_FAILED')
 
   return (await response.json()) as Submission
@@ -380,28 +618,28 @@ export async function gradeSubmission(
   return (await response.json()) as Submission
 }
 
-export async function updateSubmission(
+export async function detachSubmission(
   courseId: string,
   assignmentId: string,
-  submissionId: string,
-  payload: { body?: string; file_ids?: string[] },
+  userId: string,
 ): Promise<Submission> {
   const response = await fetch(
-    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}`,
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/detach`,
     {
-      method: 'PATCH',
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ user_id: userId }),
     },
   )
 
+  if (response.status === 400) throw new Error('BAD_REQUEST')
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('NOT_FOUND')
-  if (!response.ok) throw new Error('UPDATE_SUBMISSION_FAILED')
+  if (!response.ok) throw new Error('DETACH_SUBMISSION_FAILED')
 
   return (await response.json()) as Submission
 }
@@ -453,17 +691,69 @@ export async function inviteTeacherByEmail(
   return (await response.json()) as Member
 }
 
+export type Material = {
+  id: string
+  course_id: string
+  title: string
+  body?: string | null
+  links?: string[]
+  file_ids?: string[]
+  created_at?: string
+  user_id?: string
+  author?: { first_name: string; last_name: string } | null
+}
+
+export async function getMaterial(
+  courseId: string,
+  materialId: string,
+): Promise<Material> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/materials/${materialId}`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_MATERIAL_FAILED')
+
+  return (await response.json()) as Material
+}
+
+export async function deleteMaterial(
+  courseId: string,
+  materialId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/materials/${materialId}`,
+    { method: 'DELETE', headers: getAuthHeaders() },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('DELETE_MATERIAL_FAILED')
+}
+
 export async function createMaterial(
   courseId: string,
-  payload: { title: string; body?: string; file_ids?: string[] },
-): Promise<unknown> {
+  payload: { title: string; body?: string; links?: string[]; file_ids?: string[] },
+): Promise<Material> {
+  const body: Record<string, unknown> = {
+    title: payload.title,
+    body: payload.body,
+    links: payload.links,
+  }
+  if (payload.file_ids && payload.file_ids.length > 0) {
+    body.file_ids = payload.file_ids
+  }
   const response = await fetch(`${API_BASE}/courses/${courseId}/materials`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...getAuthHeaders(),
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   })
 
   if (response.status === 401) throw new Error('UNAUTHORIZED')
@@ -471,7 +761,7 @@ export async function createMaterial(
   if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
   if (!response.ok) throw new Error('CREATE_MATERIAL_FAILED')
 
-  return response.json()
+  return (await response.json()) as Material
 }
 
 export async function listAssignmentComments(
@@ -497,13 +787,13 @@ export async function createAssignmentComment(
   payload: {
     body: string
     parent_id?: string | null
+    is_private?: boolean
     file_ids?: string[]
-    reply_to_user_id?: string | null
   },
 ): Promise<Comment> {
   const body: Record<string, unknown> = { body: payload.body, file_ids: payload.file_ids ?? [] }
   if (payload.parent_id != null) body.parent_id = payload.parent_id
-  if (payload.reply_to_user_id != null) body.reply_to_user_id = payload.reply_to_user_id
+  if (payload.is_private != null) body.is_private = payload.is_private
 
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/comments`,
@@ -545,10 +835,11 @@ export async function listPostComments(
 export async function createPostComment(
   courseId: string,
   postId: string,
-  payload: { body: string; parent_id?: string | null; file_ids?: string[] },
+  payload: { body: string; parent_id?: string | null; is_private?: boolean; file_ids?: string[] },
 ): Promise<Comment> {
   const body: Record<string, unknown> = { body: payload.body, file_ids: payload.file_ids ?? [] }
   if (payload.parent_id != null) body.parent_id = payload.parent_id
+  if (payload.is_private != null) body.is_private = payload.is_private
 
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/posts/${postId}/comments`,
@@ -590,10 +881,11 @@ export async function listMaterialComments(
 export async function createMaterialComment(
   courseId: string,
   materialId: string,
-  payload: { body: string; parent_id?: string | null; file_ids?: string[] },
+  payload: { body: string; parent_id?: string | null; is_private?: boolean; file_ids?: string[] },
 ): Promise<Comment> {
   const body: Record<string, unknown> = { body: payload.body, file_ids: payload.file_ids ?? [] }
   if (payload.parent_id != null) body.parent_id = payload.parent_id
+  if (payload.is_private != null) body.is_private = payload.is_private
 
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/materials/${materialId}/comments`,
@@ -620,12 +912,13 @@ export const listComments = listAssignmentComments
 export async function createComment(
   courseId: string,
   entityId: string,
-  payload: { body?: string; file_ids?: string[]; reply_to_user_id?: string },
+  payload: { body?: string; file_ids?: string[]; parent_id?: string | null; is_private?: boolean },
 ): Promise<Comment> {
   return createAssignmentComment(courseId, entityId, {
     body: payload.body ?? '',
     file_ids: payload.file_ids,
-    reply_to_user_id: payload.reply_to_user_id,
+    parent_id: payload.parent_id,
+    is_private: payload.is_private,
   })
 }
 
@@ -700,16 +993,29 @@ export async function removeMember(
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (response.status === 409) throw new Error('LAST_OWNER')
   if (!response.ok) throw new Error('REMOVE_MEMBER_FAILED')
 }
 
-export async function updateMemberRole(
+export async function leaveCourse(courseId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/courses/${courseId}/leave`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 409) throw new Error('LAST_OWNER')
+  if (!response.ok) throw new Error('LEAVE_COURSE_FAILED')
+}
+
+export async function changeMemberRole(
   courseId: string,
   userId: string,
-  role: 'teacher' | 'owner',
+  role: 'owner' | 'teacher' | 'student',
 ): Promise<Member> {
   const response = await fetch(
-    `${API_BASE}/courses/${courseId}/members/${userId}`,
+    `${API_BASE}/courses/${courseId}/members/${userId}/role`,
     {
       method: 'PATCH',
       headers: {
@@ -723,8 +1029,18 @@ export async function updateMemberRole(
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
-  if (!response.ok) throw new Error('UPDATE_MEMBER_ROLE_FAILED')
+  if (response.status === 409) throw new Error('LAST_OWNER')
+  if (!response.ok) throw new Error('CHANGE_MEMBER_ROLE_FAILED')
 
   return (await response.json()) as Member
+}
+
+/** @deprecated Use changeMemberRole instead */
+export async function updateMemberRole(
+  courseId: string,
+  userId: string,
+  role: 'teacher' | 'owner',
+): Promise<Member> {
+  return changeMemberRole(courseId, userId, role)
 }
 

@@ -29,7 +29,7 @@ export function ProfileTab() {
   useEffect(() => {
     if (data) {
       setUser(data)
-      setFullName(`${data.first_name} ${data.last_name}`.trim())
+      setFullName(`${data.first_name ?? ''} ${data.last_name ?? ''}`.trim())
       setBirthDate(data.birth_date)
       setLoading(false)
     } else if (!isLoading) {
@@ -42,11 +42,26 @@ export function ProfileTab() {
 
   const handleSave = async () => {
     const nextErrors: ProfileErrors = {}
-    if (!fullName.trim()) {
+    const trimmedFullName = fullName.trim()
+    const words = trimmedFullName.split(/\s+/).filter(Boolean)
+    if (!trimmedFullName) {
       nextErrors.fullName = 'Укажите ФИО'
+    } else if (words.length < 2) {
+      nextErrors.fullName = 'Введите имя и фамилию (минимум два слова)'
     }
     if (!birthDate) {
       nextErrors.birthDate = 'Укажите дату рождения'
+    } else {
+      const birthDateObj = new Date(birthDate + 'T00:00:00')
+      const today = new Date()
+      const minBirthDate = new Date(
+        today.getFullYear() - 14,
+        today.getMonth(),
+        today.getDate(),
+      )
+      if (birthDateObj > minBirthDate) {
+        nextErrors.birthDate = 'Вам должно быть не менее 14 лет'
+      }
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -57,11 +72,11 @@ export function ProfileTab() {
     setSaving(true)
     try {
       const updated = await updateProfileMutation.mutateAsync({
-        fullName,
+        fullName: trimmedFullName,
         birthDate,
       })
       setUser(updated)
-      setFullName(`${updated.first_name} ${updated.last_name}`.trim())
+      setFullName(`${updated.first_name ?? ''} ${updated.last_name ?? ''}`.trim())
       setBirthDate(updated.birth_date)
       setIsEditing(false)
     } catch {
@@ -101,6 +116,7 @@ export function ProfileTab() {
             disabled={!isEditing}
             error={Boolean(errors.fullName)}
             helperText={errors.fullName}
+            placeholder="Имя Фамилия"
           />
 
           <TextField

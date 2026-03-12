@@ -89,3 +89,21 @@ export async function updateCurrentUser(payload: UpdateProfilePayload): Promise<
   return user
 }
 
+export type CheckEmailResponse = {
+  exists: boolean
+}
+
+export async function checkEmailExists(email: string): Promise<CheckEmailResponse> {
+  const params = new URLSearchParams({ email: email.trim() })
+  const response = await fetch(`${API_BASE}/users/check-email?${params}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (!response.ok) throw new Error('CHECK_EMAIL_FAILED')
+
+  return (await response.json()) as CheckEmailResponse
+}
+
