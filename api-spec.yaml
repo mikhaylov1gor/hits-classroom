@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: hits-classroom API
-  version: 0.1.0
-  description: Backend API для LMS (курсы, задания, материалы, посты, оценки).
+  version: 0.3.0
+  description: Backend API для LMS (курсы, задания, материалы, посты, оценки, файлы).
 
 servers:
   - url: /api/v1
@@ -12,6 +12,7 @@ tags:
   - name: auth
   - name: users
   - name: courses
+  - name: members
   - name: posts
   - name: materials
   - name: assignments
@@ -32,6 +33,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
 
+  # ── Auth ──────────────────────────────────────────────────────────────────────
+
   /auth/register:
     post:
       tags: [auth]
@@ -45,15 +48,15 @@ paths:
               $ref: "#/components/schemas/RegisterRequest"
       responses:
         "201":
-          description: Created
+          description: Created — возвращает JWT токен и профиль пользователя
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/LoginResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "409":
-          description: Email already exists
+          description: Email уже зарегистрирован
 
   /auth/login:
     post:
@@ -74,7 +77,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "401":
-          description: Invalid credentials
+          description: Неверный email или пароль
+
+  # ── Users ─────────────────────────────────────────────────────────────────────
+
+  /users/check-email:
+    get:
+      tags: [users]
+      summary: Проверка существования пользователя по email
+      operationId: checkEmailExists
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckEmailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /users/me:
     get:
@@ -114,6 +145,96 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /users/{userId}/files:
+    get:
+      tags: [files]
+      summary: Список загруженных файлов пользователя
+      operationId: listUserFiles
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/File"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Files ─────────────────────────────────────────────────────────────────────
+
+  /files:
+    post:
+      tags: [files]
+      summary: Загрузка файла
+      operationId: uploadFile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: Файл слишком большой
+
+  /files/{fileId}:
+    get:
+      tags: [files]
+      summary: Скачивание файла
+      operationId: downloadFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Courses ───────────────────────────────────────────────────────────────────
 
   /courses:
     get:
@@ -160,7 +281,7 @@ paths:
   /courses/join:
     post:
       tags: [courses]
-      summary: Присоединение по коду (F-02)
+      summary: Присоединение по коду приглашения (F-02)
       operationId: joinCourse
       security:
         - bearerAuth: []
@@ -179,10 +300,10 @@ paths:
                 $ref: "#/components/schemas/CourseWithRole"
         "400":
           $ref: "#/components/responses/BadRequest"
-        "404":
-          description: Course not found or invalid code
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Курс не найден или код неверный
 
   /courses/{courseId}:
     get:
@@ -255,7 +376,7 @@ paths:
   /courses/{courseId}/invite-code:
     get:
       tags: [courses]
-      summary: Получение/генерация кода приглашения 8 символов (F-04)
+      summary: Получение кода приглашения (8 символов) (F-04). Генерирует, если отсутствует.
       operationId: getInviteCode
       security:
         - bearerAuth: []
@@ -274,10 +395,85 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    post:
+      tags: [courses]
+      summary: Перегенерация кода приглашения. Только владелец.
+      operationId: regenerateInviteCode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          description: OK — новый код
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteCode"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/feed:
+    get:
+      tags: [courses]
+      summary: Лента постов, материалов и заданий курса (сортировка по дате)
+      operationId: getCourseFeed
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeedItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Members ───────────────────────────────────────────────────────────────────
+
+  /courses/{courseId}/leave:
+    post:
+      tags: [members]
+      summary: Покинуть курс. Если владелец — должен быть ещё хотя бы один владелец.
+      operationId: leaveCourse
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Не участник курса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Нельзя покинуть курс — вы последний владелец
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /courses/{courseId}/members:
     get:
-      tags: [courses]
+      tags: [members]
       summary: Список участников курса
       operationId: listCourseMembers
       security:
@@ -300,8 +496,8 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
     post:
-      tags: [courses]
-      summary: Назначение преподавателей (F-07), только владелец
+      tags: [members]
+      summary: Назначить участника преподавателем (F-07). Только владелец.
       operationId: assignTeacher
       security:
         - bearerAuth: []
@@ -329,15 +525,76 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /courses/{courseId}/feed:
-    get:
-      tags: [courses]
-      summary: Лента постов, материалов и заданий курса
-      operationId: getCourseFeed
+  /courses/{courseId}/members/{userId}:
+    delete:
+      tags: [members]
+      summary: Исключить участника. Владелец — может исключить преподов и студентов. Преподаватель — только студентов.
+      operationId: removeMember
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/members/{userId}/role:
+    patch:
+      tags: [members]
+      summary: Изменить роль участника (owner, teacher, student). Только владелец. При понижении owner проверяется наличие другого владельца.
+      operationId: changeMemberRole
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeMemberRoleRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Нельзя понизить последнего владельца
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /courses/{courseId}/members/{userId}/grades:
+    get:
+      tags: [users]
+      summary: Профиль студента в классе — задания с оценками (F-15). Студент видит только свои.
+      operationId: getStudentGrades
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/UserId"
       responses:
         "200":
           description: OK
@@ -346,7 +603,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/FeedItem"
+                  $ref: "#/components/schemas/SubmissionWithAssignment"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -354,10 +611,53 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /courses/{courseId}/invite-teacher:
+    post:
+      tags: [members]
+      summary: Пригласить пользователя как учителя по email. Только владелец. Если уже студент — роль обновляется до учителя.
+      operationId: inviteTeacher
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteTeacherRequest"
+      responses:
+        "200":
+          description: OK — участник добавлен или обновлён до учителя
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Пользователь с таким email не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Пользователь уже является учителем этого курса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Posts ─────────────────────────────────────────────────────────────────────
+
   /courses/{courseId}/posts:
     post:
       tags: [posts]
-      summary: Создание поста (F-09)
+      summary: Создание поста (F-09). Доступно всем участникам курса (owner, teacher, student).
       operationId: createPost
       security:
         - bearerAuth: []
@@ -385,10 +685,110 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /courses/{courseId}/posts/{postId}:
+    get:
+      tags: [posts]
+      summary: Получение поста с полной информацией (body, links, file_ids)
+      operationId: getPost
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [posts]
+      summary: Удаление поста. Автор поста или owner/teacher курса.
+      operationId: deletePost
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/posts/{postId}/comments:
+    get:
+      tags: [comments]
+      summary: Комментарии к посту в виде дерева
+      operationId: listPostComments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [comments]
+      summary: Добавить комментарий к посту. Поддерживает вложенность через parent_id.
+      operationId: createPostComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Materials ─────────────────────────────────────────────────────────────────
+
   /courses/{courseId}/materials:
     post:
       tags: [materials]
-      summary: Создание материала (F-10)
+      summary: Создание материала (F-10). Только owner/teacher.
       operationId: createMaterial
       security:
         - bearerAuth: []
@@ -416,10 +816,110 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /courses/{courseId}/materials/{materialId}:
+    get:
+      tags: [materials]
+      summary: Получение материала с полной информацией
+      operationId: getMaterial
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/MaterialId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Material"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [materials]
+      summary: Удаление материала. Только owner/teacher.
+      operationId: deleteMaterial
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/MaterialId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/materials/{materialId}/comments:
+    get:
+      tags: [comments]
+      summary: Комментарии к материалу в виде дерева
+      operationId: listMaterialComments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/MaterialId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [comments]
+      summary: Добавить комментарий к материалу. Поддерживает вложенность через parent_id.
+      operationId: createMaterialComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/MaterialId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Assignments ───────────────────────────────────────────────────────────────
+
   /courses/{courseId}/assignments:
     post:
       tags: [assignments]
-      summary: Создание задания (F-08), дедлайн (F-18)
+      summary: Создание задания (F-08). Поддерживает дедлайн (F-18) и шкалу оценки. Только owner/teacher.
       operationId: createAssignment
       security:
         - bearerAuth: []
@@ -470,11 +970,112 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [assignments]
+      summary: Удаление задания (каскадно удаляет ответы и комментарии). Только owner/teacher.
+      operationId: deleteAssignment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/comments:
+    get:
+      tags: [comments]
+      summary: Комментарии к заданию в виде дерева (F-19). Студент видит публичные + свои приватные.
+      operationId: listComments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [comments]
+      summary: Добавить комментарий к заданию. Поддерживает is_private (личное сообщение преподу).
+      operationId: createComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/comments/{commentId}:
+    delete:
+      tags: [comments]
+      summary: Удалить комментарий (и все вложенные ответы). Автор или owner/teacher курса.
+      operationId: deleteComment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Submissions ───────────────────────────────────────────────────────────────
 
   /courses/{courseId}/assignments/{assignmentId}/submissions:
     get:
       tags: [submissions]
-      summary: Просмотр всех ответов (F-13), преподаватель
+      summary: Список ответов на задание (F-13). Преподаватель/владелец видит все, студент — только свой.
       operationId: listSubmissions
       security:
         - bearerAuth: []
@@ -498,7 +1099,7 @@ paths:
           $ref: "#/components/responses/NotFound"
     post:
       tags: [submissions]
-      summary: Ответ на задание (F-11), неизменяем после отправки (F-12)
+      summary: Ответ на задание (F-11). Неизменяем после отправки (F-12).
       operationId: submitAssignment
       security:
         - bearerAuth: []
@@ -527,12 +1128,40 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Already submitted
+          description: Ответ уже был отправлен ранее
+
+  /courses/{courseId}/assignments/{assignmentId}/submissions/my:
+    get:
+      tags: [submissions]
+      summary: Получение своего ответа на задание
+      operationId: getMySubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Ответ не найден (ещё не отправлен)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/grade:
     put:
       tags: [submissions]
-      summary: Оценивание 0–100 (F-14)
+      summary: Выставление оценки (F-14). Оценка от 0 до max_grade задания.
       operationId: gradeSubmission
       security:
         - bearerAuth: []
@@ -567,36 +1196,10 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /courses/{courseId}/assignments/{assignmentId}/detach:
-    put:
-      tags: [submissions]
-      summary: Отсоединение (отмена is_attached), преподаватель
-      operationId: detachSubmission
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-        - $ref: "#/components/parameters/AssignmentId"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Submission"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
   /courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/return:
     put:
       tags: [submissions]
-      summary: Возврат работы на переработку (F-25)
+      summary: Возврат работы студенту на переработку (F-25). Только owner/teacher.
       operationId: returnSubmission
       security:
         - bearerAuth: []
@@ -609,9 +1212,36 @@ paths:
           schema:
             type: string
             format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/detach:
+    put:
+      tags: [submissions]
+      summary: Открепить ответ студента (сбросить прикрепление). Только owner/teacher.
+      operationId: detachSubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
       requestBody:
+        required: true
         content:
-          application/json: {}
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetachSubmissionRequest"
       responses:
         "200":
           description: OK
@@ -628,183 +1258,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /courses/{courseId}/assignments/{assignmentId}/comments:
-    get:
-      tags: [comments]
-      summary: Комментарии к заданию (F-19)
-      operationId: listComments
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-        - $ref: "#/components/parameters/AssignmentId"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Comment"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    post:
-      tags: [comments]
-      summary: Добавить комментарий (текст + файлы)
-      operationId: createComment
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-        - $ref: "#/components/parameters/AssignmentId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateCommentRequest"
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Comment"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /courses/{courseId}/members/{userId}/grades:
-    get:
-      tags: [users]
-      summary: Профиль студента в классе — последние задания с оценками (F-15)
-      operationId: getStudentGrades
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SubmissionWithAssignment"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /files:
-    post:
-      tags: [files]
-      summary: Загрузка файла
-      operationId: uploadFile
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/File"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "413":
-          description: File too large
-
-  /files/{fileId}:
-    get:
-      tags: [files]
-      summary: Скачивание файла
-      operationId: downloadFile
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: fileId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: OK
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /users/{userId}/files:
-    get:
-      tags: [files]
-      summary: Список загруженных файлов пользователя
-      operationId: listUserFiles
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/File"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+# ── Components ────────────────────────────────────────────────────────────────
 
 components:
   securitySchemes:
@@ -823,6 +1277,27 @@ components:
         format: uuid
     AssignmentId:
       name: assignmentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PostId:
+      name: postId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MaterialId:
+      name: materialId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: userId
       in: path
       required: true
       schema:
@@ -871,6 +1346,8 @@ components:
         code:
           type: string
 
+    # ── Auth ──────────────────────────────────────────────────────────────────
+
     RegisterRequest:
       type: object
       required: [email, password, first_name, last_name, birth_date]
@@ -904,8 +1381,11 @@ components:
       properties:
         token:
           type: string
+          description: JWT Bearer токен
         user:
           $ref: "#/components/schemas/User"
+
+    # ── Users ─────────────────────────────────────────────────────────────────
 
     User:
       type: object
@@ -927,6 +1407,13 @@ components:
           type: string
           format: date-time
 
+    CheckEmailResponse:
+      type: object
+      properties:
+        exists:
+          type: boolean
+          description: true, если пользователь с таким email зарегистрирован
+
     UpdateProfileRequest:
       type: object
       properties:
@@ -937,6 +1424,30 @@ components:
         birth_date:
           type: string
           format: date
+
+    # ── Files ─────────────────────────────────────────────────────────────────
+
+    File:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        file_name:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Courses ───────────────────────────────────────────────────────────────
 
     CreateCourseRequest:
       type: object
@@ -991,6 +1502,28 @@ components:
           minLength: 8
           maxLength: 8
 
+    FeedItem:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [post, material, assignment]
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: Заполнено только для заданий
+
+    # ── Members ───────────────────────────────────────────────────────────────
+
     Member:
       type: object
       properties:
@@ -1015,24 +1548,25 @@ components:
           type: string
           format: uuid
 
-    FeedItem:
+    InviteTeacherRequest:
       type: object
+      required: [email]
       properties:
-        type:
+        email:
           type: string
-          enum: [post, material, assignment]
-        id:
+          format: email
+          description: Email пользователя, которого нужно пригласить как учителя
+
+    ChangeMemberRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
           type: string
-          format: uuid
-        title:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        deadline:
-          type: string
-          format: date-time
-          nullable: true
+          enum: [owner, teacher, student]
+          description: Новая роль участника
+
+    # ── Posts ─────────────────────────────────────────────────────────────────
 
     CreatePostRequest:
       type: object
@@ -1042,6 +1576,12 @@ components:
           type: string
         body:
           type: string
+        links:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Прикреплённые ссылки
         file_ids:
           type: array
           items:
@@ -1057,13 +1597,29 @@ components:
         course_id:
           type: string
           format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: ID пользователя, создавшего пост
         title:
           type: string
         body:
           type: string
+        links:
+          type: array
+          items:
+            type: string
+            format: uri
+        file_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
         created_at:
           type: string
           format: date-time
+
+    # ── Materials ─────────────────────────────────────────────────────────────
 
     CreateMaterialRequest:
       type: object
@@ -1073,6 +1629,12 @@ components:
           type: string
         body:
           type: string
+        links:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Прикреплённые ссылки
         file_ids:
           type: array
           items:
@@ -1092,9 +1654,21 @@ components:
           type: string
         body:
           type: string
+        links:
+          type: array
+          items:
+            type: string
+            format: uri
+        file_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
         created_at:
           type: string
           format: date-time
+
+    # ── Assignments ───────────────────────────────────────────────────────────
 
     CreateAssignmentRequest:
       type: object
@@ -1104,6 +1678,12 @@ components:
           type: string
         body:
           type: string
+        links:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Прикреплённые ссылки
         file_ids:
           type: array
           items:
@@ -1113,6 +1693,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        max_grade:
+          type: integer
+          minimum: 1
+          default: 100
+          description: "Максимальный балл (шкала оценки). Примеры: 5, 10, 100. По умолчанию 100."
 
     Assignment:
       type: object
@@ -1127,13 +1712,28 @@ components:
           type: string
         body:
           type: string
+        links:
+          type: array
+          items:
+            type: string
+            format: uri
+        file_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
         deadline:
           type: string
           format: date-time
           nullable: true
+        max_grade:
+          type: integer
+          description: Максимальный балл по шкале оценки
         created_at:
           type: string
           format: date-time
+
+    # ── Submissions ───────────────────────────────────────────────────────────
 
     CreateSubmissionRequest:
       type: object
@@ -1160,20 +1760,23 @@ components:
           format: uuid
         body:
           type: string
+        file_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
         submitted_at:
           type: string
           format: date-time
         grade:
           type: integer
           minimum: 0
-          maximum: 100
           nullable: true
-        is_attached:
-          type: boolean
-          description: Финальная ли отправка
-        is_returned:
-          type: boolean
-          description: Возвращена ли на переработку
+          description: Оценка в диапазоне [0, max_grade] задания. null — не выставлена.
+        grade_comment:
+          type: string
+          nullable: true
+          description: Комментарий преподавателя к оценке
 
     GradeRequest:
       type: object
@@ -1182,7 +1785,19 @@ components:
         grade:
           type: integer
           minimum: 0
-          maximum: 100
+          description: Оценка в диапазоне [0, max_grade] задания
+        grade_comment:
+          type: string
+          description: Необязательный комментарий преподавателя
+
+    DetachSubmissionRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: ID студента, чей ответ нужно открепить
 
     SubmissionWithAssignment:
       type: object
@@ -1192,9 +1807,23 @@ components:
         assignment:
           $ref: "#/components/schemas/Assignment"
 
+    # ── Comments ──────────────────────────────────────────────────────────────
+
     CreateCommentRequest:
       type: object
+      required: [body]
       properties:
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID родительского комментария. Если не указан — корневой комментарий.
+        is_private:
+          type: boolean
+          default: false
+          description: >-
+            Личный комментарий — виден только автору и owner/teacher курса.
+            Ответ на приватный комментарий автоматически наследует is_private=true.
         body:
           type: string
         file_ids:
@@ -1212,31 +1841,40 @@ components:
         assignment_id:
           type: string
           format: uuid
+          description: Непусто для комментариев к заданиям
+        post_id:
+          type: string
+          format: uuid
+          description: Непусто для комментариев к постам
+        material_id:
+          type: string
+          format: uuid
+          description: Непусто для комментариев к материалам
         user_id:
           type: string
           format: uuid
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID родительского комментария или null для корневых
+        is_private:
+          type: boolean
+          description: >-
+            true — личный комментарий. Студент видит только свои приватные ветки,
+            преподаватель/владелец видит все.
         body:
           type: string
+        file_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
         created_at:
           type: string
           format: date-time
-
-    File:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        user_id:
-          type: string
-          format: uuid
-        file_name:
-          type: string
-        file_size:
-          type: integer
-          format: int64
-        mime_type:
-          type: string
-        created_at:
-          type: string
-          format: date-time
+        replies:
+          type: array
+          description: Вложенные ответы (рекурсивно, только в GET-ответах)
+          items:
+            $ref: "#/components/schemas/Comment"
