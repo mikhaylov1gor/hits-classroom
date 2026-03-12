@@ -1127,7 +1127,10 @@ paths:
           $ref: "#/components/responses/NotFound"
     post:
       tags: [submissions]
-      summary: Ответ на задание (F-11). Неизменяем после отправки (F-12).
+      summary: >-
+        Сохранить/отправить ответ на задание (F-11, F-12).
+        is_attached=false — черновик (можно перезаписывать).
+        is_attached=true — финальная сдача; после дедлайна невозможна (409).
       operationId: submitAssignment
       security:
         - bearerAuth: []
@@ -1156,7 +1159,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Ответ уже был отправлен ранее
+          description: >-
+            Конфликт: либо ответ уже был финально отправлен,
+            либо дедлайн задания истёк (при is_attached=true)
 
   /courses/{courseId}/assignments/{assignmentId}/submissions/my:
     get:
@@ -1773,6 +1778,12 @@ components:
           items:
             type: string
             format: uuid
+        is_attached:
+          type: boolean
+          default: false
+          description: >-
+            false — черновик (можно обновлять, не считается финальной сдачей).
+            true — финальная отправка. После дедлайна финальная отправка невозможна.
 
     Submission:
       type: object
@@ -1796,6 +1807,12 @@ components:
         submitted_at:
           type: string
           format: date-time
+        is_attached:
+          type: boolean
+          description: true — финальная отправка (работа сдана)
+        is_returned:
+          type: boolean
+          description: true — работа возвращена преподавателем на доработку
         grade:
           type: integer
           minimum: 0
