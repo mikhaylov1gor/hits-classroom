@@ -1089,3 +1089,33 @@ func (uc *GetFile) GetFile(in GetFileInput) (*domain.File, []byte, error) {
 
 	return f, data, nil
 }
+
+type GetFileInfoInput struct {
+	FileID string
+	UserID string
+}
+
+type GetFileInfo struct {
+	fileRepo repository.FileRepository
+}
+
+func NewGetFileInfo(fileRepo repository.FileRepository) *GetFileInfo {
+	return &GetFileInfo{fileRepo: fileRepo}
+}
+
+func (uc *GetFileInfo) GetFileInfo(in GetFileInfoInput) (*domain.File, error) {
+	if in.FileID == "" || in.UserID == "" {
+		return nil, ErrForbidden
+	}
+
+	f, err := uc.fileRepo.GetByID(in.FileID)
+	if err != nil || f == nil {
+		return nil, ErrForbidden
+	}
+
+	if f.UserID != in.UserID {
+		return nil, ErrForbidden
+	}
+
+	return f, nil
+}

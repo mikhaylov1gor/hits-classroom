@@ -234,6 +234,34 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /files/{fileId}/info:
+    get:
+      tags: [files]
+      summary: Получение информации о файле (без самого файла)
+      operationId: getFileInfo
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ── Courses ───────────────────────────────────────────────────────────────────
 
   /courses:

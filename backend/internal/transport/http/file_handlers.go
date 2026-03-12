@@ -182,3 +182,48 @@ func (h *ListUserFilesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(out)
 }
+
+type GetFileInfoHandler struct {
+	getFileInfo *usecase.GetFileInfo
+}
+
+func NewGetFileInfoHandler(getFileInfo *usecase.GetFileInfo) *GetFileInfoHandler {
+	return &GetFileInfoHandler{getFileInfo: getFileInfo}
+}
+
+func (h *GetFileInfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	fileID := r.PathValue("fileId")
+	if fileID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	f, err := h.getFileInfo.GetFileInfo(usecase.GetFileInfoInput{FileID: fileID, UserID: userID})
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(fileResponse(f))
+}

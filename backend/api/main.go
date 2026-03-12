@@ -84,6 +84,7 @@ func main() {
 	uploadFileUC := usecase.NewUploadFile(fileRepo)
 	listUserFilesUC := usecase.NewListUserFiles(fileRepo)
 	getFileUC := usecase.NewGetFile(fileRepo)
+	getFileInfoUC := usecase.NewGetFileInfo(fileRepo)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -130,6 +131,7 @@ func main() {
 	mux.Handle("POST /api/v1/files", authWrap(httphandler.NewUploadFileHandler(uploadFileUC)))
 	mux.Handle("GET /api/v1/users/{userId}/files", authWrap(httphandler.NewListUserFilesHandler(listUserFilesUC)))
 	mux.Handle("GET /api/v1/files/{fileId}", authWrap(httphandler.NewGetFileHandler(getFileUC)))
+	mux.Handle("GET /api/v1/files/{fileId}/info", authWrap(httphandler.NewGetFileInfoHandler(getFileInfoUC)))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
