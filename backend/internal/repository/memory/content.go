@@ -43,6 +43,25 @@ func (r *PostRepository) ListByCourse(courseID string) ([]*domain.Post, error) {
 	return r.byCid[courseID], nil
 }
 
+func (r *PostRepository) Delete(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.byID[id]
+	if !ok {
+		return nil
+	}
+	delete(r.byID, id)
+	list := r.byCid[p.CourseID]
+	out := list[:0]
+	for _, item := range list {
+		if item.ID != id {
+			out = append(out, item)
+		}
+	}
+	r.byCid[p.CourseID] = out
+	return nil
+}
+
 var _ repository.PostRepository = (*PostRepository)(nil)
 
 type MaterialRepository struct {
@@ -66,6 +85,12 @@ func (r *MaterialRepository) Create(m *domain.Material) error {
 	return nil
 }
 
+func (r *MaterialRepository) GetByID(id string) (*domain.Material, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.byID[id], nil
+}
+
 func (r *MaterialRepository) ListByCourse(courseID string) ([]*domain.Material, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -73,6 +98,25 @@ func (r *MaterialRepository) ListByCourse(courseID string) ([]*domain.Material, 
 		return []*domain.Material{}, nil
 	}
 	return r.byCid[courseID], nil
+}
+
+func (r *MaterialRepository) Delete(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.byID[id]
+	if !ok {
+		return nil
+	}
+	delete(r.byID, id)
+	list := r.byCid[m.CourseID]
+	out := list[:0]
+	for _, item := range list {
+		if item.ID != id {
+			out = append(out, item)
+		}
+	}
+	r.byCid[m.CourseID] = out
+	return nil
 }
 
 var _ repository.MaterialRepository = (*MaterialRepository)(nil)
@@ -111,6 +155,25 @@ func (r *AssignmentRepository) ListByCourse(courseID string) ([]*domain.Assignme
 		return []*domain.Assignment{}, nil
 	}
 	return r.byCid[courseID], nil
+}
+
+func (r *AssignmentRepository) Delete(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.byID[id]
+	if !ok {
+		return nil
+	}
+	delete(r.byID, id)
+	list := r.byCid[a.CourseID]
+	out := list[:0]
+	for _, item := range list {
+		if item.ID != id {
+			out = append(out, item)
+		}
+	}
+	r.byCid[a.CourseID] = out
+	return nil
 }
 
 var _ repository.AssignmentRepository = (*AssignmentRepository)(nil)
@@ -175,20 +238,32 @@ func (r *SubmissionRepository) Update(s *domain.Submission) error {
 	return nil
 }
 
+func (r *SubmissionRepository) DeleteByAssignment(assignmentID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.byAssign[assignmentID] {
+		delete(r.byID, s.ID)
+	}
+	delete(r.byAssign, assignmentID)
+	return nil
+}
+
 var _ repository.SubmissionRepository = (*SubmissionRepository)(nil)
 
 type CommentRepository struct {
-	mu       sync.RWMutex
-	byID     map[string]*domain.Comment
-	byAssign map[string][]*domain.Comment
-	byPost   map[string][]*domain.Comment
+	mu         sync.RWMutex
+	byID       map[string]*domain.Comment
+	byAssign   map[string][]*domain.Comment
+	byPost     map[string][]*domain.Comment
+	byMaterial map[string][]*domain.Comment
 }
 
 func NewCommentRepository() *CommentRepository {
 	return &CommentRepository{
-		byID:     make(map[string]*domain.Comment),
-		byAssign: make(map[string][]*domain.Comment),
-		byPost:   make(map[string][]*domain.Comment),
+		byID:       make(map[string]*domain.Comment),
+		byAssign:   make(map[string][]*domain.Comment),
+		byPost:     make(map[string][]*domain.Comment),
+		byMaterial: make(map[string][]*domain.Comment),
 	}
 }
 
@@ -201,6 +276,9 @@ func (r *CommentRepository) Create(c *domain.Comment) error {
 	}
 	if c.PostID != "" {
 		r.byPost[c.PostID] = append(r.byPost[c.PostID], c)
+	}
+	if c.MaterialID != "" {
+		r.byMaterial[c.MaterialID] = append(r.byMaterial[c.MaterialID], c)
 	}
 	return nil
 }
@@ -239,6 +317,16 @@ func (r *CommentRepository) Delete(id string) error {
 		}
 		r.byPost[c.PostID] = out
 	}
+	if c.MaterialID != "" {
+		list := r.byMaterial[c.MaterialID]
+		out := list[:0]
+		for _, item := range list {
+			if item.ID != id {
+				out = append(out, item)
+			}
+		}
+		r.byMaterial[c.MaterialID] = out
+	}
 	return nil
 }
 
@@ -260,4 +348,81 @@ func (r *CommentRepository) ListByPost(postID string) ([]*domain.Comment, error)
 	return r.byPost[postID], nil
 }
 
+func (r *CommentRepository) ListByMaterial(materialID string) ([]*domain.Comment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.byMaterial[materialID] == nil {
+		return []*domain.Comment{}, nil
+	}
+	return r.byMaterial[materialID], nil
+}
+
+func (r *CommentRepository) DeleteByAssignment(assignmentID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.byAssign[assignmentID] {
+		delete(r.byID, c.ID)
+	}
+	delete(r.byAssign, assignmentID)
+	return nil
+}
+
+func (r *CommentRepository) DeleteByPost(postID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.byPost[postID] {
+		delete(r.byID, c.ID)
+	}
+	delete(r.byPost, postID)
+	return nil
+}
+
+func (r *CommentRepository) DeleteByMaterial(materialID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.byMaterial[materialID] {
+		delete(r.byID, c.ID)
+	}
+	delete(r.byMaterial, materialID)
+	return nil
+}
+
 var _ repository.CommentRepository = (*CommentRepository)(nil)
+
+type FileRepository struct {
+	mu    sync.RWMutex
+	byID  map[string]*domain.File
+	byUid map[string][]*domain.File
+}
+
+func NewFileRepository() *FileRepository {
+	return &FileRepository{
+		byID:  make(map[string]*domain.File),
+		byUid: make(map[string][]*domain.File),
+	}
+}
+
+func (r *FileRepository) Create(f *domain.File) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byID[f.ID] = f
+	r.byUid[f.UserID] = append(r.byUid[f.UserID], f)
+	return nil
+}
+
+func (r *FileRepository) GetByID(id string) (*domain.File, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.byID[id], nil
+}
+
+func (r *FileRepository) ListByUser(userID string) ([]*domain.File, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.byUid[userID] == nil {
+		return []*domain.File{}, nil
+	}
+	return r.byUid[userID], nil
+}
+
+var _ repository.FileRepository = (*FileRepository)(nil)

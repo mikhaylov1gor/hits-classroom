@@ -18,4 +18,5 @@ type CourseMemberRepository interface {
 	ListByCourse(courseID string) ([]*domain.CourseMember, error)
 	ListByUser(userID string) ([]*domain.CourseMember, error)
 	DeleteByCourse(courseID string) error
+	Delete(courseID, userID string) error
 }
