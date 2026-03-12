@@ -755,6 +755,41 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /courses/{courseId}/posts/{postId}/files/{fileId}:
+    get:
+      tags: [files]
+      summary: Скачать файл, прикреплённый к посту. Доступно всем участникам курса.
+      operationId: getPostFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/PostId"
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Содержимое файла
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Пост или файл не найдены, либо файл не прикреплён к данному посту
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /courses/{courseId}/posts/{postId}/comments:
     get:
       tags: [comments]
@@ -885,6 +920,41 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/materials/{materialId}/files/{fileId}:
+    get:
+      tags: [files]
+      summary: Скачать файл, прикреплённый к материалу. Доступно всем участникам курса.
+      operationId: getMaterialFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/MaterialId"
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Содержимое файла
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Материал или файл не найдены, либо файл не прикреплён к данному материалу
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /courses/{courseId}/materials/{materialId}/comments:
     get:

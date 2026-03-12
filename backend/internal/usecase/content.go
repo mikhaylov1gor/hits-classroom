@@ -1056,6 +1056,114 @@ func (uc *GetSubmissionFile) GetSubmissionFile(in GetSubmissionFileInput) (*doma
 	return f, data, nil
 }
 
+// ── GetPostFile ───────────────────────────────────────────────────────────────
+
+type GetPostFileInput struct {
+	CourseID    string
+	PostID      string
+	FileID      string
+	RequesterID string
+}
+
+type GetPostFile struct {
+	memberRepo  repository.CourseMemberRepository
+	postRepo    repository.PostRepository
+	fileRepo    repository.FileRepository
+	storagePath string
+}
+
+func NewGetPostFile(memberRepo repository.CourseMemberRepository, postRepo repository.PostRepository, fileRepo repository.FileRepository) *GetPostFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &GetPostFile{memberRepo: memberRepo, postRepo: postRepo, fileRepo: fileRepo, storagePath: storagePath}
+}
+
+func (uc *GetPostFile) GetPostFile(in GetPostFileInput) (*domain.File, []byte, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.RequesterID)
+	if err != nil || role == "" {
+		return nil, nil, ErrForbidden
+	}
+	p, err := uc.postRepo.GetByID(in.PostID)
+	if err != nil || p == nil || p.CourseID != in.CourseID {
+		return nil, nil, ErrCourseNotFound
+	}
+	found := false
+	for _, fid := range p.FileIDs {
+		if fid == in.FileID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, nil, ErrCourseNotFound
+	}
+	f, err := uc.fileRepo.GetByID(in.FileID)
+	if err != nil || f == nil {
+		return nil, nil, ErrCourseNotFound
+	}
+	data, err := ioutil.ReadFile(filepath.Join(uc.storagePath, f.UserID, f.ID+"_"+f.FileName))
+	if err != nil {
+		return nil, nil, &ValidationError{Message: "file not found on disk"}
+	}
+	return f, data, nil
+}
+
+// ── GetMaterialFile ───────────────────────────────────────────────────────────
+
+type GetMaterialFileInput struct {
+	CourseID    string
+	MaterialID  string
+	FileID      string
+	RequesterID string
+}
+
+type GetMaterialFile struct {
+	memberRepo   repository.CourseMemberRepository
+	materialRepo repository.MaterialRepository
+	fileRepo     repository.FileRepository
+	storagePath  string
+}
+
+func NewGetMaterialFile(memberRepo repository.CourseMemberRepository, materialRepo repository.MaterialRepository, fileRepo repository.FileRepository) *GetMaterialFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &GetMaterialFile{memberRepo: memberRepo, materialRepo: materialRepo, fileRepo: fileRepo, storagePath: storagePath}
+}
+
+func (uc *GetMaterialFile) GetMaterialFile(in GetMaterialFileInput) (*domain.File, []byte, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.RequesterID)
+	if err != nil || role == "" {
+		return nil, nil, ErrForbidden
+	}
+	m, err := uc.materialRepo.GetByID(in.MaterialID)
+	if err != nil || m == nil || m.CourseID != in.CourseID {
+		return nil, nil, ErrCourseNotFound
+	}
+	found := false
+	for _, fid := range m.FileIDs {
+		if fid == in.FileID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, nil, ErrCourseNotFound
+	}
+	f, err := uc.fileRepo.GetByID(in.FileID)
+	if err != nil || f == nil {
+		return nil, nil, ErrCourseNotFound
+	}
+	data, err := ioutil.ReadFile(filepath.Join(uc.storagePath, f.UserID, f.ID+"_"+f.FileName))
+	if err != nil {
+		return nil, nil, &ValidationError{Message: "file not found on disk"}
+	}
+	return f, data, nil
+}
+
 // ── File usecases ────────────────────────────────────────────────────────────
 type UploadFileInput struct {
 	UserID   string

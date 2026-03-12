@@ -183,6 +183,37 @@ func (h *ListUserFilesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+// serveFile — общий хелпер для отдачи файла клиенту.
+func serveFile(w http.ResponseWriter, f *domain.File, data []byte) {
+	w.Header().Set("Content-Type", f.MimeType)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+f.FileName+"\"")
+	w.Header().Set("Content-Length", strconv.FormatInt(f.FileSize, 10))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+// serveFileError — общий хелпер обработки ошибок при скачивании файлов.
+func serveFileError(w http.ResponseWriter, err error) {
+	if errors.Is(err, usecase.ErrForbidden) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+		return
+	}
+	if errors.Is(err, usecase.ErrCourseNotFound) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		return
+	}
+	var vErr *usecase.ValidationError
+	if errors.As(err, &vErr) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+		return
+	}
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+}
+
 type GetSubmissionFileHandler struct {
 	getSubmissionFile *usecase.GetSubmissionFile
 }
@@ -217,31 +248,90 @@ func (h *GetSubmissionFileHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		RequesterID:  userID,
 	})
 	if err != nil {
-		if errors.Is(err, usecase.ErrForbidden) {
-			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
-			return
-		}
-		if errors.Is(err, usecase.ErrCourseNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-			return
-		}
-		var vErr *usecase.ValidationError
-		if errors.As(err, &vErr) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		serveFileError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", f.MimeType)
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+f.FileName+"\"")
-	w.Header().Set("Content-Length", strconv.FormatInt(f.FileSize, 10))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	serveFile(w, f, data)
+}
+
+// ── Post file ─────────────────────────────────────────────────────────────────
+
+type GetPostFileHandler struct {
+	getPostFile *usecase.GetPostFile
+}
+
+func NewGetPostFileHandler(uc *usecase.GetPostFile) *GetPostFileHandler {
+	return &GetPostFileHandler{getPostFile: uc}
+}
+
+func (h *GetPostFileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	postID := r.PathValue("postId")
+	fileID := r.PathValue("fileId")
+	if courseID == "" || postID == "" || fileID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	f, data, err := h.getPostFile.GetPostFile(usecase.GetPostFileInput{
+		CourseID:    courseID,
+		PostID:      postID,
+		FileID:      fileID,
+		RequesterID: userID,
+	})
+	if err != nil {
+		serveFileError(w, err)
+		return
+	}
+	serveFile(w, f, data)
+}
+
+// ── Material file ─────────────────────────────────────────────────────────────
+
+type GetMaterialFileHandler struct {
+	getMaterialFile *usecase.GetMaterialFile
+}
+
+func NewGetMaterialFileHandler(uc *usecase.GetMaterialFile) *GetMaterialFileHandler {
+	return &GetMaterialFileHandler{getMaterialFile: uc}
+}
+
+func (h *GetMaterialFileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	materialID := r.PathValue("materialId")
+	fileID := r.PathValue("fileId")
+	if courseID == "" || materialID == "" || fileID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	f, data, err := h.getMaterialFile.GetMaterialFile(usecase.GetMaterialFileInput{
+		CourseID:    courseID,
+		MaterialID:  materialID,
+		FileID:      fileID,
+		RequesterID: userID,
+	})
+	if err != nil {
+		serveFileError(w, err)
+		return
+	}
+	serveFile(w, f, data)
 }
 
 type GetFileInfoHandler struct {
