@@ -43,3 +43,9 @@ type CommentRepository interface {
 	DeleteByPost(postID string) error
 	DeleteByMaterial(materialID string) error
 }
+
+type FileRepository interface {
+	Create(f *domain.File) error
+	GetByID(id string) (*domain.File, error)
+	ListByUser(userID string) ([]*domain.File, error)
+}

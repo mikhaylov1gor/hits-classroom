@@ -44,6 +44,8 @@ type Submission struct {
 	SubmittedAt  time.Time
 	Grade        *int
 	GradeComment *string
+	IsAttached   bool
+	IsReturned   bool
 }
 
 // Comment используется для комментариев к заданиям, постам и материалам.
@@ -60,4 +62,13 @@ type Comment struct {
 	Body         string
 	FileIDs      []string
 	CreatedAt    time.Time
+}
+
+type File struct {
+	ID        string
+	UserID    string
+	FileName  string
+	FileSize  int64
+	MimeType  string
+	CreatedAt time.Time
 }

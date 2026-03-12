@@ -7,15 +7,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
+
+	"github.com/google/uuid"
 )
 
 var (
-	ErrCourseNotFound = errors.New("course not found")
-	ErrForbidden      = errors.New("forbidden")
-	ErrAlreadyMember  = errors.New("already a member")
+	ErrCourseNotFound   = errors.New("course not found")
+	ErrForbidden        = errors.New("forbidden")
+	ErrAlreadyMember    = errors.New("already a member")
+	ErrAssignmentClosed = errors.New("assignment is closed")
 )
 
 const inviteCodeLen = 8

@@ -57,6 +57,7 @@ func main() {
 	assignmentRepo := memory.NewAssignmentRepository()
 	submissionRepo := memory.NewSubmissionRepository()
 	commentRepo := memory.NewCommentRepository()
+	fileRepo := memory.NewFileRepository()
 
 	createPostUC := usecase.NewCreatePost(memberRepo, postRepo)
 	getPostUC := usecase.NewGetPost(memberRepo, postRepo)
@@ -72,12 +73,17 @@ func main() {
 	listSubmissionsUC := usecase.NewListSubmissions(memberRepo, assignmentRepo, submissionRepo)
 	getMySubmissionUC := usecase.NewGetMySubmission(memberRepo, assignmentRepo, submissionRepo)
 	gradeSubmissionUC := usecase.NewGradeSubmission(memberRepo, assignmentRepo, submissionRepo)
+	detachAssignmentUC := usecase.NewDetachSubmission(memberRepo, assignmentRepo, submissionRepo)
+	returnAssignmentUC := usecase.NewReturnAssignment(memberRepo, assignmentRepo, submissionRepo)
 	getStudentGradesUC := usecase.NewGetStudentGrades(memberRepo, assignmentRepo, submissionRepo)
 	listCommentsUC := usecase.NewListComments(memberRepo, assignmentRepo, commentRepo)
 	createCommentUC := usecase.NewCreateComment(memberRepo, assignmentRepo, postRepo, materialRepo, commentRepo)
 	listPostCommentsUC := usecase.NewListPostComments(memberRepo, postRepo, commentRepo)
 	listMaterialCommentsUC := usecase.NewListMaterialComments(memberRepo, materialRepo, commentRepo)
 	deleteCommentUC := usecase.NewDeleteComment(memberRepo, commentRepo)
+	uploadFileUC := usecase.NewUploadFile(fileRepo)
+	listUserFilesUC := usecase.NewListUserFiles(fileRepo)
+	getFileUC := usecase.NewGetFile(fileRepo)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -110,6 +116,8 @@ func main() {
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions", authWrap(httphandler.NewCreateSubmissionHandler(createSubmissionUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/my", authWrap(httphandler.NewGetMySubmissionHandler(getMySubmissionUC)))
 	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/grade", authWrap(httphandler.NewGradeSubmissionHandler(gradeSubmissionUC)))
+	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/detach", authWrap(httphandler.NewDetachAssignmentHandler(detachAssignmentUC)))
+	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/return", authWrap(httphandler.NewReturnAssignmentHandler(returnAssignmentUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/members/{userId}/grades", authWrap(httphandler.NewGetStudentGradesHandler(getStudentGradesUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/comments", authWrap(httphandler.NewListCommentsHandler(listCommentsUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/comments", authWrap(httphandler.NewCreateCommentHandler(createCommentUC)))
@@ -118,6 +126,10 @@ func main() {
 	mux.Handle("GET /api/v1/courses/{courseId}/materials/{materialId}/comments", authWrap(httphandler.NewListMaterialCommentsHandler(listMaterialCommentsUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/materials/{materialId}/comments", authWrap(httphandler.NewCreateMaterialCommentHandler(createCommentUC)))
 	mux.Handle("DELETE /api/v1/courses/{courseId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
+
+	mux.Handle("POST /api/v1/files", authWrap(httphandler.NewUploadFileHandler(uploadFileUC)))
+	mux.Handle("GET /api/v1/users/{userId}/files", authWrap(httphandler.NewListUserFilesHandler(listUserFilesUC)))
+	mux.Handle("GET /api/v1/files/{fileId}", authWrap(httphandler.NewGetFileHandler(getFileUC)))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

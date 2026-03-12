@@ -388,3 +388,41 @@ func (r *CommentRepository) DeleteByMaterial(materialID string) error {
 }
 
 var _ repository.CommentRepository = (*CommentRepository)(nil)
+
+type FileRepository struct {
+	mu    sync.RWMutex
+	byID  map[string]*domain.File
+	byUid map[string][]*domain.File
+}
+
+func NewFileRepository() *FileRepository {
+	return &FileRepository{
+		byID:  make(map[string]*domain.File),
+		byUid: make(map[string][]*domain.File),
+	}
+}
+
+func (r *FileRepository) Create(f *domain.File) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byID[f.ID] = f
+	r.byUid[f.UserID] = append(r.byUid[f.UserID], f)
+	return nil
+}
+
+func (r *FileRepository) GetByID(id string) (*domain.File, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.byID[id], nil
+}
+
+func (r *FileRepository) ListByUser(userID string) ([]*domain.File, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.byUid[userID] == nil {
+		return []*domain.File{}, nil
+	}
+	return r.byUid[userID], nil
+}
+
+var _ repository.FileRepository = (*FileRepository)(nil)

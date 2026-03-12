@@ -14,7 +14,8 @@
 		{ "key": "courseId", "value": "" },
 		{ "key": "inviteCode", "value": "" },
 		{ "key": "assignmentId", "value": "" },
-		{ "key": "submissionId", "value": "" }
+		{ "key": "submissionId", "value": "" },
+		{ "key": "fileId", "value": "" }
 	],
 	"item": [
 		{
@@ -172,27 +173,36 @@
 				},
 				{
 					"name": "20 Create submission (student)",
-					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    if (b.id) pm.collectionVariables.set('submissionId', b.id);", "    if (b.user_id) pm.collectionVariables.set('studentId', b.user_id);", "}"], "type": "text/javascript"}}],
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    if (b.id) pm.collectionVariables.set('submissionId', b.id);", "    if (b.user_id) pm.collectionVariables.set('studentId', b.user_id);", "    if (b.is_attached !== undefined) console.log('Submission created with is_attached:', b.is_attached);", "}"], "type": "text/javascript"}}],
 					"request": {
 						"method": "POST",
 						"header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}, {"key": "Content-Type", "value": "application/json"}],
-						"body": {"mode": "raw", "raw": "{\n  \"body\": \"Решение приложено.\",\n  \"file_ids\": []\n}"},
+						"body": {"mode": "raw", "raw": "{\n  \"body\": \"Решение приложено.\",\n  \"file_ids\": [],\n  \"is_attached\": true\n}"},
 						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"
 					}
 				},
 				{
 					"name": "21 List submissions",
-					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const arr = pm.response.json();", "    if (Array.isArray(arr) && arr.length && !pm.collectionVariables.get('submissionId')) {", "        pm.collectionVariables.set('submissionId', arr[0].id);", "    }", "}"], "type": "text/javascript"}}],
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const arr = pm.response.json();", "    if (Array.isArray(arr) && arr.length && !pm.collectionVariables.get('submissionId')) {", "        pm.collectionVariables.set('submissionId', arr[0].id);", "        if (arr[0].is_attached !== undefined) console.log('First submission attached:', arr[0].is_attached);", "    }", "}"], "type": "text/javascript"}}],
 					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"}
 				},
 				{
 					"name": "22 Grade submission",
-					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const b = pm.response.json();", "    if (b.grade !== undefined) pm.collectionVariables.set('lastGrade', b.grade);", "}"], "type": "text/javascript"}}],
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const b = pm.response.json();", "    if (b.grade !== undefined) pm.collectionVariables.set('lastGrade', b.grade);", "    if (b.is_attached !== undefined) console.log('Submission attached:', b.is_attached);", "}"], "type": "text/javascript"}}],
 					"request": {
 						"method": "PUT",
 						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Content-Type", "value": "application/json"}],
 						"body": {"mode": "raw", "raw": "{\n  \"grade\": 85\n}"},
 						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/{{submissionId}}/grade"
+					}
+				},
+				{
+					"name": "22.5 Detach submission (teacher)",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const b = pm.response.json();", "    if (b.is_attached !== undefined) pm.collectionVariables.set('isAttached', b.is_attached);", "    if (b.grade === null || b.grade === undefined) {", "        console.log('✓ Grade removed after detach');", "        pm.collectionVariables.set('gradeAfterDetach', null);", "    } else {", "        pm.collectionVariables.set('gradeAfterDetach', b.grade);", "    }", "} else if (pm.response.code === 400) {", "    console.log('Submission is already detached');", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "PUT",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/detach"
 					}
 				},
 				{
@@ -225,7 +235,42 @@
 					}
 				},
 				{
-					"name": "27 Delete course",
+					"name": "27 Return submission (teacher)",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const b = pm.response.json();", "    console.log('Submission after return:', {", "        id: b.id,", "        is_attached: b.is_attached,", "        is_returned: b.is_returned", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "PUT",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Content-Type", "value": "application/json"}],
+						"body": {"mode": "raw", "raw": "{}"},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/{{submissionId}}/return"
+					}
+				},
+				{
+					"name": "28 Resubmit after return (student)",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    console.log('Resubmitted after return:', {", "        id: b.id,", "        is_attached: b.is_attached,", "        is_returned: b.is_returned", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}, {"key": "Content-Type", "value": "application/json"}],
+						"body": {"mode": "raw", "raw": "{\n  \"body\": \"Исправленное решение.\",\n  \"file_ids\": [],\n  \"is_attached\": true\n}"},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"
+					}
+				},
+				{
+					"name": "29 Upload file",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    if (b.id) pm.collectionVariables.set('fileId', b.id);", "    console.log('File uploaded:', { id: b.id, name: b.file_name });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": []}]},
+						"url": "{{baseUrl}}/api/v1/files"
+					}
+				},
+				{
+					"name": "30 List user files",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const arr = pm.response.json();", "    console.log('User files count:', Array.isArray(arr) ? arr.length : 0);", "    if (Array.isArray(arr) && arr.length && !pm.collectionVariables.get('fileId')) {", "        pm.collectionVariables.set('fileId', arr[0].id);", "    }", "}"], "type": "text/javascript"}}],
+					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/users/{{userId}}/files"}
+				},
+				{
+					"name": "31 Delete course",
 					"request": {"method": "DELETE", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/courses/{{courseId}}"}
 				}
 			]
@@ -259,8 +304,67 @@
 				{
 					"name": "Get feed",
 					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/feed"}
+				},
+				{
+					"name": "Detach submission",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const b = pm.response.json();", "    console.log('Submission after detach:', {", "        id: b.id,", "        is_attached: b.is_attached,", "        grade: b.grade,", "        grade_comment: b.grade_comment", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "PUT",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/detach"
+					}
+				},
+				{
+					"name": "Return submission for rework",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const b = pm.response.json();", "    console.log('Submission marked as returned:', {", "        id: b.id,", "        is_attached: b.is_attached,", "        is_returned: b.is_returned", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "PUT",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}, {"key": "Content-Type", "value": "application/json"}],
+						"body": {"mode": "raw", "raw": "{}"},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/{{submissionId}}/return"
+					}
+				},
+				{
+					"name": "Save draft (is_attached=false)",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201 || pm.response.code === 200) {", "    const b = pm.response.json();", "    console.log('Draft saved:', {", "        id: b.id,", "        is_attached: b.is_attached,", "        is_returned: b.is_returned", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}, {"key": "Content-Type", "value": "application/json"}],
+						"body": {"mode": "raw", "raw": "{\n  \"body\": \"Черновик решения...\",\n  \"file_ids\": [],\n  \"is_attached\": false\n}"},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"
+					}
+				},
+				{
+					"name": "Submit final (is_attached=true)",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201 || pm.response.code === 200) {", "    const b = pm.response.json();", "    console.log('Submission finalized:', {", "        id: b.id,", "        is_attached: b.is_attached,", "        is_returned: b.is_returned", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}, {"key": "Content-Type", "value": "application/json"}],
+						"body": {"mode": "raw", "raw": "{\n  \"body\": \"Финальное решение.\",\n  \"file_ids\": [],\n  \"is_attached\": true\n}"},
+						"url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"
+					}
+				},
+				{
+					"name": "Upload file",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 201) {", "    const b = pm.response.json();", "    console.log('File uploaded:', {", "        id: b.id,", "        file_name: b.file_name,", "        file_size: b.file_size,", "        mime_type: b.mime_type", "    });", "}"], "type": "text/javascript"}}],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": []}]},
+						"url": "{{baseUrl}}/api/v1/files"
+					}
+				},
+				{
+					"name": "List user files",
+					"event": [{"listen": "test", "script": {"exec": ["if (pm.response.code === 200) {", "    const arr = pm.response.json();", "    const count = Array.isArray(arr) ? arr.length : 0;", "    console.log('User files:', count);", "    arr.forEach(f => {", "        console.log(`- ${f.file_name} (${f.file_size} bytes, ${f.mime_type})`);", "    });", "}"], "type": "text/javascript"}}],
+					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/users/{{userId}}/files"}
+				},
+				{
+					"name": "Download file",
+					"request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{token}}"}], "url": "{{baseUrl}}/api/v1/files/{{fileId}}"}
 				}
 			]
 		}
 	]
 }
+					
