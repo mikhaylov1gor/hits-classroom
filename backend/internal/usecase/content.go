@@ -1329,11 +1329,7 @@ func (uc *GetFileInfo) GetFileInfo(in GetFileInfoInput) (*domain.File, error) {
 
 	f, err := uc.fileRepo.GetByID(in.FileID)
 	if err != nil || f == nil {
-		return nil, ErrForbidden
-	}
-
-	if f.UserID != in.UserID {
-		return nil, ErrForbidden
+		return nil, &ValidationError{Message: "file not found"}
 	}
 
 	return f, nil

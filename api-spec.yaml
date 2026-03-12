@@ -237,7 +237,7 @@ paths:
   /files/{fileId}/info:
     get:
       tags: [files]
-      summary: Получение информации о файле (без самого файла)
+      summary: Получение метаданных файла (имя, размер, тип). Доступно любому авторизованному пользователю.
       operationId: getFileInfo
       security:
         - bearerAuth: []
@@ -257,8 +257,6 @@ paths:
                 $ref: "#/components/schemas/File"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
