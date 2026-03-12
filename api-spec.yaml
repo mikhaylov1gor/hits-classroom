@@ -1191,6 +1191,50 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/files/{fileId}:
+    get:
+      tags: [submissions]
+      summary: >-
+        Скачать файл, прикреплённый к решению.
+        Owner/teacher видят файлы любого решения.
+        Студент — только из своего решения.
+      operationId: getSubmissionFile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Содержимое файла
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Решение или файл не найдены, либо файл не прикреплён к данному решению
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/grade:
     put:
       tags: [submissions]

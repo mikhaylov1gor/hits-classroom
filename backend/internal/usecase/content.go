@@ -972,6 +972,90 @@ func filterPrivateComments(all []*domain.Comment, userID string, role domain.Cou
 	return out
 }
 
+// ── GetSubmissionFile ─────────────────────────────────────────────────────────
+
+type GetSubmissionFileInput struct {
+	CourseID     string
+	AssignmentID string
+	SubmissionID string
+	FileID       string
+	RequesterID  string
+}
+
+type GetSubmissionFile struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	submissionRepo repository.SubmissionRepository
+	fileRepo       repository.FileRepository
+	storagePath    string
+}
+
+func NewGetSubmissionFile(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	submissionRepo repository.SubmissionRepository,
+	fileRepo repository.FileRepository,
+) *GetSubmissionFile {
+	storagePath := os.Getenv("FILES_STORAGE_PATH")
+	if storagePath == "" {
+		storagePath = "./storage/files"
+	}
+	return &GetSubmissionFile{
+		memberRepo:     memberRepo,
+		assignmentRepo: assignmentRepo,
+		submissionRepo: submissionRepo,
+		fileRepo:       fileRepo,
+		storagePath:    storagePath,
+	}
+}
+
+func (uc *GetSubmissionFile) GetSubmissionFile(in GetSubmissionFileInput) (*domain.File, []byte, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.RequesterID)
+	if err != nil || role == "" {
+		return nil, nil, ErrForbidden
+	}
+
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, nil, ErrCourseNotFound
+	}
+
+	s, err := uc.submissionRepo.GetByID(in.SubmissionID)
+	if err != nil || s == nil || s.AssignmentID != in.AssignmentID {
+		return nil, nil, ErrCourseNotFound
+	}
+
+	// Студент может скачать только файлы своего решения
+	if role == domain.RoleStudent && s.UserID != in.RequesterID {
+		return nil, nil, ErrForbidden
+	}
+
+	// Проверяем что запрошенный файл действительно прикреплён к решению
+	found := false
+	for _, fid := range s.FileIDs {
+		if fid == in.FileID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, nil, ErrCourseNotFound
+	}
+
+	f, err := uc.fileRepo.GetByID(in.FileID)
+	if err != nil || f == nil {
+		return nil, nil, ErrCourseNotFound
+	}
+
+	filePath := filepath.Join(uc.storagePath, f.UserID, f.ID+"_"+f.FileName)
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, nil, &ValidationError{Message: "file not found on disk"}
+	}
+
+	return f, data, nil
+}
+
 // ── File usecases ────────────────────────────────────────────────────────────
 type UploadFileInput struct {
 	UserID   string

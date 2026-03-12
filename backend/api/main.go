@@ -128,10 +128,13 @@ func main() {
 	mux.Handle("POST /api/v1/courses/{courseId}/materials/{materialId}/comments", authWrap(httphandler.NewCreateMaterialCommentHandler(createCommentUC)))
 	mux.Handle("DELETE /api/v1/courses/{courseId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
 
+	getSubmissionFileUC := usecase.NewGetSubmissionFile(memberRepo, assignmentRepo, submissionRepo, fileRepo)
+
 	mux.Handle("POST /api/v1/files", authWrap(httphandler.NewUploadFileHandler(uploadFileUC)))
 	mux.Handle("GET /api/v1/users/{userId}/files", authWrap(httphandler.NewListUserFilesHandler(listUserFilesUC)))
 	mux.Handle("GET /api/v1/files/{fileId}", authWrap(httphandler.NewGetFileHandler(getFileUC)))
 	mux.Handle("GET /api/v1/files/{fileId}/info", authWrap(httphandler.NewGetFileInfoHandler(getFileInfoUC)))
+	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/files/{fileId}", authWrap(httphandler.NewGetSubmissionFileHandler(getSubmissionFileUC)))
 
 	log.Println("server starting on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
