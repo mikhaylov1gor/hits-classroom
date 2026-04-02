@@ -1,0 +1,942 @@
+{
+  "info": {
+    "name": "hits-classroom E2E",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Полный end-to-end тест API hits-classroom.\nЗапускайте в Postman Runner последовательно сверху вниз.\nПеред запуском убедитесь, что сервер запущен на localhost:8080."
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:8080"},
+    {"key": "ownerToken", "value": ""},
+    {"key": "ownerId", "value": ""},
+    {"key": "studentToken", "value": ""},
+    {"key": "studentId", "value": ""},
+    {"key": "teacherToken", "value": ""},
+    {"key": "teacherId", "value": ""},
+    {"key": "courseId", "value": ""},
+    {"key": "inviteCode", "value": ""},
+    {"key": "postId", "value": ""},
+    {"key": "materialId", "value": ""},
+    {"key": "assignmentId", "value": ""},
+    {"key": "submissionId", "value": ""},
+    {"key": "publicCommentId", "value": ""},
+    {"key": "privateCommentId", "value": ""},
+    {"key": "replyCommentId", "value": ""},
+    {"key": "postCommentId", "value": ""},
+    {"key": "materialCommentId", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "1. Auth & Users",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Body has status ok', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.status).to.eql('ok');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw": "{{baseUrl}}/health"}
+          }
+        },
+        {
+          "name": "Register Owner",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('ownerToken', json.token);",
+            "pm.collectionVariables.set('ownerId', json.user.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"owner@test.com\",\n  \"password\": \"password123\",\n  \"first_name\": \"Owner\",\n  \"last_name\": \"User\",\n  \"birth_date\": \"1990-01-01\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/auth/register"}
+          }
+        },
+        {
+          "name": "Register Student",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('studentToken', json.token);",
+            "pm.collectionVariables.set('studentId', json.user.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"student@test.com\",\n  \"password\": \"password123\",\n  \"first_name\": \"Student\",\n  \"last_name\": \"User\",\n  \"birth_date\": \"2000-05-15\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/auth/register"}
+          }
+        },
+        {
+          "name": "Register Teacher",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('teacherToken', json.token);",
+            "pm.collectionVariables.set('teacherId', json.user.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"teacher@test.com\",\n  \"password\": \"password123\",\n  \"first_name\": \"Teacher\",\n  \"last_name\": \"User\",\n  \"birth_date\": \"1985-09-20\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/auth/register"}
+          }
+        },
+        {
+          "name": "Login Owner",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('ownerToken', json.token);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"owner@test.com\",\n  \"password\": \"password123\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/auth/login"}
+          }
+        },
+        {
+          "name": "Get Me (Owner)",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has email', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.email).to.eql('owner@test.com');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/users/me"}
+          }
+        },
+        {
+          "name": "Update Profile (Owner)",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Name updated', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.first_name).to.eql('Владелец');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"first_name\": \"Владелец\",\n  \"last_name\": \"Курсов\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/users/me"}
+          }
+        },
+        {
+          "name": "Check Email — exists",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('exists is true', function() {",
+            "    pm.expect(pm.response.json().exists).to.be.true;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/check-email?email=student@test.com",
+              "query": [{"key": "email", "value": "student@test.com"}]
+            }
+          }
+        },
+        {
+          "name": "Check Email — not found",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('exists is false', function() {",
+            "    pm.expect(pm.response.json().exists).to.be.false;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/check-email?email=nobody@test.com",
+              "query": [{"key": "email", "value": "nobody@test.com"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Courses",
+      "item": [
+        {
+          "name": "Create Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('courseId', json.id);",
+            "pm.test('Has title', function() { pm.expect(json.title).to.eql('Тестовый курс'); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Тестовый курс\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses"}
+          }
+        },
+        {
+          "name": "Get Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has role owner', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('owner');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}"}
+          }
+        },
+        {
+          "name": "List Courses",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('At least 1 course', function() {",
+            "    pm.expect(pm.response.json().length).to.be.at.least(1);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses"}
+          }
+        },
+        {
+          "name": "Update Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Title updated', function() {",
+            "    pm.expect(pm.response.json().title).to.eql('Обновлённый курс');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Обновлённый курс\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}"}
+          }
+        },
+        {
+          "name": "Get Invite Code",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('inviteCode', json.code);",
+            "pm.test('Code is 8 chars', function() { pm.expect(json.code.length).to.eql(8); });"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/invite-code"}
+          }
+        },
+        {
+          "name": "Regenerate Invite Code",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('inviteCode', json.code);",
+            "pm.test('New code is 8 chars', function() { pm.expect(json.code.length).to.eql(8); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/invite-code"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Members",
+      "item": [
+        {
+          "name": "Login Student",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('studentToken', json.token);",
+            "pm.collectionVariables.set('studentId', json.user.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"student@test.com\",\n  \"password\": \"password123\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/auth/login"}
+          }
+        },
+        {
+          "name": "[Student] Join Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Role is student', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('student');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{studentToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"code\": \"{{inviteCode}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/join"}
+          }
+        },
+        {
+          "name": "Login Teacher",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('teacherToken', json.token);",
+            "pm.collectionVariables.set('teacherId', json.user.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"teacher@test.com\",\n  \"password\": \"password123\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/auth/login"}
+          }
+        },
+        {
+          "name": "[Teacher] Join Course (as student)",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Role is student', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('student');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{teacherToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"code\": \"{{inviteCode}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/join"}
+          }
+        },
+        {
+          "name": "[Owner] Assign Teacher (promote from student)",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Role is teacher', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('teacher');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"user_id\": \"{{teacherId}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/members"}
+          }
+        },
+        {
+          "name": "[Owner] Invite Teacher by Email (already teacher → 409)",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 409 — already teacher', function() { pm.response.to.have.status(409); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"email\": \"teacher@test.com\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/invite-teacher"}
+          }
+        },
+        {
+          "name": "List Members",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('At least 3 members', function() {",
+            "    pm.expect(pm.response.json().length).to.be.at.least(3);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/members"}
+          }
+        },
+        {
+          "name": "[Owner] Change Role: teacher → owner",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Role is owner', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('owner');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"role\": \"owner\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/members/{{teacherId}}/role"}
+          }
+        },
+        {
+          "name": "[Owner] Change Role: back to teacher",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Role is teacher', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('teacher');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"role\": \"teacher\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/members/{{teacherId}}/role"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Content",
+      "item": [
+        {
+          "name": "[Owner] Create Post",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('postId', json.id);",
+            "pm.test('Has title', function() { pm.expect(json.title).to.eql('Первый пост'); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Первый пост\",\n  \"body\": \"Добро пожаловать в курс!\",\n  \"links\": [\"https://example.com/welcome\"]\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/posts"}
+          }
+        },
+        {
+          "name": "Get Post",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has body', function() {",
+            "    pm.expect(pm.response.json().body).to.not.be.empty;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/posts/{{postId}}"}
+          }
+        },
+        {
+          "name": "[Owner] Create Material",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('materialId', json.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Лекция 1\",\n  \"body\": \"Содержание первой лекции.\",\n  \"links\": [\"https://docs.example.com/lecture1\"]\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/materials"}
+          }
+        },
+        {
+          "name": "Get Material",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has body and links', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.body).to.not.be.empty;",
+            "    pm.expect(json.links.length).to.be.at.least(1);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/materials/{{materialId}}"}
+          }
+        },
+        {
+          "name": "[Owner] Create Assignment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('assignmentId', json.id);",
+            "pm.test('Max grade is 10', function() { pm.expect(json.max_grade).to.eql(10); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Задание 1\",\n  \"body\": \"Решите задачу и загрузите ответ.\",\n  \"links\": [\"https://example.com/task1\"],\n  \"max_grade\": 10,\n  \"deadline\": \"2026-12-31T23:59:59Z\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments"}
+          }
+        },
+        {
+          "name": "Get Assignment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has deadline', function() {",
+            "    pm.expect(pm.response.json().deadline).to.not.be.null;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}"}
+          }
+        },
+        {
+          "name": "Get Course Feed",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Feed has 3 items (post+material+assignment)', function() {",
+            "    pm.expect(pm.response.json().length).to.eql(3);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/feed"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Submissions & Grading",
+      "item": [
+        {
+          "name": "[Student] Submit Assignment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('submissionId', json.id);",
+            "pm.test('Grade is null', function() { pm.expect(json.grade).to.be.null; });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{studentToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"Мой ответ на задание 1.\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"}
+          }
+        },
+        {
+          "name": "[Student] Submit Again → 409",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 409 — already submitted', function() { pm.response.to.have.status(409); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{studentToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"Попытка повторной отправки\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"}
+          }
+        },
+        {
+          "name": "[Student] Get My Submission",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Is my submission', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.user_id).to.eql(pm.collectionVariables.get('studentId'));",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/my"}
+          }
+        },
+        {
+          "name": "[Student] List Submissions — only own",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Only own submission (1 item)', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.length).to.eql(1);",
+            "    pm.expect(json[0].user_id).to.eql(pm.collectionVariables.get('studentId'));",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"}
+          }
+        },
+        {
+          "name": "[Owner] List Submissions — all",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has at least 1 submission', function() {",
+            "    pm.expect(pm.response.json().length).to.be.at.least(1);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions"}
+          }
+        },
+        {
+          "name": "[Owner] Grade Submission",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Grade is 8', function() {",
+            "    pm.expect(pm.response.json().grade).to.eql(8);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"grade\": 8,\n  \"grade_comment\": \"Хорошая работа!\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/{{submissionId}}/grade"}
+          }
+        },
+        {
+          "name": "[Owner] Get Student Grades",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has graded submission', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.length).to.be.at.least(1);",
+            "    pm.expect(json[0].submission.grade).to.eql(8);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/members/{{studentId}}/grades"}
+          }
+        },
+        {
+          "name": "[Owner] Return Submission",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/submissions/{{submissionId}}/return"}
+          }
+        },
+        {
+          "name": "[Owner] Detach Submission",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status is 200 or 204', function() {",
+            "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"user_id\": \"{{studentId}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/detach"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Comments (public & private)",
+      "item": [
+        {
+          "name": "[Student] Public Comment on Assignment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('publicCommentId', json.id);",
+            "pm.test('is_private is false', function() { pm.expect(json.is_private).to.be.false; });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{studentToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"У меня вопрос по условию задания.\",\n  \"is_private\": false\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments"}
+          }
+        },
+        {
+          "name": "[Student] Private Comment on Assignment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('privateCommentId', json.id);",
+            "pm.test('is_private is true', function() { pm.expect(json.is_private).to.be.true; });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{studentToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"Личное сообщение преподавателю: не успеваю сдать вовремя.\",\n  \"is_private\": true\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments"}
+          }
+        },
+        {
+          "name": "[Student] List Assignment Comments — filtered",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Student sees public + own private', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.length).to.eql(2);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments"}
+          }
+        },
+        {
+          "name": "[Owner] List Assignment Comments — all",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Owner sees all comments', function() {",
+            "    var json = pm.response.json();",
+            "    pm.expect(json.length).to.be.at.least(2);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments"}
+          }
+        },
+        {
+          "name": "[Owner] Reply to Private Comment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('replyCommentId', json.id);",
+            "pm.test('Reply inherits is_private', function() { pm.expect(json.is_private).to.be.true; });",
+            "pm.test('Has parent_id', function() {",
+            "    pm.expect(json.parent_id).to.eql(pm.collectionVariables.get('privateCommentId'));",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"Понял, можете сдать до конца недели.\",\n  \"parent_id\": \"{{privateCommentId}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}/comments"}
+          }
+        },
+        {
+          "name": "[Owner] Comment on Post",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('postCommentId', json.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"Комментарий к посту.\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/posts/{{postId}}/comments"}
+          }
+        },
+        {
+          "name": "List Post Comments",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has comments', function() {",
+            "    pm.expect(pm.response.json().length).to.be.at.least(1);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/posts/{{postId}}/comments"}
+          }
+        },
+        {
+          "name": "[Owner] Comment on Material",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 201', function() { pm.response.to.have.status(201); });",
+            "var json = pm.response.json();",
+            "pm.collectionVariables.set('materialCommentId', json.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{ownerToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"body\": \"Комментарий к материалу.\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/materials/{{materialId}}/comments"}
+          }
+        },
+        {
+          "name": "List Material Comments",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Has comments', function() {",
+            "    pm.expect(pm.response.json().length).to.be.at.least(1);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/materials/{{materialId}}/comments"}
+          }
+        },
+        {
+          "name": "[Owner] Delete Reply Comment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/comments/{{replyCommentId}}"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Cleanup & Deletion",
+      "item": [
+        {
+          "name": "[Owner] Remove Student from Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/members/{{studentId}}"}
+          }
+        },
+        {
+          "name": "[Student] Re-join Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Joined as student', function() {",
+            "    pm.expect(pm.response.json().role).to.eql('student');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{studentToken}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\n  \"code\": \"{{inviteCode}}\"\n}"},
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/join"}
+          }
+        },
+        {
+          "name": "[Student] Leave Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Authorization", "value": "Bearer {{studentToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/leave"}
+          }
+        },
+        {
+          "name": "Delete Post",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/posts/{{postId}}"}
+          }
+        },
+        {
+          "name": "Delete Material",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/materials/{{materialId}}"}
+          }
+        },
+        {
+          "name": "Delete Assignment",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments/{{assignmentId}}"}
+          }
+        },
+        {
+          "name": "Delete Course",
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Status 204', function() { pm.response.to.have.status(204); });"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{ownerToken}}"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/courses/{{courseId}}"}
+          }
+        }
+      ]
+    }
+  ]
+}
