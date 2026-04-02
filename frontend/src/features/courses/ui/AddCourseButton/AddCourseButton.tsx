@@ -2,7 +2,6 @@ import { useState } from 'react'
 import {
   Box,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -13,10 +12,9 @@ import {
   Tab,
   Tabs,
   TextField,
-  Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import { createCourse, joinCourse, inviteTeacherByEmail } from '../../api/coursesApi'
+import { createCourse, joinCourse } from '../../api/coursesApi'
 import { useCourses } from '../../model/CoursesContext'
 import type { CourseWithRole } from '../../model/types'
 
@@ -32,8 +30,6 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
   const [activeTab, setActiveTab] = useState<TabId>('create')
 
   const [createTitle, setCreateTitle] = useState('')
-  const [teacherEmail, setTeacherEmail] = useState('')
-  const [teacherEmails, setTeacherEmails] = useState<string[]>([])
   const [createError, setCreateError] = useState<string | null>(null)
   const [createLoading, setCreateLoading] = useState(false)
 
@@ -46,23 +42,9 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
 
   const resetForm = () => {
     setCreateTitle('')
-    setTeacherEmail('')
-    setTeacherEmails([])
     setCreateError(null)
     setJoinCode('')
     setJoinError(null)
-  }
-
-  const addTeacherEmail = () => {
-    const email = teacherEmail.trim().toLowerCase()
-    if (!email) return
-    if (teacherEmails.includes(email)) return
-    setTeacherEmails((prev) => [...prev, email])
-    setTeacherEmail('')
-  }
-
-  const removeTeacherEmail = (email: string) => {
-    setTeacherEmails((prev) => prev.filter((e) => e !== email))
   }
 
   const handleClose = () => {
@@ -86,21 +68,11 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
     setCreateLoading(true)
     try {
       const created = await createCourse({ title: trimmed })
-      for (const email of teacherEmails) {
-        try {
-          await inviteTeacherByEmail(created.id, email)
-        } catch {
-        }
-      }
       resetForm()
       setDialogOpen(false)
       addCourse(created)
       onCourseAdded?.(created)
-      const teacherMsg =
-        teacherEmails.length > 0
-          ? ` Добавлено преподавателей: ${teacherEmails.length}.`
-          : ''
-      setSuccessMessage(`Курс «${created.title}» создан.${teacherMsg}`)
+      setSuccessMessage(`Курс «${created.title}» создан`)
     } catch {
       setCreateError('Не удалось создать курс')
     } finally {
@@ -196,49 +168,6 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
                   helperText={createError}
                   autoFocus
                 />
-                <Box className="flex flex-col gap-2">
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Добавить преподавателей по email
-                  </Typography>
-                  <Box className="flex gap-2">
-                    <TextField
-                      size="small"
-                      type="email"
-                      label="Email преподавателя"
-                      placeholder="teacher@example.com"
-                      value={teacherEmail}
-                      onChange={(e) => setTeacherEmail(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          addTeacherEmail()
-                        }
-                      }}
-                      disabled={createLoading}
-                      sx={{ flex: 1 }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outlined"
-                      onClick={addTeacherEmail}
-                      disabled={createLoading || !teacherEmail.trim()}
-                    >
-                      Добавить
-                    </Button>
-                  </Box>
-                  {teacherEmails.length > 0 && (
-                    <Box className="flex flex-wrap gap-1">
-                      {teacherEmails.map((email) => (
-                        <Chip
-                          key={email}
-                          label={email}
-                          size="small"
-                          onDelete={() => removeTeacherEmail(email)}
-                        />
-                      ))}
-                    </Box>
-                  )}
-                </Box>
               </Box>
             )}
             {activeTab === 'join' && (

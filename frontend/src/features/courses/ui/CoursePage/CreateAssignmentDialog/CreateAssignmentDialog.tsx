@@ -13,6 +13,7 @@ import {
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
 import { createAssignment, uploadFiles } from '../../../api/coursesApi'
+import { isValidUrl } from '../../../utils/urlValidation'
 
 type CreateAssignmentDialogProps = {
   open: boolean
@@ -29,6 +30,7 @@ export function CreateAssignmentDialog({
 }: CreateAssignmentDialogProps) {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [links, setLinks] = useState('')
   const [deadline, setDeadline] = useState('')
   const [maxGrade, setMaxGrade] = useState<string>('100')
   const [files, setFiles] = useState<File[]>([])
@@ -39,6 +41,7 @@ export function CreateAssignmentDialog({
   const resetForm = () => {
     setTitle('')
     setContent('')
+    setLinks('')
     setDeadline('')
     setMaxGrade('100')
     setFiles([])
@@ -73,6 +76,32 @@ export function CreateAssignmentDialog({
       return
     }
 
+    const trimmedDeadline = deadline.trim()
+    if (trimmedDeadline) {
+      const deadlineDate = new Date(trimmedDeadline)
+      if (isNaN(deadlineDate.getTime())) {
+        setError('Некорректная дата дедлайна')
+        return
+      }
+      if (deadlineDate <= new Date()) {
+        setError('Дедлайн должен быть в будущем')
+        return
+      }
+    }
+
+    const linkLines = links
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    if (linkLines.length > 0) {
+      const invalidIndex = linkLines.findIndex((line) => !isValidUrl(line))
+      if (invalidIndex >= 0) {
+        setError(`Некорректная ссылка в строке ${invalidIndex + 1}: «${linkLines[invalidIndex]}»`)
+        return
+      }
+    }
+
     setLoading(true)
     try {
       const fileIds = files.length > 0 ? await uploadFiles(files) : []
@@ -84,6 +113,7 @@ export function CreateAssignmentDialog({
       await createAssignment(courseId, {
         title: trimmedTitle,
         body: trimmedContent,
+        links: linkLines.length > 0 ? linkLines : undefined,
         deadline: deadlineIso,
         max_grade: parsedMaxGrade,
         file_ids: fileIds,
@@ -91,8 +121,12 @@ export function CreateAssignmentDialog({
       resetForm()
       onClose()
       onCreated()
-    } catch {
-      setError('Не удалось создать задание')
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message === 'FILE_TOO_LARGE'
+          ? 'Файл слишком большой'
+          : 'Не удалось создать задание',
+      )
     } finally {
       setLoading(false)
     }
@@ -143,6 +177,17 @@ export function CreateAssignmentDialog({
             inputProps={{ 'aria-label': 'Описание задания' }}
           />
           <TextField
+            label="Ссылки (опционально, по одной на строку)"
+            fullWidth
+            multiline
+            minRows={2}
+            size="small"
+            value={links}
+            onChange={(e) => setLinks(e.target.value)}
+            placeholder="https://example.com"
+            inputProps={{ 'aria-label': 'Ссылки' }}
+          />
+          <TextField
             label="Дедлайн"
             fullWidth
             size="small"
@@ -150,7 +195,13 @@ export function CreateAssignmentDialog({
             value={deadline}
             onChange={(e) => setDeadline(e.target.value)}
             InputLabelProps={{ shrink: true }}
-            inputProps={{ 'aria-label': 'Дедлайн' }}
+            inputProps={{
+              'aria-label': 'Дедлайн',
+              min: new Date(Date.now() + 60000)
+                .toISOString()
+                .slice(0, 16),
+            }}
+            helperText="Только дата в будущем"
           />
           <TextField
             label="Максимальный балл"
@@ -160,7 +211,7 @@ export function CreateAssignmentDialog({
             value={maxGrade}
             onChange={(e) => setMaxGrade(e.target.value)}
             inputProps={{ min: 1, max: 1000, 'aria-label': 'Максимальный балл' }}
-            helperText="Шкала оценки (по умолчанию 100)"
+            helperText="1 = зачёт/незачёт, >1 = числовая шкала (по умолчанию 100)"
           />
           <Box>
             <input

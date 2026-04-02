@@ -15,6 +15,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import { getMemberGrades } from '../../api/coursesApi'
 import type { Member, SubmissionWithAssignment } from '../../model/types'
+import { formatGradeDisplay } from '../../utils/gradeUtils'
 import { getMemberInitials } from '../../model/types'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -38,7 +39,6 @@ type UserProfileDialogProps = {
   onClose: () => void
   member: Member | null
   courseId: string
-  authUserId?: string
   isTeacher?: boolean
   onAssignmentClick?: (assignmentId: string) => void
 }
@@ -48,7 +48,6 @@ export function UserProfileDialog({
   onClose,
   member,
   courseId,
-  authUserId,
   isTeacher,
   onAssignmentClick,
 }: UserProfileDialogProps) {
@@ -58,7 +57,7 @@ export function UserProfileDialog({
   const showGrades =
     Boolean(member) &&
     member.role === 'student' &&
-    (Boolean(isTeacher) || (Boolean(authUserId) && member.user_id === authUserId))
+    Boolean(isTeacher)
 
   useEffect(() => {
     if (!open || !member || !courseId || !showGrades) {
@@ -144,23 +143,26 @@ export function UserProfileDialog({
                 </Typography>
               ) : (
                 <List dense disablePadding>
-                {grades.map(({ submission, assignment }) => (
-                  <ListItem
-                    key={submission.id}
-                    className="border border-slate-200 rounded-lg mb-2 cursor-pointer hover:bg-slate-50"
-                    onClick={() => onAssignmentClick?.(assignment.id)}
-                    sx={{ cursor: onAssignmentClick ? 'pointer' : 'default' }}
-                  >
-                    <ListItemText
-                      primary={assignment.title}
-                      secondary={
-                        submission.grade != null
-                          ? `Оценка: ${submission.grade}`
-                          : 'Без оценки'
-                      }
-                    />
-                  </ListItem>
-                ))}
+                {grades.map(({ submission, assignment }) => {
+                  const maxGrade = assignment.max_grade ?? 100
+                  return (
+                    <ListItem
+                      key={submission.id}
+                      className="border border-slate-200 rounded-lg mb-2 cursor-pointer hover:bg-slate-50"
+                      onClick={() => onAssignmentClick?.(assignment.id)}
+                      sx={{ cursor: onAssignmentClick ? 'pointer' : 'default' }}
+                    >
+                      <ListItemText
+                        primary={assignment.title}
+                        secondary={
+                          submission.grade != null
+                            ? formatGradeDisplay(submission.grade, maxGrade)
+                            : 'Без оценки'
+                        }
+                      />
+                    </ListItem>
+                  )
+                })}
                 </List>
               )}
             </Box>

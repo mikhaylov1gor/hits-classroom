@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Avatar,
   Box,
@@ -6,27 +6,29 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
-  IconButton,
   TextField,
   Typography,
 } from '@mui/material'
-import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
-import CloseIcon from '@mui/icons-material/Close'
-import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
-import LinkIcon from '@mui/icons-material/Link'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
 import {
   listMaterialComments,
   createMaterialComment,
-  uploadFiles,
+  getMaterial,
+  type Material,
 } from '../../../api/coursesApi'
+import { FileAttachmentLink } from '../../FileAttachmentLink/FileAttachmentLink'
+import { getLinkHref } from '../../../utils/urlValidation'
+import LinkIcon from '@mui/icons-material/Link'
 import { useAuth } from '../../../../auth/model/AuthContext'
 import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
 import {
   type Comment,
   type FeedItem,
   type Member,
+  buildCommentTree,
   countCommentsRecursively,
   getNameByUserId,
 } from '../../../model/types'
@@ -59,21 +61,13 @@ function formatDate(dateStr?: string): string {
 function CommentForm({
   commentText,
   setCommentText,
-  commentFiles,
-  handleFileChange,
-  removeCommentFile,
   handleSubmitComment,
   submittingComment,
-  fileInputRef,
 }: {
   commentText: string
   setCommentText: (v: string) => void
-  commentFiles: File[]
-  handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  removeCommentFile: (i: number) => void
   handleSubmitComment: (e: React.FormEvent) => void
   submittingComment: boolean
-  fileInputRef: React.RefObject<HTMLInputElement | null>
 }) {
   return (
     <Box component="form" onSubmit={handleSubmitComment} className="flex flex-col gap-2">
@@ -89,45 +83,6 @@ function CommentForm({
         inputProps={{ 'aria-label': 'Текст комментария' }}
       />
       <Box className="flex items-center gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileChange}
-          aria-label="Прикрепить файл к комментарию"
-        />
-        <Button
-          component="span"
-          variant="outlined"
-          size="small"
-          startIcon={<AttachFileOutlinedIcon />}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          Файл
-        </Button>
-        {commentFiles.length > 0 && (
-          <Box className="flex flex-wrap gap-1">
-            {commentFiles.map((f, i) => (
-              <Box
-                key={`${f.name}-${i}`}
-                className="flex items-center gap-0.5 px-2 py-0.5 bg-slate-100 rounded text-xs"
-              >
-                <Typography variant="caption" className="truncate max-w-[80px]">
-                  {f.name}
-                </Typography>
-                <IconButton
-                  size="small"
-                  sx={{ p: 0.25 }}
-                  aria-label={`Удалить ${f.name}`}
-                  onClick={() => removeCommentFile(i)}
-                >
-                  <CloseIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Box>
-            ))}
-          </Box>
-        )}
         <Button
           type="submit"
           variant="contained"
@@ -167,7 +122,15 @@ function CommentItem({
   const isReplyingToThis = replyToParentId === comment.id
   const isOwn = authUserId && comment.user_id === authUserId
   return (
-    <Box className="flex flex-col gap-1" sx={{ ml: depth * 2 }}>
+    <Box
+      className="flex flex-col gap-1"
+      sx={{
+        ml: depth > 0 ? 3 : 0,
+        pl: depth > 0 ? 2 : 0,
+        borderLeft: depth > 0 ? '2px solid' : 'none',
+        borderColor: 'grey.300',
+      }}
+    >
       <Box
         className="p-3 rounded-lg"
         sx={{
@@ -211,7 +174,7 @@ function CommentItem({
         </Box>
       )}
       {comment.replies && comment.replies.length > 0 && (
-        <Box className="flex flex-col gap-2 mt-1">
+        <Box className="flex flex-col gap-2 mt-2">
           {comment.replies.map((r) => (
             <CommentItem
               key={r.id}
@@ -245,13 +208,21 @@ export function MaterialCard({
     getNameByUserId(courseMembers, userId, fallback)
   const [comments, setComments] = useState<Comment[]>([])
   const [commentText, setCommentText] = useState('')
-  const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [replyToParentId, setReplyToParentId] = useState<string | null>(null)
   const [loadingComments, setLoadingComments] = useState(false)
   const [submittingComment, setSubmittingComment] = useState(false)
   const [showAddCommentInput, setShowAddCommentInput] = useState(false)
   const [commentsModalOpen, setCommentsModalOpen] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [fullMaterial, setFullMaterial] = useState<Material | null>(null)
+  const [bodyExpanded, setBodyExpanded] = useState(false)
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false)
+
+  useEffect(() => {
+    if (!courseId || item.type !== 'material') return
+    getMaterial(courseId, item.id)
+      .then(setFullMaterial)
+      .catch(() => setFullMaterial(null))
+  }, [courseId, item.id, item.type])
 
   useEffect(() => {
     if (!courseId) return
@@ -269,14 +240,11 @@ export function MaterialCard({
 
     setSubmittingComment(true)
     try {
-      const fileIds = commentFiles.length > 0 ? await uploadFiles(commentFiles) : []
       await createMaterialComment(courseId, item.id, {
         body: trimmed,
         parent_id: replyToParentId,
-        file_ids: fileIds,
       })
       setCommentText('')
-      setCommentFiles([])
       setReplyToParentId(null)
       setShowAddCommentInput(false)
       const list = await listMaterialComments(courseId, item.id)
@@ -287,23 +255,24 @@ export function MaterialCard({
     }
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files
-    if (selected) {
-      setCommentFiles((prev) => [...prev, ...Array.from(selected)])
-    }
-    e.target.value = ''
-  }
-
-  const removeCommentFile = (index: number) => {
-    setCommentFiles((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const content = item.body || item.title
-  const displayDate = formatDate(item.created_at)
-  const attachments = item.attachments ?? []
+  const data = fullMaterial ?? item
+  const content = data.body || data.title
+  const displayDate = formatDate(data.created_at ?? item.created_at)
+  const links = fullMaterial?.links ?? []
+  const fileIds = fullMaterial?.file_ids ?? item.file_ids ?? []
+  const attachments =
+    item.attachments && item.attachments.length > 0
+      ? item.attachments
+      : fileIds.map((id, i) => ({ id, name: `Файл ${i + 1}` }))
   const totalCommentsCount = countCommentsRecursively(comments)
   const hasComments = totalCommentsCount > 0
+
+  const BODY_PREVIEW_LENGTH = 300
+  const isBodyLong = (content?.length ?? 0) > BODY_PREVIEW_LENGTH
+  const displayContent =
+    isBodyLong && !bodyExpanded
+      ? `${content!.slice(0, BODY_PREVIEW_LENGTH)}…`
+      : content
 
   return (
     <Box
@@ -319,7 +288,9 @@ export function MaterialCard({
       onClick={onClick}
     >
       <Box className="p-4">
-        <Box className="flex items-start gap-3">
+        <Box
+          className={`flex gap-3 ${data.body && data.body.trim() ? 'items-start' : 'items-center'}`}
+        >
           <Avatar
             sx={{
               bgcolor: 'info.main',
@@ -331,7 +302,7 @@ export function MaterialCard({
           >
             {authorInitial}
           </Avatar>
-          <Box className="flex-1 min-w-0">
+          <Box className={`flex-1 min-w-0 ${data.body && data.body.trim() ? '' : 'pt-1'}`}>
             <Box className="flex items-center justify-between gap-2 mb-1">
               <Typography variant="subtitle1" className="font-semibold text-slate-800">
                 {item.title}
@@ -345,13 +316,35 @@ export function MaterialCard({
                 </Typography>
               </Box>
             </Box>
-            <Typography
-              variant="body2"
-              className="text-slate-600 whitespace-pre-wrap"
-              sx={{ lineHeight: 1.6 }}
-            >
-              {content}
-            </Typography>
+            {data.body && data.body.trim() && (
+              <>
+                <Typography
+                  variant="body2"
+                  className="text-slate-600 whitespace-pre-wrap"
+                  sx={{
+                    lineHeight: 1.6,
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                  }}
+                >
+                  {displayContent}
+                </Typography>
+                {isBodyLong && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setBodyExpanded((v) => !v)
+                    }}
+                    startIcon={bodyExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    sx={{ mt: 0.5, textTransform: 'none' }}
+                  >
+                    {bodyExpanded ? 'Свернуть' : 'Развернуть'}
+                  </Button>
+                )}
+              </>
+            )}
           </Box>
         </Box>
       </Box>
@@ -360,36 +353,56 @@ export function MaterialCard({
         className="px-4 pb-4 pt-0 border-t border-slate-100"
         onClick={(e) => onClick && e.stopPropagation()}
       >
-        {attachments.length > 0 && (
+        {(links.length > 0 || attachments.length > 0) && (
           <Box className="flex flex-col gap-2 mb-4">
-            <Typography variant="subtitle2" className="text-slate-600">
-              Вложения
-            </Typography>
-            <Box className="flex flex-wrap gap-2">
-              {attachments.map((a) => (
-                <Box
-                  key={a.id}
-                  className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200"
-                >
-                  <InsertDriveFileOutlinedIcon fontSize="small" color="action" />
-                  <Typography variant="body2" className="font-medium">
-                    {a.name}
-                  </Typography>
-                  {a.url && (
-                    <IconButton
-                      size="small"
+            <Button
+              size="small"
+              variant="text"
+              startIcon={
+                attachmentsExpanded ? (
+                  <ExpandLessIcon fontSize="small" />
+                ) : (
+                  <ExpandMoreIcon fontSize="small" />
+                )
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                setAttachmentsExpanded((v) => !v)
+              }}
+              sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+            >
+              Вложения ({links.length + attachments.length})
+            </Button>
+            {attachmentsExpanded && (
+              <Box className="flex flex-col gap-2 w-full">
+                {links.map((url, i) => (
+                  <Box
+                    key={`link-${i}`}
+                    className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm w-full"
+                  >
+                    <LinkIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    <Typography
+                      variant="body2"
                       component="a"
-                      href={a.url}
+                      href={getLinkHref(url)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label={`Открыть ${a.name}`}
+                      sx={{ color: 'primary.main', wordBreak: 'break-all' }}
                     >
-                      <LinkIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </Box>
-              ))}
-            </Box>
+                      {url}
+                    </Typography>
+                  </Box>
+                ))}
+                {attachments.map((a) => (
+                  <Box key={a.id} className="w-full">
+                    <FileAttachmentLink
+                      attachment={{ id: a.id, name: a.name || 'Файл' }}
+                      fileSource={{ type: 'material', courseId, materialId: item.id }}
+                    />
+                  </Box>
+                ))}
+              </Box>
+            )}
           </Box>
         )}
 
@@ -421,12 +434,8 @@ export function MaterialCard({
                 <CommentForm
                   commentText={commentText}
                   setCommentText={setCommentText}
-                  commentFiles={commentFiles}
-                  handleFileChange={handleFileChange}
-                  removeCommentFile={removeCommentFile}
                   handleSubmitComment={handleSubmitComment}
                   submittingComment={submittingComment}
-                  fileInputRef={fileInputRef}
                 />
               )}
             </>
@@ -458,7 +467,7 @@ export function MaterialCard({
                 <DialogTitle id="material-comments-dialog-title">Комментарии</DialogTitle>
                 <DialogContent className="flex flex-col gap-4">
                   <Box className="flex flex-col gap-3">
-                    {comments.map((c) => (
+                    {buildCommentTree(comments).map((c) => (
                       <CommentItem
                         key={c.id}
                         comment={c}
@@ -467,7 +476,6 @@ export function MaterialCard({
                         onCancelReply={() => {
                         setReplyToParentId(null)
                         setCommentText('')
-                        setCommentFiles([])
                       }}
                         depth={0}
                         replyToParentId={replyToParentId}
@@ -476,12 +484,8 @@ export function MaterialCard({
                           <CommentForm
                             commentText={commentText}
                             setCommentText={setCommentText}
-                            commentFiles={commentFiles}
-                            handleFileChange={handleFileChange}
-                            removeCommentFile={removeCommentFile}
                             handleSubmitComment={handleSubmitComment}
                             submittingComment={submittingComment}
-                            fileInputRef={fileInputRef}
                           />
                         )}
                         getName={getName}
@@ -492,12 +496,8 @@ export function MaterialCard({
                     <CommentForm
                       commentText={commentText}
                       setCommentText={setCommentText}
-                      commentFiles={commentFiles}
-                      handleFileChange={handleFileChange}
-                      removeCommentFile={removeCommentFile}
                       handleSubmitComment={handleSubmitComment}
                       submittingComment={submittingComment}
-                      fileInputRef={fileInputRef}
                     />
                   )}
                 </DialogContent>
