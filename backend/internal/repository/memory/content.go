@@ -2,6 +2,7 @@ package memory
 
 import (
 	"sync"
+	"time"
 
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
@@ -155,6 +156,32 @@ func (r *AssignmentRepository) ListByCourse(courseID string) ([]*domain.Assignme
 		return []*domain.Assignment{}, nil
 	}
 	return r.byCid[courseID], nil
+}
+
+func (r *AssignmentRepository) Update(a *domain.Assignment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byID[a.ID] = a
+	list := r.byCid[a.CourseID]
+	for i, item := range list {
+		if item.ID == a.ID {
+			list[i] = a
+			break
+		}
+	}
+	return nil
+}
+
+func (r *AssignmentRepository) ListDueForAutoFinalize(before time.Time) ([]*domain.Assignment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []*domain.Assignment
+	for _, a := range r.byID {
+		if a.TeamCount > 0 && a.Deadline != nil && a.Deadline.Before(before) && a.DeadlineAutoFinalizedAt == nil {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 func (r *AssignmentRepository) Delete(id string) error {
