@@ -3,6 +3,7 @@ package usecase
 import (
 	"errors"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -105,14 +106,24 @@ func (uc *CreateMaterial) CreateMaterial(in CreateMaterialInput) (*domain.Materi
 }
 
 type CreateAssignmentInput struct {
-	CourseID string
-	UserID   string
-	Title    string
-	Body     string
-	Links    []string
-	FileIDs  []string
-	Deadline *time.Time
-	MaxGrade int
+	CourseID               string
+	UserID                 string
+	Title                  string
+	Body                   string
+	Links                  []string
+	FileIDs                []string
+	Deadline               *time.Time
+	MaxGrade               int
+	AssignmentKind         domain.AssignmentKind
+	DesiredTeamSize        int
+	TeamDistributionType domain.TeamDistributionType
+	TeamCount              int
+	TeamSubmissionRule     domain.TeamSubmissionRule
+	VoteTieBreak           domain.VoteTieBreak
+	AllowEarlyFinalization *bool
+	TeamGradingMode        domain.TeamGradingMode
+	PeerSplitMinPercent    float64
+	PeerSplitMaxPercent    float64
 }
 
 type CreateAssignment struct {
@@ -140,16 +151,106 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 	if maxGrade <= 0 {
 		maxGrade = 100
 	}
+	distributionType := in.TeamDistributionType
+	if distributionType == "" {
+		distributionType = domain.TeamDistributionFree
+	}
+	teamRule := in.TeamSubmissionRule
+	if teamRule == "" {
+		teamRule = domain.TeamRuleFirstSubmission
+	}
+	if in.TeamCount < 0 {
+		return nil, &ValidationError{Message: "team_count cannot be negative"}
+	}
+	students, err := listStudentIDs(in.CourseID, uc.memberRepo)
+	if err != nil {
+		return nil, err
+	}
+	n := len(students)
+	teamCount := 0
+	maxTeamSize := 0
+	switch {
+	case in.DesiredTeamSize >= 2:
+		if n == 0 {
+			teamCount = 1
+			maxTeamSize = in.DesiredTeamSize
+		} else {
+			teamCount = int(math.Ceil(float64(n) / float64(in.DesiredTeamSize)))
+			if teamCount < 1 {
+				teamCount = 1
+			}
+			maxTeamSize = int(math.Ceil(float64(n) / float64(teamCount)))
+			if maxTeamSize < 2 {
+				maxTeamSize = 2
+			}
+		}
+	case in.TeamCount > 0:
+		teamCount = in.TeamCount
+		var cerr error
+		maxTeamSize, cerr = calcMaxTeamSize(n, teamCount)
+		if cerr != nil {
+			return nil, cerr
+		}
+	}
+	kind := in.AssignmentKind
+	if kind == "" {
+		if teamCount > 0 {
+			kind = domain.AssignmentKindGroup
+		} else {
+			kind = domain.AssignmentKindIndividual
+		}
+	}
+	if kind == domain.AssignmentKindIndividual {
+		teamCount = 0
+		maxTeamSize = 0
+	}
+	if kind == domain.AssignmentKindGroup && teamCount <= 0 {
+		return nil, &ValidationError{Message: "group assignment requires desired_team_size >= 2 or team_count > 0"}
+	}
+	gradingMode := in.TeamGradingMode
+	if gradingMode == "" {
+		gradingMode = domain.TeamGradingIndividual
+	}
+	if gradingMode == domain.TeamGradingPeerSplit {
+		if kind != domain.AssignmentKindGroup {
+			return nil, &ValidationError{Message: "peer_split grading applies only to group assignments"}
+		}
+		if in.PeerSplitMinPercent < 0 || in.PeerSplitMaxPercent > 100 || in.PeerSplitMinPercent > in.PeerSplitMaxPercent {
+			return nil, &ValidationError{Message: "peer_split_min_percent and peer_split_max_percent must be between 0 and 100 with min <= max"}
+		}
+	}
+	if gradingMode == domain.TeamGradingTeamUniform && kind != domain.AssignmentKindGroup {
+		return nil, &ValidationError{Message: "team_uniform grading applies only to group assignments"}
+	}
+	voteTie := in.VoteTieBreak
+	if voteTie == "" {
+		voteTie = domain.VoteTieBreakHighestAuthorAverage
+	}
+	allowEarly := true
+	if in.AllowEarlyFinalization != nil {
+		allowEarly = *in.AllowEarlyFinalization
+	}
 	a := &domain.Assignment{
-		ID:        uuid.New().String(),
-		CourseID:  in.CourseID,
-		Title:     title,
-		Body:      in.Body,
-		Links:     in.Links,
-		FileIDs:   in.FileIDs,
-		Deadline:  in.Deadline,
-		MaxGrade:  maxGrade,
-		CreatedAt: time.Now().UTC(),
+		ID:                     uuid.New().String(),
+		CourseID:               in.CourseID,
+		Title:                  title,
+		Body:                   in.Body,
+		Links:                  in.Links,
+		FileIDs:                in.FileIDs,
+		Deadline:               in.Deadline,
+		MaxGrade:               maxGrade,
+		AssignmentKind:         kind,
+		DesiredTeamSize:        in.DesiredTeamSize,
+		TeamDistributionType:   distributionType,
+		TeamCount:              teamCount,
+		MaxTeamSize:            maxTeamSize,
+		TeamSubmissionRule:     teamRule,
+		VoteTieBreak:           voteTie,
+		AllowEarlyFinalization: allowEarly,
+		TeamGradingMode:        gradingMode,
+		PeerSplitMinPercent:    in.PeerSplitMinPercent,
+		PeerSplitMaxPercent:    in.PeerSplitMaxPercent,
+		CreatedAt:              time.Now().UTC(),
 	}
 	if err := uc.assignmentRepo.Create(a); err != nil {
 		return nil, err
@@ -239,10 +340,13 @@ type CreateSubmission struct {
 	memberRepo     repository.CourseMemberRepository
 	assignmentRepo repository.AssignmentRepository
 	submissionRepo repository.SubmissionRepository
+	teamMemberRepo repository.TeamMemberRepository
 }
 
-func NewCreateSubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *CreateSubmission {
-	return &CreateSubmission{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+func NewCreateSubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository, teamMemberRepo repository.TeamMemberRepository) *CreateSubmission {
+	return &CreateSubmission{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo, teamMemberRepo: teamMemberRepo,
+	}
 }
 
 func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.Submission, error) {
@@ -254,10 +358,70 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 	if err != nil || a == nil || a.CourseID != in.CourseID {
 		return nil, ErrCourseNotFound
 	}
+	if a.IsGroup() {
+		team, err := uc.teamMemberRepo.GetTeamByUser(in.AssignmentID, in.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if team == nil {
+			return nil, ErrForbidden
+		}
+	}
 
 	if in.IsAttached {
 		if a.Deadline != nil && time.Now().UTC().After(*a.Deadline) {
 			return nil, ErrAssignmentClosed
+		}
+	}
+	if a.IsGroup() && in.IsAttached {
+		now := time.Now().UTC()
+		if !a.AllowEarlyFinalization && a.Deadline != nil && now.Before(*a.Deadline) {
+			if a.TeamSubmissionRule != domain.TeamRuleVoteEqual && a.TeamSubmissionRule != domain.TeamRuleVoteWeighted {
+				return nil, &ValidationError{Message: "final submission is not allowed before deadline"}
+			}
+		}
+		team, err := uc.teamMemberRepo.GetTeamByUser(in.AssignmentID, in.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if team == nil {
+			return nil, ErrForbidden
+		}
+		members, err := uc.teamMemberRepo.ListByTeam(team.ID)
+		if err != nil {
+			return nil, err
+		}
+		memberSet := make(map[string]bool, len(members))
+		for _, m := range members {
+			memberSet[m.UserID] = true
+		}
+		allSubs, err := uc.submissionRepo.ListByAssignment(in.AssignmentID)
+		if err != nil {
+			return nil, err
+		}
+		if a.TeamSubmissionRule == domain.TeamRuleFirstSubmission {
+			for _, s := range allSubs {
+				if memberSet[s.UserID] && s.IsAttached && !s.IsReturned {
+					return nil, ErrAlreadySubmitted
+				}
+			}
+		}
+		if a.TeamSubmissionRule == domain.TeamRuleTopStudentOnly {
+			var bestUser string
+			bestScore := -1.0
+			for _, m := range members {
+				score, _ := calcNormalizedAverage(in.CourseID, m.UserID, uc.assignmentRepo, uc.submissionRepo)
+				if score > bestScore {
+					bestScore = score
+					bestUser = m.UserID
+				}
+			}
+			if bestUser != "" && bestUser != in.UserID {
+				return nil, ErrForbidden
+			}
+		}
+		if a.TeamSubmissionRule == domain.TeamRuleVoteEqual || a.TeamSubmissionRule == domain.TeamRuleVoteWeighted {
+			return nil, &ValidationError{Message: "use voting finalize endpoint for this assignment"}
 		}
 	}
 
@@ -275,6 +439,11 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 		if err := uc.submissionRepo.Update(existing); err != nil {
 			return nil, err
 		}
+		if a.IsGroup() && in.IsAttached && a.TeamSubmissionRule == domain.TeamRuleLastSubmission {
+			if err := uc.detachAttachedPeers(in.AssignmentID, existing.UserID); err != nil {
+				return nil, err
+			}
+		}
 		return existing, nil
 	}
 	s := &domain.Submission{
@@ -289,7 +458,41 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 	if err := uc.submissionRepo.Create(s); err != nil {
 		return nil, err
 	}
+	if a.IsGroup() && in.IsAttached && a.TeamSubmissionRule == domain.TeamRuleLastSubmission {
+		if err := uc.detachAttachedPeers(in.AssignmentID, in.UserID); err != nil {
+			return nil, err
+		}
+	}
 	return s, nil
+}
+
+func (uc *CreateSubmission) detachAttachedPeers(assignmentID, exceptUserID string) error {
+	team, err := uc.teamMemberRepo.GetTeamByUser(assignmentID, exceptUserID)
+	if err != nil || team == nil {
+		return err
+	}
+	members, err := uc.teamMemberRepo.ListByTeam(team.ID)
+	if err != nil {
+		return err
+	}
+	memberSet := make(map[string]bool, len(members))
+	for _, m := range members {
+		memberSet[m.UserID] = true
+	}
+	allSubs, err := uc.submissionRepo.ListByAssignment(assignmentID)
+	if err != nil {
+		return err
+	}
+	for _, sub := range allSubs {
+		if !memberSet[sub.UserID] || sub.UserID == exceptUserID || !sub.IsAttached {
+			continue
+		}
+		sub.IsAttached = false
+		if err := uc.submissionRepo.Update(sub); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type ListSubmissions struct {
@@ -338,10 +541,21 @@ type GradeSubmission struct {
 	memberRepo     repository.CourseMemberRepository
 	assignmentRepo repository.AssignmentRepository
 	submissionRepo repository.SubmissionRepository
+	teamMemberRepo repository.TeamMemberRepository
+	auditRepo      repository.TeamAuditRepository
 }
 
-func NewGradeSubmission(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository) *GradeSubmission {
-	return &GradeSubmission{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo}
+func NewGradeSubmission(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	submissionRepo repository.SubmissionRepository,
+	teamMemberRepo repository.TeamMemberRepository,
+	auditRepo repository.TeamAuditRepository,
+) *GradeSubmission {
+	return &GradeSubmission{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo,
+		teamMemberRepo: teamMemberRepo, auditRepo: auditRepo,
+	}
 }
 
 func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Submission, error) {
@@ -356,6 +570,9 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	if err != nil || a == nil || a.CourseID != in.CourseID {
 		return nil, ErrCourseNotFound
 	}
+	if a.TeamGradingMode == domain.TeamGradingPeerSplit {
+		return nil, &ValidationError{Message: "use POST .../teams/{teamId}/grade-peer-split for this assignment"}
+	}
 	s, err := uc.submissionRepo.GetByID(in.SubmissionID)
 	if err != nil || s == nil || s.AssignmentID != in.AssignmentID {
 		return nil, ErrCourseNotFound
@@ -369,6 +586,35 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	}
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
+	}
+	if a.TeamGradingMode == domain.TeamGradingTeamUniform && a.IsGroup() && uc.teamMemberRepo != nil {
+		team, terr := uc.teamMemberRepo.GetTeamByUser(in.AssignmentID, s.UserID)
+		if terr == nil && team != nil {
+			mems, merr := uc.teamMemberRepo.ListByTeam(team.ID)
+			if merr == nil {
+				for _, m := range mems {
+					if m.UserID == s.UserID {
+						continue
+					}
+					o, _ := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, m.UserID)
+					if o == nil {
+						continue
+					}
+					g := in.Grade
+					o.Grade = &g
+					if in.GradeComment != "" {
+						cc := in.GradeComment
+						o.GradeComment = &cc
+					}
+					if err := uc.submissionRepo.Update(o); err != nil {
+						return nil, err
+					}
+				}
+				tryTeamAudit(uc.auditRepo, in.AssignmentID, team.ID, in.UserID, domain.TeamAuditGradeApplied, map[string]string{"mode": "team_uniform"})
+			}
+		}
+	} else {
+		tryTeamAudit(uc.auditRepo, in.AssignmentID, "", in.UserID, domain.TeamAuditGradeApplied, map[string]string{"submission_id": s.ID})
 	}
 	return s, nil
 }
@@ -856,10 +1102,28 @@ type DeleteAssignment struct {
 	assignmentRepo repository.AssignmentRepository
 	submissionRepo repository.SubmissionRepository
 	commentRepo    repository.CommentRepository
+	teamRepo       repository.TeamRepository
+	teamMemberRepo repository.TeamMemberRepository
+	teamVoteRepo   repository.TeamVoteRepository
+	peerRepo       repository.TeamPeerGradeRepository
+	auditRepo      repository.TeamAuditRepository
 }
 
-func NewDeleteAssignment(memberRepo repository.CourseMemberRepository, assignmentRepo repository.AssignmentRepository, submissionRepo repository.SubmissionRepository, commentRepo repository.CommentRepository) *DeleteAssignment {
-	return &DeleteAssignment{memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo, commentRepo: commentRepo}
+func NewDeleteAssignment(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	submissionRepo repository.SubmissionRepository,
+	commentRepo repository.CommentRepository,
+	teamRepo repository.TeamRepository,
+	teamMemberRepo repository.TeamMemberRepository,
+	teamVoteRepo repository.TeamVoteRepository,
+	peerRepo repository.TeamPeerGradeRepository,
+	auditRepo repository.TeamAuditRepository,
+) *DeleteAssignment {
+	return &DeleteAssignment{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, submissionRepo: submissionRepo, commentRepo: commentRepo,
+		teamRepo: teamRepo, teamMemberRepo: teamMemberRepo, teamVoteRepo: teamVoteRepo, peerRepo: peerRepo, auditRepo: auditRepo,
+	}
 }
 
 func (uc *DeleteAssignment) DeleteAssignment(courseID, assignmentID, userID string) error {
@@ -876,6 +1140,21 @@ func (uc *DeleteAssignment) DeleteAssignment(courseID, assignmentID, userID stri
 	}
 	_ = uc.commentRepo.DeleteByAssignment(assignmentID)
 	_ = uc.submissionRepo.DeleteByAssignment(assignmentID)
+	if uc.teamVoteRepo != nil {
+		_ = uc.teamVoteRepo.DeleteByAssignment(assignmentID)
+	}
+	if uc.peerRepo != nil {
+		_ = uc.peerRepo.DeleteByAssignment(assignmentID)
+	}
+	if uc.auditRepo != nil {
+		_ = uc.auditRepo.DeleteByAssignment(assignmentID)
+	}
+	if uc.teamMemberRepo != nil {
+		_ = uc.teamMemberRepo.DeleteByAssignment(assignmentID)
+	}
+	if uc.teamRepo != nil {
+		_ = uc.teamRepo.DeleteByAssignment(assignmentID)
+	}
 	return uc.assignmentRepo.Delete(assignmentID)
 }
 
