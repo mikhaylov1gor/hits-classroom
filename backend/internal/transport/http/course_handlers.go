@@ -664,14 +664,35 @@ func assignmentResponse(a *domain.Assignment) map[string]interface{} {
 		fileIDs = []string{}
 	}
 	out := map[string]interface{}{
-		"id":         a.ID,
-		"course_id":  a.CourseID,
-		"title":      a.Title,
-		"body":       a.Body,
-		"links":      links,
-		"file_ids":   fileIDs,
-		"max_grade":  a.MaxGrade,
-		"created_at": a.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"id":                       a.ID,
+		"course_id":                a.CourseID,
+		"title":                    a.Title,
+		"body":                     a.Body,
+		"links":                    links,
+		"file_ids":                 fileIDs,
+		"max_grade":                a.MaxGrade,
+		"assignment_kind":          string(a.AssignmentKind),
+		"desired_team_size":        a.DesiredTeamSize,
+		"team_distribution_type":   string(a.TeamDistributionType),
+		"team_count":               a.TeamCount,
+		"max_team_size":            a.MaxTeamSize,
+		"team_submission_rule":     string(a.TeamSubmissionRule),
+		"vote_tie_break":           string(a.VoteTieBreak),
+		"allow_early_finalization": a.AllowEarlyFinalization,
+		"team_grading_mode":        string(a.TeamGradingMode),
+		"peer_split_min_percent":   a.PeerSplitMinPercent,
+		"peer_split_max_percent":   a.PeerSplitMaxPercent,
+		"created_at":               a.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if a.RosterLockedAt != nil {
+		out["roster_locked_at"] = a.RosterLockedAt.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		out["roster_locked_at"] = nil
+	}
+	if a.DeadlineAutoFinalizedAt != nil {
+		out["deadline_auto_finalized_at"] = a.DeadlineAutoFinalizedAt.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		out["deadline_auto_finalized_at"] = nil
 	}
 	if a.Deadline != nil {
 		out["deadline"] = a.Deadline.Format("2006-01-02T15:04:05Z07:00")
@@ -966,12 +987,22 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		Title    string   `json:"title"`
-		Body     string   `json:"body"`
-		Links    []string `json:"links"`
-		FileIDs  []string `json:"file_ids"`
-		Deadline *string  `json:"deadline"`
-		MaxGrade int      `json:"max_grade"`
+		Title                  string   `json:"title"`
+		Body                   string   `json:"body"`
+		Links                  []string `json:"links"`
+		FileIDs                []string `json:"file_ids"`
+		Deadline               *string  `json:"deadline"`
+		MaxGrade               int      `json:"max_grade"`
+		AssignmentKind         string   `json:"assignment_kind"`
+		DesiredTeamSize        int      `json:"desired_team_size"`
+		TeamDistributionType   string   `json:"team_distribution_type"`
+		TeamCount              int      `json:"team_count"`
+		TeamSubmissionRule     string   `json:"team_submission_rule"`
+		VoteTieBreak           string   `json:"vote_tie_break"`
+		AllowEarlyFinalization *bool    `json:"allow_early_finalization"`
+		TeamGradingMode        string   `json:"team_grading_mode"`
+		PeerSplitMinPercent    float64  `json:"peer_split_min_percent"`
+		PeerSplitMaxPercent    float64  `json:"peer_split_max_percent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -988,11 +1019,36 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			deadline = &t
 		}
 	}
-	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{CourseID: courseID, UserID: userID, Title: req.Title, Body: req.Body, Links: req.Links, FileIDs: req.FileIDs, Deadline: deadline, MaxGrade: req.MaxGrade})
+	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{
+		CourseID:               courseID,
+		UserID:                 userID,
+		Title:                  req.Title,
+		Body:                   req.Body,
+		Links:                  req.Links,
+		FileIDs:                req.FileIDs,
+		Deadline:               deadline,
+		MaxGrade:               req.MaxGrade,
+		AssignmentKind:         domain.AssignmentKind(req.AssignmentKind),
+		DesiredTeamSize:        req.DesiredTeamSize,
+		TeamDistributionType:   domain.TeamDistributionType(req.TeamDistributionType),
+		TeamCount:              req.TeamCount,
+		TeamSubmissionRule:     domain.TeamSubmissionRule(req.TeamSubmissionRule),
+		VoteTieBreak:           domain.VoteTieBreak(req.VoteTieBreak),
+		AllowEarlyFinalization: req.AllowEarlyFinalization,
+		TeamGradingMode:        domain.TeamGradingMode(req.TeamGradingMode),
+		PeerSplitMinPercent:    req.PeerSplitMinPercent,
+		PeerSplitMaxPercent:    req.PeerSplitMaxPercent,
+	})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
 			return
 		}
 		if errors.Is(err, usecase.ErrValidation) {

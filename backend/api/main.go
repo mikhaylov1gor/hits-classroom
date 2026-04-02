@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"hits-classroom/internal/repository/memory"
+	"hits-classroom/internal/repository/gormrepo"
 	httphandler "hits-classroom/internal/transport/http"
 	"hits-classroom/internal/usecase"
 )
@@ -16,7 +16,14 @@ func main() {
 
 	jwtSecret := []byte("dev-secret-change-in-production")
 	jwtIssuer := &usecase.JWTIssuer{Secret: jwtSecret, Expiry: 24 * time.Hour}
-	userRepo := memory.NewUserRepository()
+	db, err := gormrepo.OpenFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := gormrepo.AutoMigrate(db); err != nil {
+		log.Fatal(err)
+	}
+	userRepo := gormrepo.NewUserRepository(db)
 	hasher := usecase.BcryptHasher{}
 	registerUC := usecase.NewRegister(userRepo, hasher, jwtIssuer)
 	mux.Handle("/api/v1/auth/register", httphandler.NewRegisterHandler(registerUC))
@@ -35,8 +42,8 @@ func main() {
 	mux.Handle("GET /api/v1/users/me", authWrap(httphandler.NewGetMeHandler(getMeUC)))
 	mux.Handle("PATCH /api/v1/users/me", authWrap(httphandler.NewUpdateMeHandler(updateMeUC)))
 
-	courseRepo := memory.NewCourseRepository()
-	memberRepo := memory.NewCourseMemberRepository()
+	courseRepo := gormrepo.NewCourseRepository(db)
+	memberRepo := gormrepo.NewCourseMemberRepository(db)
 	createCourseUC := usecase.NewCreateCourse(courseRepo, memberRepo)
 	joinCourseUC := usecase.NewJoinCourse(courseRepo, memberRepo)
 	listCoursesUC := usecase.NewListCourses(courseRepo, memberRepo)
@@ -52,12 +59,15 @@ func main() {
 	removeMemberUC := usecase.NewRemoveMember(memberRepo)
 	changeMemberRoleUC := usecase.NewChangeMemberRole(memberRepo)
 
-	postRepo := memory.NewPostRepository()
-	materialRepo := memory.NewMaterialRepository()
-	assignmentRepo := memory.NewAssignmentRepository()
-	submissionRepo := memory.NewSubmissionRepository()
-	commentRepo := memory.NewCommentRepository()
-	fileRepo := memory.NewFileRepository()
+	postRepo := gormrepo.NewPostRepository(db)
+	materialRepo := gormrepo.NewMaterialRepository(db)
+	assignmentRepo := gormrepo.NewAssignmentRepository(db)
+	submissionRepo := gormrepo.NewSubmissionRepository(db)
+	commentRepo := gormrepo.NewCommentRepository(db)
+	fileRepo := gormrepo.NewFileRepository(db)
+	teamRepo := gormrepo.NewTeamRepository(db)
+	teamMemberRepo := gormrepo.NewTeamMemberRepository(db)
+	teamVoteRepo := gormrepo.NewTeamVoteRepository(db)
 
 	createPostUC := usecase.NewCreatePost(memberRepo, postRepo)
 	getPostUC := usecase.NewGetPost(memberRepo, postRepo)
@@ -67,12 +77,15 @@ func main() {
 	deleteMaterialUC := usecase.NewDeleteMaterial(memberRepo, materialRepo, commentRepo)
 	createAssignmentUC := usecase.NewCreateAssignment(memberRepo, assignmentRepo)
 	getAssignmentUC := usecase.NewGetAssignment(memberRepo, assignmentRepo)
-	deleteAssignmentUC := usecase.NewDeleteAssignment(memberRepo, assignmentRepo, submissionRepo, commentRepo)
+	teamPeerGradeRepo := gormrepo.NewTeamPeerGradeRepository(db)
+	teamAuditRepo := gormrepo.NewTeamAuditRepository(db)
+
+	deleteAssignmentUC := usecase.NewDeleteAssignment(memberRepo, assignmentRepo, submissionRepo, commentRepo, teamRepo, teamMemberRepo, teamVoteRepo, teamPeerGradeRepo, teamAuditRepo)
 	getCourseFeedUC := usecase.NewGetCourseFeed(memberRepo, postRepo, materialRepo, assignmentRepo)
-	createSubmissionUC := usecase.NewCreateSubmission(memberRepo, assignmentRepo, submissionRepo)
+	createSubmissionUC := usecase.NewCreateSubmission(memberRepo, assignmentRepo, submissionRepo, teamMemberRepo)
 	listSubmissionsUC := usecase.NewListSubmissions(memberRepo, assignmentRepo, submissionRepo)
 	getMySubmissionUC := usecase.NewGetMySubmission(memberRepo, assignmentRepo, submissionRepo)
-	gradeSubmissionUC := usecase.NewGradeSubmission(memberRepo, assignmentRepo, submissionRepo)
+	gradeSubmissionUC := usecase.NewGradeSubmission(memberRepo, assignmentRepo, submissionRepo, teamMemberRepo, teamAuditRepo)
 	detachAssignmentUC := usecase.NewDetachSubmission(memberRepo, assignmentRepo, submissionRepo)
 	returnAssignmentUC := usecase.NewReturnAssignment(memberRepo, assignmentRepo, submissionRepo)
 	getStudentGradesUC := usecase.NewGetStudentGrades(memberRepo, assignmentRepo, submissionRepo)
@@ -85,6 +98,20 @@ func main() {
 	listUserFilesUC := usecase.NewListUserFiles(fileRepo)
 	getFileUC := usecase.NewGetFile(fileRepo)
 	getFileInfoUC := usecase.NewGetFileInfo(fileRepo)
+	listAssignmentTeamsUC := usecase.NewListAssignmentTeams(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, teamVoteRepo, userRepo)
+	saveManualTeamsUC := usecase.NewSaveManualTeams(memberRepo, assignmentRepo, teamRepo, teamAuditRepo)
+	generateRandomTeamsUC := usecase.NewGenerateRandomTeams(memberRepo, assignmentRepo, teamRepo, teamAuditRepo)
+	generateBalancedTeamsUC := usecase.NewGenerateBalancedTeams(memberRepo, assignmentRepo, teamRepo, submissionRepo, teamAuditRepo)
+	createTeamUC := usecase.NewCreateTeam(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, teamAuditRepo)
+	joinTeamUC := usecase.NewJoinTeam(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, teamAuditRepo)
+	leaveTeamUC := usecase.NewLeaveTeam(memberRepo, assignmentRepo, teamMemberRepo, teamAuditRepo)
+	voteTeamSubmissionUC := usecase.NewVoteTeamSubmission(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, teamVoteRepo, teamAuditRepo)
+	finalizeTeamVoteUC := usecase.NewFinalizeTeamVoteSubmission(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, teamVoteRepo, teamAuditRepo)
+	lockTeamRosterUC := usecase.NewLockTeamRoster(memberRepo, assignmentRepo, teamAuditRepo)
+	listTeamAuditUC := usecase.NewListTeamAudit(memberRepo, teamAuditRepo)
+	submitPeerGradeSplitUC := usecase.NewSubmitPeerGradeSplit(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, teamPeerGradeRepo, teamAuditRepo)
+	gradeTeamPeerSplitUC := usecase.NewGradeTeamPeerSplit(memberRepo, assignmentRepo, teamRepo, submissionRepo, teamMemberRepo, teamPeerGradeRepo, teamAuditRepo)
+	autoFinalizeUC := usecase.NewAutoFinalizeDeadline(assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, finalizeTeamVoteUC, teamAuditRepo)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -127,6 +154,28 @@ func main() {
 	mux.Handle("GET /api/v1/courses/{courseId}/materials/{materialId}/comments", authWrap(httphandler.NewListMaterialCommentsHandler(listMaterialCommentsUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/materials/{materialId}/comments", authWrap(httphandler.NewCreateMaterialCommentHandler(createCommentUC)))
 	mux.Handle("DELETE /api/v1/courses/{courseId}/comments/{commentId}", authWrap(httphandler.NewDeleteCommentHandler(deleteCommentUC)))
+	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/teams", authWrap(httphandler.NewListAssignmentTeamsHandler(listAssignmentTeamsUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/save", authWrap(httphandler.NewSaveManualTeamsHandler(saveManualTeamsUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/generate-random", authWrap(httphandler.NewGenerateRandomTeamsHandler(generateRandomTeamsUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/generate-balanced", authWrap(httphandler.NewGenerateBalancedTeamsHandler(generateBalancedTeamsUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams", authWrap(httphandler.NewCreateTeamHandler(createTeamUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/join", authWrap(httphandler.NewJoinTeamHandler(joinTeamUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/leave", authWrap(httphandler.NewLeaveTeamHandler(leaveTeamUC)))
+	mux.Handle("DELETE /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/leave", authWrap(httphandler.NewLeaveTeamHandler(leaveTeamUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/votes", authWrap(httphandler.NewVoteTeamSubmissionHandler(voteTeamSubmissionUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/finalize-vote", authWrap(httphandler.NewFinalizeTeamVoteSubmissionHandler(finalizeTeamVoteUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/lock-roster", authWrap(httphandler.NewLockTeamRosterHandler(lockTeamRosterUC)))
+	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/audit", authWrap(httphandler.NewListTeamAuditHandler(listTeamAuditUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/peer-grade-split", authWrap(httphandler.NewSubmitPeerGradeSplitHandler(submitPeerGradeSplitUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/grade-peer-split", authWrap(httphandler.NewGradeTeamPeerSplitHandler(gradeTeamPeerSplitUC)))
+
+	go func() {
+		t := time.NewTicker(1 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			_ = autoFinalizeUC.Run(time.Now().UTC())
+		}
+	}()
 
 	getSubmissionFileUC := usecase.NewGetSubmissionFile(memberRepo, assignmentRepo, submissionRepo, fileRepo)
 	getPostFileUC := usecase.NewGetPostFile(memberRepo, postRepo, fileRepo)
