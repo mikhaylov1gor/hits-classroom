@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: hits-classroom API
-  version: 0.3.0
+  version: 0.5.0
   description: Backend API для LMS (курсы, задания, материалы, посты, оценки, файлы).
 
 servers:
@@ -19,6 +19,7 @@ tags:
   - name: submissions
   - name: comments
   - name: files
+  - name: teams
 
 paths:
   /health:
@@ -1085,6 +1086,395 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /courses/{courseId}/assignments/{assignmentId}/teams:
+    get:
+      tags: [teams]
+      summary: Список команд задания с участниками и normalized average баллом
+      operationId: listAssignmentTeams
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamWithMembers"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [teams]
+      summary: Создать команду (только для free-распределения, студент)
+      operationId: createTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/save:
+    post:
+      tags: [teams]
+      summary: Сохранить команды задания целиком (bulk replace). Для manual/random/balanced.
+      operationId: saveAssignmentTeams
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveTeamsRequest"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/generate-random:
+    post:
+      tags: [teams]
+      summary: Автоматически сгенерировать рандомные команды (режим random)
+      operationId: generateRandomTeams
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/generate-balanced:
+    post:
+      tags: [teams]
+      summary: Автоматически сгенерировать балансированные команды (режим balanced)
+      operationId: generateBalancedTeams
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/join:
+    post:
+      tags: [teams]
+      summary: Вступить в команду (free-режим, студент)
+      operationId: joinTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/leave:
+    post:
+      tags: [teams]
+      summary: Выйти из команды (free-режим, студент)
+      operationId: leaveTeam
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [teams]
+      summary: Выйти из команды (альтернативный метод)
+      operationId: leaveTeamDelete
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/votes:
+    post:
+      tags: [teams]
+      summary: Голос за решение команды (для правил vote_equal/vote_weighted)
+      operationId: voteTeamSubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoteTeamSubmissionRequest"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/finalize-vote:
+    post:
+      tags: [teams]
+      summary: Зафиксировать победившее решение по голосованию (owner/teacher)
+      operationId: finalizeTeamVote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/lock-roster:
+    post:
+      tags: [teams]
+      summary: Заблокировать состав команд (owner/teacher)
+      operationId: lockTeamRoster
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/audit:
+    get:
+      tags: [teams]
+      summary: Аудит событий по командам задания (owner/teacher)
+      operationId: listTeamAssignmentAudit
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: team_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamAuditEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/peer-grade-split:
+    post:
+      tags: [teams]
+      summary: Отправить распределение процентов оценки между участниками команды (student)
+      operationId: submitPeerGradeSplit
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PeerGradeSplitRequest"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/grade-peer-split:
+    post:
+      tags: [teams]
+      summary: Выставить общую оценку команде с распределением по процентам (owner/teacher)
+      operationId: gradeTeamPeerSplit
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GradeTeamPeerSplitRequest"
+      responses:
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /courses/{courseId}/assignments/{assignmentId}/comments:
     get:
       tags: [comments]
@@ -1843,6 +2233,33 @@ components:
           minimum: 1
           default: 100
           description: "Максимальный балл (шкала оценки). Примеры: 5, 10, 100. По умолчанию 100."
+        team_distribution_type:
+          $ref: "#/components/schemas/TeamDistributionType"
+        team_count:
+          type: integer
+          minimum: 0
+          description: Количество команд (legacy). Приоритет у desired_team_size, если задан.
+        desired_team_size:
+          type: integer
+          minimum: 2
+          description: Желаемый размер команды; число команд = ceil(студенты / desired_team_size).
+        assignment_kind:
+          $ref: "#/components/schemas/AssignmentKind"
+        team_submission_rule:
+          $ref: "#/components/schemas/TeamSubmissionRule"
+        vote_tie_break:
+          $ref: "#/components/schemas/VoteTieBreak"
+        allow_early_finalization:
+          type: boolean
+          description: Разрешить досрочную финализацию (прикрепление / finalize-vote) до дедлайна.
+        team_grading_mode:
+          $ref: "#/components/schemas/TeamGradingMode"
+        peer_split_min_percent:
+          type: number
+          format: float
+        peer_split_max_percent:
+          type: number
+          format: float
 
     Assignment:
       type: object
@@ -1874,6 +2291,40 @@ components:
         max_grade:
           type: integer
           description: Максимальный балл по шкале оценки
+        assignment_kind:
+          $ref: "#/components/schemas/AssignmentKind"
+        desired_team_size:
+          type: integer
+        team_distribution_type:
+          $ref: "#/components/schemas/TeamDistributionType"
+        team_count:
+          type: integer
+          description: Количество команд
+        max_team_size:
+          type: integer
+          description: Максимальный размер команды, рассчитанный по формуле ceil(students/team_count), минимум 2
+        team_submission_rule:
+          $ref: "#/components/schemas/TeamSubmissionRule"
+        vote_tie_break:
+          $ref: "#/components/schemas/VoteTieBreak"
+        allow_early_finalization:
+          type: boolean
+        team_grading_mode:
+          $ref: "#/components/schemas/TeamGradingMode"
+        peer_split_min_percent:
+          type: number
+          format: float
+        peer_split_max_percent:
+          type: number
+          format: float
+        roster_locked_at:
+          type: string
+          format: date-time
+          nullable: true
+        deadline_auto_finalized_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -1963,6 +2414,153 @@ components:
           $ref: "#/components/schemas/Submission"
         assignment:
           $ref: "#/components/schemas/Assignment"
+
+    TeamDistributionType:
+      type: string
+      enum: [free, random, balanced, manual]
+
+    AssignmentKind:
+      type: string
+      enum: [individual, group]
+
+    VoteTieBreak:
+      type: string
+      enum: [random, highest_author_average]
+
+    TeamGradingMode:
+      type: string
+      enum: [individual, team_uniform, team_peer_split]
+
+    TeamSubmissionRule:
+      type: string
+      enum: [first_submission, last_submission, top_student_only, vote_equal, vote_weighted]
+
+    TeamMemberInfo:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        average_score:
+          type: number
+          format: float
+
+    Team:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        creator_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        max_members:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    TeamWithMembers:
+      allOf:
+        - $ref: "#/components/schemas/Team"
+        - type: object
+          properties:
+            members:
+              type: array
+              items:
+                $ref: "#/components/schemas/TeamMemberInfo"
+            status:
+              type: string
+              description: >-
+                forming | roster_locked | voting_open | voting | submitted | graded | not_submitted
+
+    TeamAuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        actor_user_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    PeerGradeSplitRequest:
+      type: object
+      required: [percents]
+      properties:
+        percents:
+          type: object
+          additionalProperties:
+            type: number
+            format: float
+          description: user_id -> процент доли (сумма 100 ± 0.01)
+
+    GradeTeamPeerSplitRequest:
+      type: object
+      required: [grade]
+      properties:
+        grade:
+          type: integer
+        grade_comment:
+          type: string
+
+    CreateTeamRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Название команды; если пусто, сервер сгенерирует автоматически
+
+    SaveTeamItem:
+      type: object
+      properties:
+        name:
+          type: string
+        member_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    SaveTeamsRequest:
+      type: object
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaveTeamItem"
+
+    VoteTeamSubmissionRequest:
+      type: object
+      required: [submission_id]
+      properties:
+        submission_id:
+          type: string
+          format: uuid
 
     # ── Comments ──────────────────────────────────────────────────────────────
 
