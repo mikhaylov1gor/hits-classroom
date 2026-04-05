@@ -1177,6 +1177,7 @@ export function CoursePage() {
           onClose={() => setCreateAssignmentOpen(false)}
           courseId={courseId ?? ''}
           onCreated={refreshFeed}
+          courseMembers={members}
         />
         <EditAssignmentDialog
           open={Boolean(editAssignmentId)}

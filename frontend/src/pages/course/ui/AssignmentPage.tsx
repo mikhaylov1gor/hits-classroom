@@ -85,6 +85,7 @@ import {
 import { SubmitAssignmentConfirmDialog } from '../../../features/courses/ui/SubmitAssignmentConfirmDialog/SubmitAssignmentConfirmDialog'
 import { ReturnSubmissionConfirmDialog } from '../../../features/courses/ui/ReturnSubmissionConfirmDialog/ReturnSubmissionConfirmDialog'
 import { FileAttachmentLink } from '../../../features/courses/ui/FileAttachmentLink/FileAttachmentLink'
+import { TeamsBlock } from '../../../features/courses/ui/Teams/TeamsBlock'
 
 const DRAFT_STORAGE_KEY = 'assignment-draft'
 
@@ -990,6 +991,19 @@ export function AssignmentPage() {
                   </Box>
                 ))}
               </Box>
+            </Box>
+          )}
+
+          {assignment.assignment_kind === 'group' && courseId && assignmentId && (
+            <Box className="mb-6">
+              <TeamsBlock
+                courseId={courseId}
+                assignmentId={assignmentId}
+                assignment={assignment}
+                currentUserId={authUser?.id}
+                isTeacher={isTeacher}
+                courseMembers={courseMembers}
+              />
             </Box>
           )}
 
