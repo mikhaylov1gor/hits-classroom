@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   IconButton,
   InputLabel,
@@ -16,9 +18,16 @@ import {
 } from '@mui/material'
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
-import { createAssignment, uploadFiles } from '../../../api/coursesApi'
+import {
+  createAssignment,
+  deleteAssignment,
+  generateBalancedTeams,
+  generateRandomTeams,
+  saveTeams,
+  uploadFiles,
+} from '../../../api/coursesApi'
 import { isValidUrl } from '../../../utils/urlValidation'
-import type { AssignmentKind } from '../../../model/types'
+import type { AssignmentKind, Member } from '../../../model/types'
 import {
   GroupSettingsFields,
   DEFAULT_GROUP_SETTINGS,
@@ -26,12 +35,15 @@ import {
   buildGroupFields,
 } from '../GroupSettingsFields/GroupSettingsFields'
 import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
+import { ManualTeamsSetup } from '../../Teams/ManualTeamsSetup'
+import type { ManualTeamDraft } from '../../Teams/ManualTeamsSetup'
 
 type CreateAssignmentDialogProps = {
   open: boolean
   onClose: () => void
   courseId: string
   onCreated: () => void
+  courseMembers?: Member[]
 }
 
 export function CreateAssignmentDialog({
@@ -39,6 +51,7 @@ export function CreateAssignmentDialog({
   onClose,
   courseId,
   onCreated,
+  courseMembers = [],
 }: CreateAssignmentDialogProps) {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -51,8 +64,14 @@ export function CreateAssignmentDialog({
 
   const [assignmentKind, setAssignmentKind] = useState<AssignmentKind>('individual')
   const [groupSettings, setGroupSettings] = useState<GroupSettingsValue>(DEFAULT_GROUP_SETTINGS)
+  const [manualTeams, setManualTeams] = useState<ManualTeamDraft[]>([])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const isManual = assignmentKind === 'group' && groupSettings.teamDistributionType === 'manual'
+  const students = courseMembers.filter((m) => m.role === 'student')
+  const desiredSize = parseInt(groupSettings.desiredTeamSize, 10)
+  const maxPerTeam = !isNaN(desiredSize) && desiredSize >= 2 ? desiredSize : undefined
 
   const resetForm = () => {
     setTitle('')
@@ -64,6 +83,7 @@ export function CreateAssignmentDialog({
     setError(null)
     setAssignmentKind('individual')
     setGroupSettings(DEFAULT_GROUP_SETTINGS)
+    setManualTeams([])
   }
 
   const handleClose = () => {
@@ -121,10 +141,33 @@ export function CreateAssignmentDialog({
     }
 
     if (assignmentKind === 'group') {
+      if (students.length < 4) {
+        setError('Для группового задания нужно не менее 4 студентов в классе')
+        return
+      }
       const groupError = validateGroupSettings(groupSettings)
       if (groupError) {
         setError(groupError)
         return
+      }
+    }
+
+    if (isManual) {
+      if (manualTeams.length === 0) {
+        setError('Добавьте хотя бы одну команду')
+        return
+      }
+      const emptyTeam = manualTeams.find((t) => t.memberIds.length === 0)
+      if (emptyTeam) {
+        setError(`Команда «${emptyTeam.name}» пуста — удалите её или добавьте участников`)
+        return
+      }
+      if (maxPerTeam !== undefined) {
+        const overflowTeam = manualTeams.find((t) => t.memberIds.length > maxPerTeam)
+        if (overflowTeam) {
+          setError(`Команда «${overflowTeam.name}» превышает максимальный размер (${maxPerTeam})`)
+          return
+        }
       }
     }
 
@@ -136,7 +179,7 @@ export function CreateAssignmentDialog({
           ? new Date(trimmedDeadline).toISOString()
           : undefined
 
-      await createAssignment(courseId, {
+      const created = await createAssignment(courseId, {
         title: trimmedTitle,
         body: trimmedContent,
         links: linkLines.length > 0 ? linkLines : undefined,
@@ -146,6 +189,28 @@ export function CreateAssignmentDialog({
         assignment_kind: assignmentKind,
         ...(assignmentKind === 'group' ? buildGroupFields(groupSettings) : {}),
       })
+
+      if (assignmentKind === 'group') {
+        const distType = groupSettings.teamDistributionType
+        try {
+          if (distType === 'random') {
+            await generateRandomTeams(courseId, created.id)
+          } else if (distType === 'balanced') {
+            await generateBalancedTeams(courseId, created.id)
+          } else if (distType === 'manual' && manualTeams.length > 0) {
+            await saveTeams(
+              courseId,
+              created.id,
+              manualTeams.map((t) => ({ name: t.name, member_ids: t.memberIds })),
+            )
+          }
+        } catch (teamErr) {
+          // Откатываем: удаляем только что созданное задание
+          await deleteAssignment(courseId, created.id).catch(() => undefined)
+          throw teamErr
+        }
+      }
+
       resetForm()
       onClose()
       onCreated()
@@ -182,7 +247,7 @@ export function CreateAssignmentDialog({
     <Dialog
       open={open}
       onClose={handleClose}
-      maxWidth="sm"
+      maxWidth={isManual && students.length > 0 ? 'md' : 'sm'}
       fullWidth
       aria-labelledby="create-assignment-dialog-title"
     >
@@ -259,12 +324,36 @@ export function CreateAssignmentDialog({
             </Select>
           </FormControl>
 
+          {assignmentKind === 'group' && students.length < 4 && (
+            <Alert severity="warning">
+              В классе недостаточно студентов для группового задания (есть {students.length}, нужно минимум 4)
+            </Alert>
+          )}
+
           {assignmentKind === 'group' && (
             <GroupSettingsFields
               value={groupSettings}
               onChange={setGroupSettings}
               disabled={loading}
             />
+          )}
+
+          {isManual && students.length > 0 && (
+            <>
+              <Divider />
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Распределение по командам
+                </Typography>
+                <ManualTeamsSetup
+                  students={students}
+                  teams={manualTeams}
+                  onChange={setManualTeams}
+                  maxMembersPerTeam={maxPerTeam}
+                  disabled={loading}
+                />
+              </Box>
+            </>
           )}
 
           <Box>
