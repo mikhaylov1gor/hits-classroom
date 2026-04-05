@@ -1,15 +1,18 @@
 import type {
   Assignment,
-  AssignmentType,
+  AssignmentKind,
   Comment,
   CourseWithRole,
   FeedItem,
-  GroupSettings,
   InviteCode,
   Member,
   Post,
   Submission,
   SubmissionWithAssignment,
+  TeamDistributionType,
+  TeamGradingMode,
+  TeamSubmissionRule,
+  VoteTieBreak,
 } from '../model/types'
 
 const API_BASE = '/api/v1'
@@ -497,8 +500,18 @@ export type AssignmentPayload = {
   file_ids?: string[]
   deadline?: string
   max_grade?: number
-  assignment_type?: AssignmentType
-  group_settings?: GroupSettings
+  assignment_kind?: AssignmentKind
+  // Flat group fields (API 0.5.x)
+  desired_team_size?: number | null
+  team_distribution_type?: TeamDistributionType | null
+  team_count?: number | null
+  max_team_size?: number | null
+  team_submission_rule?: TeamSubmissionRule | null
+  vote_tie_break?: VoteTieBreak | null
+  allow_early_finalization?: boolean | null
+  team_grading_mode?: TeamGradingMode | null
+  peer_split_min_percent?: number | null
+  peer_split_max_percent?: number | null
 }
 
 export async function createAssignment(
@@ -517,11 +530,20 @@ export async function createAssignment(
   if (payload.deadline != null && payload.deadline !== '') {
     body.deadline = payload.deadline
   }
-  if (payload.assignment_type) {
-    body.assignment_type = payload.assignment_type
+  if (payload.assignment_kind) {
+    body.assignment_kind = payload.assignment_kind
   }
-  if (payload.assignment_type === 'group' && payload.group_settings) {
-    body.group_settings = payload.group_settings
+  if (payload.assignment_kind === 'group') {
+    if (payload.desired_team_size != null) body.desired_team_size = payload.desired_team_size
+    if (payload.team_distribution_type != null) body.team_distribution_type = payload.team_distribution_type
+    if (payload.team_count != null) body.team_count = payload.team_count
+    if (payload.max_team_size != null) body.max_team_size = payload.max_team_size
+    if (payload.team_submission_rule != null) body.team_submission_rule = payload.team_submission_rule
+    if (payload.vote_tie_break != null) body.vote_tie_break = payload.vote_tie_break
+    if (payload.allow_early_finalization != null) body.allow_early_finalization = payload.allow_early_finalization
+    if (payload.team_grading_mode != null) body.team_grading_mode = payload.team_grading_mode
+    if (payload.peer_split_min_percent != null) body.peer_split_min_percent = payload.peer_split_min_percent
+    if (payload.peer_split_max_percent != null) body.peer_split_max_percent = payload.peer_split_max_percent
   }
 
   const response = await fetch(`${API_BASE}/courses/${courseId}/assignments`, {
@@ -560,13 +582,20 @@ export async function updateAssignment(
   } else {
     body.deadline = null
   }
-  if (payload.assignment_type) {
-    body.assignment_type = payload.assignment_type
+  if (payload.assignment_kind) {
+    body.assignment_kind = payload.assignment_kind
   }
-  if (payload.assignment_type === 'group' && payload.group_settings) {
-    body.group_settings = payload.group_settings
-  } else if (payload.assignment_type === 'individual') {
-    body.group_settings = null
+  if (payload.assignment_kind === 'group') {
+    if (payload.desired_team_size != null) body.desired_team_size = payload.desired_team_size
+    if (payload.team_distribution_type != null) body.team_distribution_type = payload.team_distribution_type
+    if (payload.team_count != null) body.team_count = payload.team_count
+    if (payload.max_team_size != null) body.max_team_size = payload.max_team_size
+    if (payload.team_submission_rule != null) body.team_submission_rule = payload.team_submission_rule
+    if (payload.vote_tie_break != null) body.vote_tie_break = payload.vote_tie_break
+    if (payload.allow_early_finalization != null) body.allow_early_finalization = payload.allow_early_finalization
+    if (payload.team_grading_mode != null) body.team_grading_mode = payload.team_grading_mode
+    if (payload.peer_split_min_percent != null) body.peer_split_min_percent = payload.peer_split_min_percent
+    if (payload.peer_split_max_percent != null) body.peer_split_max_percent = payload.peer_split_max_percent
   }
 
   const response = await fetch(

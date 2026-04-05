@@ -18,12 +18,12 @@ import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
 import { createAssignment, uploadFiles } from '../../../api/coursesApi'
 import { isValidUrl } from '../../../utils/urlValidation'
-import type { AssignmentType } from '../../../model/types'
+import type { AssignmentKind } from '../../../model/types'
 import {
   GroupSettingsFields,
   DEFAULT_GROUP_SETTINGS,
   validateGroupSettings,
-  buildGroupSettings,
+  buildGroupFields,
 } from '../GroupSettingsFields/GroupSettingsFields'
 import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
 
@@ -49,7 +49,7 @@ export function CreateAssignmentDialog({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [assignmentType, setAssignmentType] = useState<AssignmentType>('individual')
+  const [assignmentKind, setAssignmentKind] = useState<AssignmentKind>('individual')
   const [groupSettings, setGroupSettings] = useState<GroupSettingsValue>(DEFAULT_GROUP_SETTINGS)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -62,7 +62,7 @@ export function CreateAssignmentDialog({
     setMaxGrade('100')
     setFiles([])
     setError(null)
-    setAssignmentType('individual')
+    setAssignmentKind('individual')
     setGroupSettings(DEFAULT_GROUP_SETTINGS)
   }
 
@@ -120,7 +120,7 @@ export function CreateAssignmentDialog({
       }
     }
 
-    if (assignmentType === 'group') {
+    if (assignmentKind === 'group') {
       const groupError = validateGroupSettings(groupSettings)
       if (groupError) {
         setError(groupError)
@@ -143,8 +143,8 @@ export function CreateAssignmentDialog({
         deadline: deadlineIso,
         max_grade: parsedMaxGrade,
         file_ids: fileIds,
-        assignment_type: assignmentType,
-        group_settings: assignmentType === 'group' ? buildGroupSettings(groupSettings) : undefined,
+        assignment_kind: assignmentKind,
+        ...(assignmentKind === 'group' ? buildGroupFields(groupSettings) : {}),
       })
       resetForm()
       onClose()
@@ -251,15 +251,15 @@ export function CreateAssignmentDialog({
             <Select
               labelId="assignment-type-label"
               label="Тип задания"
-              value={assignmentType}
-              onChange={(e) => setAssignmentType(e.target.value as AssignmentType)}
+              value={assignmentKind}
+              onChange={(e) => setAssignmentKind(e.target.value as AssignmentKind)}
             >
               <MenuItem value="individual">Индивидуальное</MenuItem>
               <MenuItem value="group">Групповое</MenuItem>
             </Select>
           </FormControl>
 
-          {assignmentType === 'group' && (
+          {assignmentKind === 'group' && (
             <GroupSettingsFields
               value={groupSettings}
               onChange={setGroupSettings}
