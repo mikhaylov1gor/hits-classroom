@@ -1,8 +1,10 @@
 import type {
   Assignment,
+  AssignmentType,
   Comment,
   CourseWithRole,
   FeedItem,
+  GroupSettings,
   InviteCode,
   Member,
   Post,
@@ -488,16 +490,20 @@ export async function getMySubmission(
   return (await response.json()) as Submission
 }
 
+export type AssignmentPayload = {
+  title: string
+  body?: string
+  links?: string[]
+  file_ids?: string[]
+  deadline?: string
+  max_grade?: number
+  assignment_type?: AssignmentType
+  group_settings?: GroupSettings
+}
+
 export async function createAssignment(
   courseId: string,
-  payload: {
-    title: string
-    body?: string
-    links?: string[]
-    file_ids?: string[]
-    deadline?: string
-    max_grade?: number
-  },
+  payload: AssignmentPayload,
 ): Promise<Assignment> {
   const body: Record<string, unknown> = {
     title: payload.title,
@@ -510,6 +516,12 @@ export async function createAssignment(
   }
   if (payload.deadline != null && payload.deadline !== '') {
     body.deadline = payload.deadline
+  }
+  if (payload.assignment_type) {
+    body.assignment_type = payload.assignment_type
+  }
+  if (payload.assignment_type === 'group' && payload.group_settings) {
+    body.group_settings = payload.group_settings
   }
 
   const response = await fetch(`${API_BASE}/courses/${courseId}/assignments`, {
@@ -525,6 +537,54 @@ export async function createAssignment(
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
   if (!response.ok) throw new Error('CREATE_ASSIGNMENT_FAILED')
+
+  return (await response.json()) as Assignment
+}
+
+export async function updateAssignment(
+  courseId: string,
+  assignmentId: string,
+  payload: AssignmentPayload,
+): Promise<Assignment> {
+  const body: Record<string, unknown> = {
+    title: payload.title,
+    body: payload.body,
+    links: payload.links,
+    max_grade: payload.max_grade,
+  }
+  if (payload.file_ids && payload.file_ids.length > 0) {
+    body.file_ids = payload.file_ids
+  }
+  if (payload.deadline != null && payload.deadline !== '') {
+    body.deadline = payload.deadline
+  } else {
+    body.deadline = null
+  }
+  if (payload.assignment_type) {
+    body.assignment_type = payload.assignment_type
+  }
+  if (payload.assignment_type === 'group' && payload.group_settings) {
+    body.group_settings = payload.group_settings
+  } else if (payload.assignment_type === 'individual') {
+    body.group_settings = null
+  }
+
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(body),
+    },
+  )
+
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('UPDATE_ASSIGNMENT_FAILED')
 
   return (await response.json()) as Assignment
 }

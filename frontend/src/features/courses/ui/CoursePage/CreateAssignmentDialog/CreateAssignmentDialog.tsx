@@ -6,7 +6,11 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
   IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
   TextField,
   Typography,
 } from '@mui/material'
@@ -14,6 +18,14 @@ import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
 import { createAssignment, uploadFiles } from '../../../api/coursesApi'
 import { isValidUrl } from '../../../utils/urlValidation'
+import type { AssignmentType } from '../../../model/types'
+import {
+  GroupSettingsFields,
+  DEFAULT_GROUP_SETTINGS,
+  validateGroupSettings,
+  buildGroupSettings,
+} from '../GroupSettingsFields/GroupSettingsFields'
+import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
 
 type CreateAssignmentDialogProps = {
   open: boolean
@@ -36,6 +48,10 @@ export function CreateAssignmentDialog({
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [assignmentType, setAssignmentType] = useState<AssignmentType>('individual')
+  const [groupSettings, setGroupSettings] = useState<GroupSettingsValue>(DEFAULT_GROUP_SETTINGS)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const resetForm = () => {
@@ -46,6 +62,8 @@ export function CreateAssignmentDialog({
     setMaxGrade('100')
     setFiles([])
     setError(null)
+    setAssignmentType('individual')
+    setGroupSettings(DEFAULT_GROUP_SETTINGS)
   }
 
   const handleClose = () => {
@@ -102,14 +120,22 @@ export function CreateAssignmentDialog({
       }
     }
 
+    if (assignmentType === 'group') {
+      const groupError = validateGroupSettings(groupSettings)
+      if (groupError) {
+        setError(groupError)
+        return
+      }
+    }
+
     setLoading(true)
     try {
       const fileIds = files.length > 0 ? await uploadFiles(files) : []
-      const trimmedDeadline = deadline.trim()
       const deadlineIso =
         trimmedDeadline && !isNaN(new Date(trimmedDeadline).getTime())
           ? new Date(trimmedDeadline).toISOString()
           : undefined
+
       await createAssignment(courseId, {
         title: trimmedTitle,
         body: trimmedContent,
@@ -117,16 +143,24 @@ export function CreateAssignmentDialog({
         deadline: deadlineIso,
         max_grade: parsedMaxGrade,
         file_ids: fileIds,
+        assignment_type: assignmentType,
+        group_settings: assignmentType === 'group' ? buildGroupSettings(groupSettings) : undefined,
       })
       resetForm()
       onClose()
       onCreated()
     } catch (err) {
-      setError(
-        err instanceof Error && err.message === 'FILE_TOO_LARGE'
-          ? 'Файл слишком большой'
-          : 'Не удалось создать задание',
-      )
+      if (err instanceof Error) {
+        if (err.message === 'FILE_TOO_LARGE') {
+          setError('Файл слишком большой')
+        } else if (err.message === 'FORBIDDEN') {
+          setError('Нет прав для создания задания')
+        } else {
+          setError('Не удалось создать задание')
+        }
+      } else {
+        setError('Не удалось создать задание')
+      }
     } finally {
       setLoading(false)
     }
@@ -197,9 +231,7 @@ export function CreateAssignmentDialog({
             InputLabelProps={{ shrink: true }}
             inputProps={{
               'aria-label': 'Дедлайн',
-              min: new Date(Date.now() + 60000)
-                .toISOString()
-                .slice(0, 16),
+              min: new Date(Date.now() + 60000).toISOString().slice(0, 16),
             }}
             helperText="Только дата в будущем"
           />
@@ -213,6 +245,28 @@ export function CreateAssignmentDialog({
             inputProps={{ min: 1, max: 1000, 'aria-label': 'Максимальный балл' }}
             helperText="1 = зачёт/незачёт, >1 = числовая шкала (по умолчанию 100)"
           />
+
+          <FormControl fullWidth size="small">
+            <InputLabel id="assignment-type-label">Тип задания</InputLabel>
+            <Select
+              labelId="assignment-type-label"
+              label="Тип задания"
+              value={assignmentType}
+              onChange={(e) => setAssignmentType(e.target.value as AssignmentType)}
+            >
+              <MenuItem value="individual">Индивидуальное</MenuItem>
+              <MenuItem value="group">Групповое</MenuItem>
+            </Select>
+          </FormControl>
+
+          {assignmentType === 'group' && (
+            <GroupSettingsFields
+              value={groupSettings}
+              onChange={setGroupSettings}
+              disabled={loading}
+            />
+          )}
+
           <Box>
             <input
               ref={fileInputRef}
@@ -253,6 +307,7 @@ export function CreateAssignmentDialog({
               </Box>
             )}
           </Box>
+
           {error && (
             <Typography variant="body2" color="error">
               {error}
