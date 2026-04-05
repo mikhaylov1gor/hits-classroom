@@ -20,12 +20,12 @@ import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
 import { getAssignment, updateAssignment, uploadFiles } from '../../../api/coursesApi'
 import { isValidUrl } from '../../../utils/urlValidation'
-import type { Assignment, AssignmentType } from '../../../model/types'
+import type { Assignment, AssignmentKind } from '../../../model/types'
 import {
   GroupSettingsFields,
   groupSettingsFromAssignment,
   validateGroupSettings,
-  buildGroupSettings,
+  buildGroupFields,
 } from '../GroupSettingsFields/GroupSettingsFields'
 import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
 
@@ -40,15 +40,16 @@ type EditAssignmentDialogProps = {
 /** Возвращает true, если изменились параметры, которые могут затронуть уже сформированные команды */
 function hasGroupSettingsChanged(
   original: Assignment,
-  newType: AssignmentType,
+  newType: AssignmentKind,
   newSettings: GroupSettingsValue,
 ): boolean {
-  if (original.assignment_type !== 'group') return false
+  if (original.assignment_kind !== 'group') return false
   if (newType !== 'group') return true
-  const prev = original.group_settings
-  if (!prev) return false
-  const newSize = parseInt(newSettings.teamSize, 10)
-  return prev.team_size !== newSize || prev.team_formation !== newSettings.teamFormation
+  const newSize = parseInt(newSettings.desiredTeamSize, 10)
+  return (
+    original.desired_team_size !== newSize ||
+    original.team_distribution_type !== newSettings.teamDistributionType
+  )
 }
 
 function isoToLocalDatetime(iso?: string | null): string {
@@ -82,7 +83,7 @@ export function EditAssignmentDialog({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [assignmentType, setAssignmentType] = useState<AssignmentType>('individual')
+  const [assignmentKind, setAssignmentKind] = useState<AssignmentKind>('individual')
   const [groupSettings, setGroupSettings] = useState<GroupSettingsValue>(
     groupSettingsFromAssignment(null),
   )
@@ -108,8 +109,16 @@ export function EditAssignmentDialog({
         setMaxGrade(String(a.max_grade ?? 100))
         setFiles([])
         setError(null)
-        setAssignmentType(a.assignment_type === 'group' ? 'group' : 'individual')
-        setGroupSettings(groupSettingsFromAssignment(a.group_settings))
+        // Если assignment_kind не вернулся — определяем по наличию групповых полей
+        const inferredKind: AssignmentKind =
+          a.assignment_kind === 'group' ||
+          a.desired_team_size != null ||
+          a.team_distribution_type != null ||
+          a.team_submission_rule != null
+            ? 'group'
+            : 'individual'
+        setAssignmentKind(inferredKind)
+        setGroupSettings(groupSettingsFromAssignment(a))
       })
       .catch(() => setLoadError('Не удалось загрузить задание'))
       .finally(() => setLoadingData(false))
@@ -146,9 +155,8 @@ export function EditAssignmentDialog({
         deadline: deadlineIso,
         max_grade: parseInt(maxGrade, 10),
         file_ids: fileIds,
-        assignment_type: assignmentType,
-        group_settings:
-          assignmentType === 'group' ? buildGroupSettings(groupSettings) : undefined,
+        assignment_kind: assignmentKind,
+        ...(assignmentKind === 'group' ? buildGroupFields(groupSettings) : {}),
       })
       onClose()
       onSaved()
@@ -214,7 +222,7 @@ export function EditAssignmentDialog({
       }
     }
 
-    if (assignmentType === 'group') {
+    if (assignmentKind === 'group') {
       const groupError = validateGroupSettings(groupSettings)
       if (groupError) {
         setError(groupError)
@@ -223,7 +231,7 @@ export function EditAssignmentDialog({
     }
 
     // Предупреждение, если меняются настройки, влияющие на существующие команды
-    if (original && hasGroupSettingsChanged(original, assignmentType, groupSettings)) {
+    if (original && hasGroupSettingsChanged(original, assignmentKind, groupSettings)) {
       setConfirmOpen(true)
       return
     }
@@ -324,15 +332,15 @@ export function EditAssignmentDialog({
                   <Select
                     labelId="edit-assignment-type-label"
                     label="Тип задания"
-                    value={assignmentType}
-                    onChange={(e) => setAssignmentType(e.target.value as AssignmentType)}
+                    value={assignmentKind}
+                    onChange={(e) => setAssignmentKind(e.target.value as AssignmentKind)}
                   >
                     <MenuItem value="individual">Индивидуальное</MenuItem>
                     <MenuItem value="group">Групповое</MenuItem>
                   </Select>
                 </FormControl>
 
-                {assignmentType === 'group' && (
+                {assignmentKind === 'group' && (
                   <GroupSettingsFields
                     value={groupSettings}
                     onChange={setGroupSettings}

@@ -263,7 +263,7 @@ export function AssignmentCard({
   const generalCount = countCommentsRecursively(getGeneralComments(commentsTree))
   const hasComments = generalCount > 0
   const canDelete = isTeacher
-  const isGroup = item.assignment_type === 'group'
+  const isGroup = item.assignment_kind === 'group'
 
   return (
     <Box className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

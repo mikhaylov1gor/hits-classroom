@@ -22,8 +22,7 @@ export type FeedItem = {
   author?: { first_name: string; last_name: string } | null
   attachments?: { id: string; name: string; type?: string; url?: string }[] | null
   file_ids?: string[]
-  assignment_type?: AssignmentType | null
-  group_settings?: GroupSettings | null
+  assignment_kind?: AssignmentKind | null
 }
 
 export type Post = {
@@ -274,30 +273,29 @@ export type InviteCode = {
   code: string
 }
 
-export type AssignmentType = 'individual' | 'group'
+export type AssignmentKind = 'individual' | 'group'
 
-export type TeamFormationMode =
-  | 'free_join'   // свободное вступление
-  | 'random'      // рандомное распределение
-  | 'by_score'    // распределение по баллам
-  | 'manual'      // ручное распределение
+export type TeamDistributionType =
+  | 'free'      // свободное вступление
+  | 'random'    // рандомное распределение
+  | 'balanced'  // распределение по баллам
+  | 'manual'    // ручное распределение
 
-export type SolutionRule =
-  | 'first'         // первое решение
-  | 'last'          // последнее решение
-  | 'top_scorer'    // решение участника с наивысшим баллом
-  | 'vote_equal'    // голосование (равные голоса)
-  | 'vote_weighted' // разделение (взвешенные голоса)
+export type TeamSubmissionRule =
+  | 'first_submission'  // первое решение
+  | 'last_submission'   // последнее решение
+  | 'top_student_only'  // решение участника с наивысшим баллом
+  | 'vote_equal'        // голосование (равные голоса)
+  | 'vote_weighted'     // голосование (взвешенные голоса)
 
-export type GroupSettings = {
-  team_size: number
-  team_formation: TeamFormationMode
-  solution_rule: SolutionRule
-  /** Минимальная доля голоса (%), только для vote_weighted */
-  min_vote_share?: number | null
-  /** Максимальная доля голоса (%), только для vote_weighted */
-  max_vote_share?: number | null
-}
+export type VoteTieBreak =
+  | 'random'                  // случайный выбор
+  | 'highest_author_average'  // победитель по среднему баллу автора
+
+export type TeamGradingMode =
+  | 'individual'      // обычная оценка по каждому ответу
+  | 'team_uniform'    // одна оценка протягивается всей команде
+  | 'team_peer_split' // студенты делят проценты, преподаватель — одну оценку
 
 export type Assignment = {
   id: string
@@ -311,8 +309,21 @@ export type Assignment = {
   created_at?: string
   user_id?: string | null
   author?: { first_name: string; last_name: string } | null
-  assignment_type?: AssignmentType | null
-  group_settings?: GroupSettings | null
+  // Тип задания
+  assignment_kind?: AssignmentKind | null
+  // Групповые поля (плоские, как возвращает API)
+  desired_team_size?: number | null
+  team_distribution_type?: TeamDistributionType | null
+  team_count?: number | null
+  max_team_size?: number | null
+  team_submission_rule?: TeamSubmissionRule | null
+  vote_tie_break?: VoteTieBreak | null
+  allow_early_finalization?: boolean | null
+  team_grading_mode?: TeamGradingMode | null
+  peer_split_min_percent?: number | null
+  peer_split_max_percent?: number | null
+  roster_locked_at?: string | null
+  deadline_auto_finalized_at?: string | null
 }
 
 export type SubmissionStatus = 'draft' | 'submitted' | 'returned'

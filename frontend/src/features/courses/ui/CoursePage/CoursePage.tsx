@@ -28,6 +28,7 @@ import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getCourse,
+  getAssignment,
   getInviteCode,
   regenerateInviteCode,
   getCourseFeed,
@@ -127,6 +128,32 @@ function formatDateTime(dateStr?: string): string {
 
 const TAB_PARAM = 'tab'
 
+/**
+ * Загружает фид и для каждого задания параллельно подтягивает полные данные,
+ * чтобы смержить assignment_kind (эндпоинт /feed его не возвращает).
+ */
+async function loadEnrichedFeed(courseId: string): Promise<FeedItem[]> {
+  const feedData = await getCourseFeed(courseId)
+  const assignmentItems = feedData.filter((f) => f.type === 'assignment')
+  if (assignmentItems.length === 0) return feedData
+
+  const details = await Promise.all(
+    assignmentItems.map((f) =>
+      getAssignment(courseId, f.id).catch(() => null),
+    ),
+  )
+  const kindMap: Record<string, FeedItem['assignment_kind']> = {}
+  details.forEach((a) => {
+    if (a) kindMap[a.id] = a.assignment_kind
+  })
+
+  return feedData.map((f) =>
+    f.type === 'assignment' && kindMap[f.id] != null
+      ? { ...f, assignment_kind: kindMap[f.id] }
+      : f,
+  )
+}
+
 export function CoursePage() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
@@ -208,7 +235,7 @@ export function CoursePage() {
 
     Promise.all([
       getCourse(courseId),
-      getCourseFeed(courseId),
+      loadEnrichedFeed(courseId),
       listCourseMembers(courseId),
     ])
       .then(([courseData, feedData, membersData]) => {
@@ -248,7 +275,7 @@ export function CoursePage() {
 
   const refreshFeed = () => {
     if (courseId && currentTabId !== 'settings' && currentTabId !== 'users') {
-      getCourseFeed(courseId).then(setFeed).catch(() => setFeed([]))
+      loadEnrichedFeed(courseId).then(setFeed).catch(() => setFeed([]))
     }
   }
 
@@ -287,7 +314,7 @@ export function CoursePage() {
         .then(setMembers)
         .catch(() => setMembers([]))
     } else {
-      getCourseFeed(courseId)
+      loadEnrichedFeed(courseId)
         .then(setFeed)
         .catch(() => setFeed([]))
     }
