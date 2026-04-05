@@ -22,6 +22,8 @@ export type FeedItem = {
   author?: { first_name: string; last_name: string } | null
   attachments?: { id: string; name: string; type?: string; url?: string }[] | null
   file_ids?: string[]
+  assignment_type?: AssignmentType | null
+  group_settings?: GroupSettings | null
 }
 
 export type Post = {
@@ -272,6 +274,31 @@ export type InviteCode = {
   code: string
 }
 
+export type AssignmentType = 'individual' | 'group'
+
+export type TeamFormationMode =
+  | 'free_join'   // свободное вступление
+  | 'random'      // рандомное распределение
+  | 'by_score'    // распределение по баллам
+  | 'manual'      // ручное распределение
+
+export type SolutionRule =
+  | 'first'         // первое решение
+  | 'last'          // последнее решение
+  | 'top_scorer'    // решение участника с наивысшим баллом
+  | 'vote_equal'    // голосование (равные голоса)
+  | 'vote_weighted' // разделение (взвешенные голоса)
+
+export type GroupSettings = {
+  team_size: number
+  team_formation: TeamFormationMode
+  solution_rule: SolutionRule
+  /** Минимальная доля голоса (%), только для vote_weighted */
+  min_vote_share?: number | null
+  /** Максимальная доля голоса (%), только для vote_weighted */
+  max_vote_share?: number | null
+}
+
 export type Assignment = {
   id: string
   course_id: string
@@ -284,6 +311,8 @@ export type Assignment = {
   created_at?: string
   user_id?: string | null
   author?: { first_name: string; last_name: string } | null
+  assignment_type?: AssignmentType | null
+  group_settings?: GroupSettings | null
 }
 
 export type SubmissionStatus = 'draft' | 'submitted' | 'returned'

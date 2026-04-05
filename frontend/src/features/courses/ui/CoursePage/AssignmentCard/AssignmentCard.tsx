@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -17,6 +18,8 @@ import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined'
 import ChatBubbleOutlineOutlinedIcon from '@mui/icons-material/ChatBubbleOutlineOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined'
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
+import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import ReplyOutlinedIcon from '@mui/icons-material/ReplyOutlined'
 import {
@@ -43,6 +46,7 @@ type AssignmentCardProps = {
   isTeacher?: boolean
   courseMembers?: Member[]
   onDeleted?: () => void
+  onEdit?: () => void
 }
 
 function formatDateTime(dateStr?: string): string {
@@ -190,6 +194,7 @@ export function AssignmentCard({
   isTeacher = false,
   courseMembers = [],
   onDeleted,
+  onEdit,
 }: AssignmentCardProps) {
   const { user: authUser } = useAuth()
   const [comments, setComments] = useState<Comment[]>([])
@@ -258,6 +263,7 @@ export function AssignmentCard({
   const generalCount = countCommentsRecursively(getGeneralComments(commentsTree))
   const hasComments = generalCount > 0
   const canDelete = isTeacher
+  const isGroup = item.assignment_type === 'group'
 
   return (
     <Box className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -292,9 +298,22 @@ export function AssignmentCard({
                 }}
                 aria-label={`Открыть задание ${item.title}`}
               >
-                <Typography variant="subtitle1" className="font-semibold text-slate-800 mb-0.5">
-                  Пользователь {authorName} добавил задание: {item.title}
-                </Typography>
+                <Box className="flex items-center gap-2 flex-wrap mb-0.5">
+                  <Typography variant="subtitle1" className="font-semibold text-slate-800">
+                    Пользователь {authorName} добавил задание: {item.title}
+                  </Typography>
+                  {isGroup && (
+                    <Chip
+                      icon={<GroupsOutlinedIcon sx={{ fontSize: 14 }} />}
+                      label="Групповое"
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                      sx={{ height: 20, fontSize: '0.7rem' }}
+                      aria-label="Групповое задание"
+                    />
+                  )}
+                </Box>
                 <Typography variant="caption" color="text.secondary">
                   {displayDate}
                   {item.deadline && ` · Дедлайн: ${formatDateTime(item.deadline)}`}
@@ -367,6 +386,17 @@ export function AssignmentCard({
           <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
           Копировать ссылку
         </MenuItem>
+        {isTeacher && onEdit && (
+          <MenuItem
+            onClick={() => {
+              setMenuAnchor(null)
+              onEdit()
+            }}
+          >
+            <EditOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
+            Редактировать
+          </MenuItem>
+        )}
         {canDelete && (
           <MenuItem
             onClick={() => {

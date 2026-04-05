@@ -45,6 +45,7 @@ import { useAuth } from '../../../auth/model/AuthContext'
 import { useCourses } from '../../model/CoursesContext'
 import { CourseBanner } from '../CourseHeader/CourseBanner'
 import { CreateAssignmentDialog } from './CreateAssignmentDialog/CreateAssignmentDialog'
+import { EditAssignmentDialog } from './EditAssignmentDialog/EditAssignmentDialog'
 import { CreateMaterialDialog } from './CreateMaterialDialog/CreateMaterialDialog'
 import { CreatePostDialog } from './CreatePostDialog/CreatePostDialog'
 import { AssignmentCard } from './AssignmentCard/AssignmentCard'
@@ -157,6 +158,7 @@ export function CoursePage() {
   const [createPostOpen, setCreatePostOpen] = useState(false)
   const [createAssignmentOpen, setCreateAssignmentOpen] = useState(false)
   const [createMaterialOpen, setCreateMaterialOpen] = useState(false)
+  const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null)
   const [inviteTeacherEmail, setInviteTeacherEmail] = useState('')
   const [inviteTeacherLoading, setInviteTeacherLoading] = useState(false)
   const [inviteTeacherError, setInviteTeacherError] = useState<string | null>(null)
@@ -692,6 +694,7 @@ export function CoursePage() {
                       isTeacher={isTeacher}
                       courseMembers={members}
                       onDeleted={refreshFeed}
+                      onEdit={isTeacher ? () => setEditAssignmentId(item.id) : undefined}
                     />
                   ))
                 )}
@@ -1147,6 +1150,13 @@ export function CoursePage() {
           onClose={() => setCreateAssignmentOpen(false)}
           courseId={courseId ?? ''}
           onCreated={refreshFeed}
+        />
+        <EditAssignmentDialog
+          open={Boolean(editAssignmentId)}
+          onClose={() => setEditAssignmentId(null)}
+          courseId={courseId ?? ''}
+          assignmentId={editAssignmentId ?? ''}
+          onSaved={refreshFeed}
         />
         <CreateMaterialDialog
           open={createMaterialOpen}

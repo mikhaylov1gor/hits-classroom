@@ -1,0 +1,441 @@
+import { useEffect, useRef, useState } from 'react'
+import {
+  Box,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
+  TextField,
+  Typography,
+} from '@mui/material'
+import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
+import CloseIcon from '@mui/icons-material/Close'
+import { getAssignment, updateAssignment, uploadFiles } from '../../../api/coursesApi'
+import { isValidUrl } from '../../../utils/urlValidation'
+import type { Assignment, AssignmentType } from '../../../model/types'
+import {
+  GroupSettingsFields,
+  groupSettingsFromAssignment,
+  validateGroupSettings,
+  buildGroupSettings,
+} from '../GroupSettingsFields/GroupSettingsFields'
+import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
+
+type EditAssignmentDialogProps = {
+  open: boolean
+  onClose: () => void
+  courseId: string
+  assignmentId: string
+  onSaved: () => void
+}
+
+/** Возвращает true, если изменились параметры, которые могут затронуть уже сформированные команды */
+function hasGroupSettingsChanged(
+  original: Assignment,
+  newType: AssignmentType,
+  newSettings: GroupSettingsValue,
+): boolean {
+  if (original.assignment_type !== 'group') return false
+  if (newType !== 'group') return true
+  const prev = original.group_settings
+  if (!prev) return false
+  const newSize = parseInt(newSettings.teamSize, 10)
+  return prev.team_size !== newSize || prev.team_formation !== newSettings.teamFormation
+}
+
+function isoToLocalDatetime(iso?: string | null): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    return d.toISOString().slice(0, 16)
+  } catch {
+    return ''
+  }
+}
+
+export function EditAssignmentDialog({
+  open,
+  onClose,
+  courseId,
+  assignmentId,
+  onSaved,
+}: EditAssignmentDialogProps) {
+  const [loadingData, setLoadingData] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [original, setOriginal] = useState<Assignment | null>(null)
+
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [links, setLinks] = useState('')
+  const [deadline, setDeadline] = useState('')
+  const [maxGrade, setMaxGrade] = useState<string>('100')
+  const [files, setFiles] = useState<File[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const [assignmentType, setAssignmentType] = useState<AssignmentType>('individual')
+  const [groupSettings, setGroupSettings] = useState<GroupSettingsValue>(
+    groupSettingsFromAssignment(null),
+  )
+
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Загружаем полные данные задания при каждом открытии
+  useEffect(() => {
+    if (!open || !assignmentId) return
+    setLoadingData(true)
+    setLoadError(null)
+    setOriginal(null)
+
+    getAssignment(courseId, assignmentId)
+      .then((a) => {
+        setOriginal(a)
+        setTitle(a.title)
+        setContent(a.body ?? '')
+        setLinks((a.links ?? []).join('\n'))
+        setDeadline(isoToLocalDatetime(a.deadline))
+        setMaxGrade(String(a.max_grade ?? 100))
+        setFiles([])
+        setError(null)
+        setAssignmentType(a.assignment_type === 'group' ? 'group' : 'individual')
+        setGroupSettings(groupSettingsFromAssignment(a.group_settings))
+      })
+      .catch(() => setLoadError('Не удалось загрузить задание'))
+      .finally(() => setLoadingData(false))
+  }, [open, courseId, assignmentId])
+
+  const handleClose = () => {
+    if (!loading) onClose()
+  }
+
+  const runSave = async () => {
+    if (!original) return
+    setLoading(true)
+    setError(null)
+    try {
+      const trimmedTitle = title.trim()
+      const trimmedContent = content.trim()
+      const trimmedDeadline = deadline.trim()
+
+      const fileIds = files.length > 0 ? await uploadFiles(files) : (original.file_ids ?? [])
+      const deadlineIso =
+        trimmedDeadline && !isNaN(new Date(trimmedDeadline).getTime())
+          ? new Date(trimmedDeadline).toISOString()
+          : undefined
+
+      const linkLines = links
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+
+      await updateAssignment(courseId, assignmentId, {
+        title: trimmedTitle,
+        body: trimmedContent,
+        links: linkLines.length > 0 ? linkLines : undefined,
+        deadline: deadlineIso,
+        max_grade: parseInt(maxGrade, 10),
+        file_ids: fileIds,
+        assignment_type: assignmentType,
+        group_settings:
+          assignmentType === 'group' ? buildGroupSettings(groupSettings) : undefined,
+      })
+      onClose()
+      onSaved()
+    } catch (err) {
+      if (err instanceof Error) {
+        if (err.message === 'FILE_TOO_LARGE') {
+          setError('Файл слишком большой')
+        } else if (err.message === 'FORBIDDEN') {
+          setError('Нет прав для редактирования задания')
+        } else if (err.message === 'NOT_FOUND') {
+          setError('Задание не найдено')
+        } else {
+          setError('Не удалось сохранить задание')
+        }
+      } else {
+        setError('Не удалось сохранить задание')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+
+    const trimmedTitle = title.trim()
+    const trimmedContent = content.trim()
+    if (!trimmedTitle) {
+      setError('Введите название задания')
+      return
+    }
+    if (!trimmedContent) {
+      setError('Введите описание задания')
+      return
+    }
+
+    const parsedMaxGrade = maxGrade.trim() ? parseInt(maxGrade, 10) : 100
+    if (isNaN(parsedMaxGrade) || parsedMaxGrade < 1 || parsedMaxGrade > 1000) {
+      setError('Максимальный балл должен быть от 1 до 1000')
+      return
+    }
+
+    const trimmedDeadline = deadline.trim()
+    if (trimmedDeadline) {
+      const deadlineDate = new Date(trimmedDeadline)
+      if (isNaN(deadlineDate.getTime())) {
+        setError('Некорректная дата дедлайна')
+        return
+      }
+    }
+
+    const linkLines = links
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    if (linkLines.length > 0) {
+      const invalidIndex = linkLines.findIndex((line) => !isValidUrl(line))
+      if (invalidIndex >= 0) {
+        setError(`Некорректная ссылка в строке ${invalidIndex + 1}: «${linkLines[invalidIndex]}»`)
+        return
+      }
+    }
+
+    if (assignmentType === 'group') {
+      const groupError = validateGroupSettings(groupSettings)
+      if (groupError) {
+        setError(groupError)
+        return
+      }
+    }
+
+    // Предупреждение, если меняются настройки, влияющие на существующие команды
+    if (original && hasGroupSettingsChanged(original, assignmentType, groupSettings)) {
+      setConfirmOpen(true)
+      return
+    }
+
+    await runSave()
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files
+    if (selected) {
+      setFiles((prev) => [...prev, ...Array.from(selected)])
+    }
+    e.target.value = ''
+  }
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  return (
+    <>
+      <Dialog
+        open={open}
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+        aria-labelledby="edit-assignment-dialog-title"
+      >
+        <DialogTitle id="edit-assignment-dialog-title">Редактировать задание</DialogTitle>
+        <Box component="form" onSubmit={handleSubmit} noValidate>
+          <DialogContent className="flex flex-col gap-4">
+            {loadingData ? (
+              <Box className="flex justify-center py-8">
+                <CircularProgress size={32} />
+              </Box>
+            ) : loadError ? (
+              <Typography variant="body2" color="error">
+                {loadError}
+              </Typography>
+            ) : (
+              <>
+                <TextField
+                  label="Название"
+                  required
+                  fullWidth
+                  size="small"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  autoFocus
+                  inputProps={{ 'aria-label': 'Название задания' }}
+                />
+                <TextField
+                  label="Описание"
+                  required
+                  fullWidth
+                  multiline
+                  minRows={4}
+                  size="small"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  inputProps={{ 'aria-label': 'Описание задания' }}
+                />
+                <TextField
+                  label="Ссылки (опционально, по одной на строку)"
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  size="small"
+                  value={links}
+                  onChange={(e) => setLinks(e.target.value)}
+                  placeholder="https://example.com"
+                  inputProps={{ 'aria-label': 'Ссылки' }}
+                />
+                <TextField
+                  label="Дедлайн"
+                  fullWidth
+                  size="small"
+                  type="datetime-local"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ 'aria-label': 'Дедлайн' }}
+                  helperText="Оставьте пустым, чтобы убрать дедлайн"
+                />
+                <TextField
+                  label="Максимальный балл"
+                  fullWidth
+                  size="small"
+                  type="number"
+                  value={maxGrade}
+                  onChange={(e) => setMaxGrade(e.target.value)}
+                  inputProps={{ min: 1, max: 1000, 'aria-label': 'Максимальный балл' }}
+                  helperText="1 = зачёт/незачёт, >1 = числовая шкала"
+                />
+
+                <FormControl fullWidth size="small">
+                  <InputLabel id="edit-assignment-type-label">Тип задания</InputLabel>
+                  <Select
+                    labelId="edit-assignment-type-label"
+                    label="Тип задания"
+                    value={assignmentType}
+                    onChange={(e) => setAssignmentType(e.target.value as AssignmentType)}
+                  >
+                    <MenuItem value="individual">Индивидуальное</MenuItem>
+                    <MenuItem value="group">Групповое</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {assignmentType === 'group' && (
+                  <GroupSettingsFields
+                    value={groupSettings}
+                    onChange={setGroupSettings}
+                    disabled={loading}
+                  />
+                )}
+
+                <Box>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileChange}
+                    aria-label="Прикрепить файлы"
+                  />
+                  <Button
+                    component="span"
+                    variant="outlined"
+                    size="small"
+                    startIcon={<AttachFileOutlinedIcon />}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Прикрепить файлы
+                  </Button>
+                  {files.length > 0 && (
+                    <Box className="mt-2 flex flex-wrap gap-2">
+                      {files.map((f, i) => (
+                        <Box
+                          key={`${f.name}-${i}`}
+                          className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm"
+                        >
+                          <Typography variant="body2" className="truncate max-w-[120px]">
+                            {f.name}
+                          </Typography>
+                          <IconButton
+                            size="small"
+                            aria-label={`Удалить ${f.name}`}
+                            onClick={() => removeFile(i)}
+                          >
+                            <CloseIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+
+                {error && (
+                  <Typography variant="body2" color="error">
+                    {error}
+                  </Typography>
+                )}
+              </>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleClose} disabled={loading}>
+              Отмена
+            </Button>
+            {!loadingData && !loadError && (
+              <Button type="submit" variant="contained" disabled={loading}>
+                {loading ? 'Сохранение…' : 'Сохранить'}
+              </Button>
+            )}
+          </DialogActions>
+        </Box>
+      </Dialog>
+
+      {/* Предупреждение при изменении настроек, затрагивающих существующие команды */}
+      <Dialog
+        open={confirmOpen}
+        onClose={() => !loading && setConfirmOpen(false)}
+        aria-labelledby="confirm-group-change-title"
+      >
+        <DialogTitle id="confirm-group-change-title">Изменение групповых настроек</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Вы изменили размер команды или способ формирования команд. Это может затронуть уже
+            сформированные команды: некоторые из них могут превысить новый лимит или стать
+            некорректными. Потребуется ручное вмешательство.
+          </DialogContentText>
+          <DialogContentText sx={{ mt: 1 }}>
+            Продолжить сохранение?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)} disabled={loading}>
+            Отмена
+          </Button>
+          <Button
+            color="warning"
+            variant="contained"
+            disabled={loading}
+            onClick={async () => {
+              setConfirmOpen(false)
+              await runSave()
+            }}
+          >
+            {loading ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  )
+}
