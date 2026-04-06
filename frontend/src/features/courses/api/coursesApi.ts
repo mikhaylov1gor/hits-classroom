@@ -1001,6 +1001,161 @@ export async function createMaterialComment(
 
 export const listComments = listAssignmentComments
 
+// ─── Teams API ────────────────────────────────────────────────────────────────
+
+async function parseApiError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: string; message?: string }
+    return body.error ?? body.message ?? 'Произошла ошибка'
+  } catch {
+    return 'Произошла ошибка'
+  }
+}
+
+export async function listTeams(
+  courseId: string,
+  assignmentId: string,
+): Promise<TeamWithMembers[]> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_TEAMS_FAILED')
+  return (await response.json()) as TeamWithMembers[]
+}
+
+export async function createTeam(
+  courseId: string,
+  assignmentId: string,
+  name?: string,
+): Promise<Team> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(name ? { name } : {}),
+    },
+  )
+  if (response.status === 400) throw new Error(await parseApiError(response))
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('CREATE_TEAM_FAILED')
+  return (await response.json()) as Team
+}
+
+export async function joinTeam(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/${teamId}/join`,
+    { method: 'POST', headers: getAuthHeaders() },
+  )
+  if (response.status === 400) throw new Error(await parseApiError(response))
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('JOIN_TEAM_FAILED')
+}
+
+export async function leaveTeam(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/leave`,
+    { method: 'POST', headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('LEAVE_TEAM_FAILED')
+}
+
+export async function saveTeams(
+  courseId: string,
+  assignmentId: string,
+  teams: { name: string; member_ids: string[] }[],
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/save`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ teams }),
+    },
+  )
+  if (response.status === 400) throw new Error(await parseApiError(response))
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('SAVE_TEAMS_FAILED')
+}
+
+export async function generateRandomTeams(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/generate-random`,
+    { method: 'POST', headers: getAuthHeaders() },
+  )
+  if (response.status === 400) throw new Error(await parseApiError(response))
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('GENERATE_RANDOM_FAILED')
+}
+
+export async function generateBalancedTeams(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/generate-balanced`,
+    { method: 'POST', headers: getAuthHeaders() },
+  )
+  if (response.status === 400) throw new Error(await parseApiError(response))
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('GENERATE_BALANCED_FAILED')
+}
+
+export async function lockRoster(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/lock-roster`,
+    { method: 'POST', headers: getAuthHeaders() },
+  )
+  if (response.status === 400) throw new Error(await parseApiError(response))
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('LOCK_ROSTER_FAILED')
+}
+
+export async function getTeamAudit(
+  courseId: string,
+  assignmentId: string,
+  params?: { team_id?: string; limit?: number; offset?: number },
+): Promise<TeamAuditEvent[]> {
+  const query = new URLSearchParams()
+  if (params?.team_id) query.set('team_id', params.team_id)
+  if (params?.limit != null) query.set('limit', String(params.limit))
+  if (params?.offset != null) query.set('offset', String(params.offset))
+  const qs = query.toString() ? `?${query.toString()}` : ''
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams/audit${qs}`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('FETCH_AUDIT_FAILED')
+  return (await response.json()) as TeamAuditEvent[]
+}
+
 export async function createComment(
   courseId: string,
   entityId: string,
