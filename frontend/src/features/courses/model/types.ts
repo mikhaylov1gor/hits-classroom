@@ -413,4 +413,44 @@ export type SubmissionWithAssignment = {
   }
 }
 
+export type TeamStatus =
+  | 'forming'
+  | 'roster_locked'
+  | 'voting_open'
+  | 'voting'
+  | 'submitted'
+  | 'graded'
+  | 'not_submitted'
+
+export type TeamMemberInfo = {
+  user_id: string
+  first_name: string
+  last_name: string
+  average_score: number
+}
+
+export type Team = {
+  id: string
+  assignment_id: string
+  creator_id: string
+  name: string
+  max_members: number
+  created_at: string
+}
+
+export type TeamWithMembers = Team & {
+  members: TeamMemberInfo[]
+  status: TeamStatus
+}
+
+export type TeamAuditEvent = {
+  id: string
+  assignment_id: string
+  team_id: string
+  actor_user_id: string
+  event_type: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
 
