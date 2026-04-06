@@ -701,7 +701,10 @@ export async function gradeSubmission(
     },
   )
 
-  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('NOT_FOUND')
