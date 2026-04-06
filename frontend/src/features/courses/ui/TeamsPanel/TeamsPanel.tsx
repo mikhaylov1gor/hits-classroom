@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  InputAdornment,
   LinearProgress,
   List,
   ListItem,
@@ -34,7 +35,9 @@ import HistoryIcon from '@mui/icons-material/History'
 import GavelIcon from '@mui/icons-material/Gavel'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
-import type { Assignment, Submission, TeamAuditEvent, TeamWithMembers } from '../../model/types'
+import SearchIcon from '@mui/icons-material/Search'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import type { Assignment, Member, Submission, TeamAuditEvent, TeamStatus, TeamWithMembers } from '../../model/types'
 import {
   finalizeVote,
   generateBalancedTeams,
@@ -42,9 +45,32 @@ import {
   getTeamAudit,
   gradeSubmission,
   gradeTeamPeerSplit,
+  listCourseMembers,
   listTeams,
   lockRoster,
 } from '../../api/coursesApi'
+import { useNavigate } from 'react-router-dom'
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  team_created: 'Команда создана',
+  created: 'Команда создана',
+  member_joined: 'Участник вступил в команду',
+  member_left: 'Участник покинул команду',
+  member_removed: 'Участник удалён из команды',
+  roster_locked: 'Состав закреплён',
+  submission_proposed: 'Предложено решение',
+  submission_created: 'Создано решение',
+  submission_attached: 'Решение прикреплено',
+  vote_cast: 'Голос отдан',
+  vote_finalized: 'Голосование завершено',
+  voting_started: 'Голосование открыто',
+  voting_open: 'Голосование открыто',
+  deadline_auto_finalized: 'Автофиксация по дедлайну',
+  deadline_finalized: 'Фиксация по дедлайну',
+  auto_finalized: 'Автоматическая фиксация',
+  graded: 'Выставлена оценка',
+  grade_updated: 'Оценка обновлена',
+}
 
 const STATUS_LABELS: Record<string, string> = {
   forming: 'Формирование',
@@ -68,6 +94,16 @@ const STATUS_COLORS: Record<
   graded: 'success',
   not_submitted: 'error',
 }
+
+const ALL_STATUSES: TeamStatus[] = [
+  'forming',
+  'roster_locked',
+  'voting_open',
+  'voting',
+  'submitted',
+  'graded',
+  'not_submitted',
+]
 
 function TeamStatusChip({ status }: { status: string }) {
   return (
@@ -95,16 +131,32 @@ function AuditDialog({
   onClose: () => void
 }) {
   const [events, setEvents] = useState<TeamAuditEvent[]>([])
+  const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!open) return
     setLoading(true)
-    getTeamAudit(courseId, assignmentId, { team_id: teamId, limit: 50 })
-      .then(setEvents)
-      .catch(() => setEvents([]))
+    Promise.all([
+      getTeamAudit(courseId, assignmentId, { team_id: teamId, limit: 50 }),
+      listCourseMembers(courseId),
+    ])
+      .then(([evs, mems]) => {
+        setEvents(evs)
+        setMembers(mems)
+      })
+      .catch(() => {
+        setEvents([])
+        setMembers([])
+      })
       .finally(() => setLoading(false))
   }, [open, courseId, assignmentId, teamId])
+
+  function resolveActorName(userId: string): string {
+    const m = members.find((x) => x.user_id === userId)
+    if (m) return `${m.first_name} ${m.last_name}`.trim()
+    return userId.slice(0, 8) + '…'
+  }
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -121,8 +173,8 @@ function AuditDialog({
             {events.map((ev) => (
               <ListItem key={ev.id} disableGutters>
                 <ListItemText
-                  primary={ev.event_type}
-                  secondary={new Date(ev.created_at).toLocaleString('ru')}
+                  primary={EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}
+                  secondary={`${resolveActorName(ev.actor_user_id)} · ${new Date(ev.created_at).toLocaleString('ru')}`}
                 />
               </ListItem>
             ))}
@@ -304,6 +356,37 @@ function TeamUniformGradeDialog({
   )
 }
 
+function FinalSolutionCell({ submission }: { submission: Submission | undefined }) {
+  if (!submission) return <Typography variant="body2" color="text.secondary">—</Typography>
+
+  const preview = submission.body?.trim()
+  const fileCount = submission.file_ids?.length ?? 0
+
+  if (preview) {
+    return (
+      <Tooltip title={preview}>
+        <Typography variant="body2" sx={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {preview.length > 40 ? preview.slice(0, 40) + '…' : preview}
+        </Typography>
+      </Tooltip>
+    )
+  }
+  if (fileCount > 0) {
+    return <Typography variant="body2" color="text.secondary">{fileCount} файл(ов)</Typography>
+  }
+  return <Typography variant="body2" color="text.secondary">Сдано</Typography>
+}
+
+function GradeCell({ submission, maxGrade }: { submission: Submission | undefined; maxGrade: number }) {
+  if (!submission) return <Typography variant="body2" color="text.secondary">—</Typography>
+  if (submission.grade == null) return <Typography variant="body2" color="text.secondary">Не выставлена</Typography>
+  return (
+    <Typography variant="body2" fontWeight={600} color="success.main">
+      {submission.grade}/{maxGrade}
+    </Typography>
+  )
+}
+
 function TeamRow({
   team,
   courseId,
@@ -321,6 +404,7 @@ function TeamRow({
   isDeadlinePassed: boolean
   onRefresh: () => void
 }) {
+  const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
   const [auditOpen, setAuditOpen] = useState(false)
   const [gradeOpen, setGradeOpen] = useState(false)
@@ -338,11 +422,13 @@ function TeamRow({
     assignment.team_submission_rule === 'vote_weighted'
   const isPeerSplit = assignment.team_grading_mode === 'team_peer_split'
   const isUniform = assignment.team_grading_mode === 'team_uniform'
-  const isIndividual = !assignment.team_grading_mode || assignment.team_grading_mode === 'individual'
+  const isIndividual = assignment.team_grading_mode === 'individual'
 
   const memberIds = new Set(team.members.map((m) => m.user_id))
   const teamSubmissions = submissions.filter((s) => memberIds.has(s.user_id))
   const attachedSubmission = teamSubmissions.find((s) => s.is_attached)
+
+  const participantNames = team.members.map((m) => m.last_name).join(', ')
 
   const handleFinalizeVote = async () => {
     setFinalizing(true)
@@ -391,19 +477,31 @@ function TeamRow({
             <IconButton size="small" onClick={() => setExpanded((v) => !v)}>
               {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
             </IconButton>
-            <Typography variant="body2" fontWeight={600}>
+            <Typography
+              variant="body2"
+              fontWeight={600}
+              sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline', color: 'primary.main' } }}
+              onClick={() => navigate(`/course/${courseId}/assignment/${assignmentId}/team/${team.id}`)}
+            >
               {team.name}
             </Typography>
           </Box>
         </TableCell>
         <TableCell>
+          <Tooltip title={team.members.map((m) => `${m.first_name} ${m.last_name}`).join(', ')} placement="top">
+            <Typography variant="body2" sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {participantNames || '—'}
+            </Typography>
+          </Tooltip>
+        </TableCell>
+        <TableCell>
           <TeamStatusChip status={team.status} />
         </TableCell>
         <TableCell>
-          {team.members.length} / {team.max_members}
+          <FinalSolutionCell submission={attachedSubmission} />
         </TableCell>
         <TableCell>
-          {teamSubmissions.filter((s) => s.is_attached).length} финальных
+          <GradeCell submission={attachedSubmission} maxGrade={assignment.max_grade ?? 100} />
         </TableCell>
         <TableCell>
           <Box className="flex gap-1">
@@ -455,6 +553,14 @@ function TeamRow({
                 <HistoryIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            <Tooltip title="Подробнее">
+              <IconButton
+                size="small"
+                onClick={() => navigate(`/course/${courseId}/assignment/${assignmentId}/team/${team.id}`)}
+              >
+                <OpenInNewIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
           {error && (
             <Typography variant="caption" color="error">
@@ -466,7 +572,7 @@ function TeamRow({
 
       {/* Expanded members */}
       <TableRow>
-        <TableCell colSpan={5} sx={{ p: 0, border: 'none' }}>
+        <TableCell colSpan={6} sx={{ p: 0, border: 'none' }}>
           <Collapse in={expanded} timeout="auto" unmountOnExit>
             <Box sx={{ px: 5, py: 1, bgcolor: 'grey.50' }}>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
@@ -618,6 +724,9 @@ export function TeamsPanel({
   const [actionLoading, setActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [searchText, setSearchText] = useState('')
+  const [statusFilter, setStatusFilter] = useState<TeamStatus | null>(null)
+
   const distributionType = assignment.team_distribution_type
   const rosterLocked = !!assignment.roster_locked_at
   const isDeadlinePassed = assignment.deadline
@@ -660,6 +769,21 @@ export function TeamsPanel({
       setActionLoading(false)
     }
   }
+
+  const filteredTeams = teams.filter((team) => {
+    if (statusFilter && team.status !== statusFilter) return false
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase()
+      const nameMatch = team.name.toLowerCase().includes(q)
+      const memberMatch = team.members.some(
+        (m) =>
+          m.last_name.toLowerCase().includes(q) ||
+          m.first_name.toLowerCase().includes(q),
+      )
+      if (!nameMatch && !memberMatch) return false
+    }
+    return true
+  })
 
   const stats = {
     total: teams.length,
@@ -731,6 +855,46 @@ export function TeamsPanel({
         )}
       </Box>
 
+      {/* Search and filter */}
+      <Box className="flex flex-wrap gap-2 items-center">
+        <TextField
+          size="small"
+          placeholder="Поиск по названию команды или фамилии"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          sx={{ minWidth: 280, flex: 1 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <Box className="flex gap-1 flex-wrap items-center">
+          <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+            Статус:
+          </Typography>
+          <Chip
+            size="small"
+            label="Все"
+            onClick={() => setStatusFilter(null)}
+            variant={statusFilter === null ? 'filled' : 'outlined'}
+            color={statusFilter === null ? 'primary' : 'default'}
+          />
+          {ALL_STATUSES.map((s) => (
+            <Chip
+              key={s}
+              size="small"
+              label={STATUS_LABELS[s] ?? s}
+              onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+              variant={statusFilter === s ? 'filled' : 'outlined'}
+              color={statusFilter === s ? (STATUS_COLORS[s] ?? 'default') : 'default'}
+            />
+          ))}
+        </Box>
+      </Box>
+
       {error && <Alert severity="error">{error}</Alert>}
 
       {needsDeadline && !isDeadlinePassed && assignment.deadline && (
@@ -751,20 +915,23 @@ export function TeamsPanel({
         <LinearProgress />
       ) : teams.length === 0 ? (
         <Alert severity="info">Команды ещё не созданы.</Alert>
+      ) : filteredTeams.length === 0 ? (
+        <Alert severity="info">Нет команд, соответствующих фильтру.</Alert>
       ) : (
         <TableContainer component={Paper} variant="outlined">
           <Table size="small">
             <TableHead>
               <TableRow>
-                <TableCell>Команда</TableCell>
-                <TableCell>Статус</TableCell>
+                <TableCell>Название</TableCell>
                 <TableCell>Участники</TableCell>
-                <TableCell>Сдачи</TableCell>
+                <TableCell>Статус</TableCell>
+                <TableCell>Финальное решение</TableCell>
+                <TableCell>Оценка</TableCell>
                 <TableCell>Действия</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {teams.map((team) => (
+              {filteredTeams.map((team) => (
                 <TeamRow
                   key={team.id}
                   team={team}

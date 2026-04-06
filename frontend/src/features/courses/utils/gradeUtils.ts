@@ -1,7 +1,7 @@
 /**
  * Форматирует оценку для отображения.
- * Если maxGrade === 1 — зачёт/незачёт.
- * Иначе — числовая шкала (X из Y).
+ * Если maxGrade === 1 - зачёт/незачёт.
+ * Иначе - числовая шкала (X из Y).
  */
 export function formatGradeDisplay(grade: number, maxGrade: number): string {
   if (maxGrade === 1) {

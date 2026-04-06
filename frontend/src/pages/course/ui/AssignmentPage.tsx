@@ -1972,6 +1972,10 @@ export function AssignmentPage() {
                       <Typography variant="body2" color="text.secondary">
                         Работа не сдана. Оценить можно только после сдачи.
                       </Typography>
+                    ) : assignment?.assignment_kind === 'group' && assignment?.team_grading_mode !== 'individual' ? (
+                      <Typography variant="body2" color="text.secondary">
+                        Оценивание выставляется на команду — используйте раздел «Команды» выше
+                      </Typography>
                     ) : (
                     <Box className="flex flex-wrap items-start gap-2">
                       {selectedSubmission.is_returned === true ? (

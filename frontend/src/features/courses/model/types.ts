@@ -295,7 +295,7 @@ export type VoteTieBreak =
 export type TeamGradingMode =
   | 'individual'      // обычная оценка по каждому ответу
   | 'team_uniform'    // одна оценка протягивается всей команде
-  | 'team_peer_split' // студенты делят проценты, преподаватель — одну оценку
+  | 'team_peer_split' // студенты делят проценты, преподаватель - одну оценку
 
 export type Assignment = {
   id: string
@@ -378,9 +378,9 @@ export type Submission = {
   grade: number | null
   grade_comment?: string | null
   status?: SubmissionStatus | null
-  /** false или отсутствует — черновик; true — сдача прикреплена к заданию */
+  /** false или отсутствует - черновик; true - сдача прикреплена к заданию */
   is_attached?: boolean | null
-  /** true — задание вернули на доработку */
+  /** true - задание вернули на доработку */
   is_returned?: boolean | null
   author?: { first_name: string; last_name: string } | null
 }

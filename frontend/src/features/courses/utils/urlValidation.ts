@@ -1,7 +1,7 @@
 /**
  * Регулярное выражение для валидации URL.
  * Поддерживает http/https, домены (в т.ч. localhost), IP, путь, query и fragment.
- * TLD (.com и т.д.) опционален — для localhost и IP-адресов.
+ * TLD (.com и т.д.) опционален - для localhost и IP-адресов.
  */
 const URL_REGEX =
   /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}(\.[a-zA-Z0-9()]{1,6}\b)?([-a-zA-Z0-9()@:%_+.~#?&/=]*)$/i
