@@ -987,28 +987,87 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		Title                  string   `json:"title"`
-		Body                   string   `json:"body"`
-		Links                  []string `json:"links"`
-		FileIDs                []string `json:"file_ids"`
-		Deadline               *string  `json:"deadline"`
-		MaxGrade               int      `json:"max_grade"`
-		AssignmentKind         string   `json:"assignment_kind"`
-		DesiredTeamSize        int      `json:"desired_team_size"`
-		TeamDistributionType   string   `json:"team_distribution_type"`
-		TeamCount              int      `json:"team_count"`
-		TeamSubmissionRule     string   `json:"team_submission_rule"`
-		VoteTieBreak           string   `json:"vote_tie_break"`
-		AllowEarlyFinalization *bool    `json:"allow_early_finalization"`
-		TeamGradingMode        string   `json:"team_grading_mode"`
-		PeerSplitMinPercent    float64  `json:"peer_split_min_percent"`
-		PeerSplitMaxPercent    float64  `json:"peer_split_max_percent"`
+		Title                     string   `json:"title"`
+		Body                      string   `json:"body"`
+		Links                     []string `json:"links"`
+		FileIDs                   []string `json:"file_ids"`
+		FileIDsCamel              []string `json:"fileIds"`
+		Deadline                  *string  `json:"deadline"`
+		MaxGrade                  int      `json:"max_grade"`
+		MaxGradeCamel             int      `json:"maxGrade"`
+		AssignmentKind            string   `json:"assignment_kind"`
+		AssignmentKindCamel       string   `json:"assignmentKind"`
+		DesiredTeamSize           int      `json:"desired_team_size"`
+		DesiredTeamSizeCamel      int      `json:"desiredTeamSize"`
+		TeamDistributionType      string   `json:"team_distribution_type"`
+		TeamDistributionCamel     string   `json:"teamDistributionType"`
+		TeamCount                 int      `json:"team_count"`
+		TeamCountCamel            int      `json:"teamCount"`
+		TeamSubmissionRule        string   `json:"team_submission_rule"`
+		TeamSubmissionCamel       string   `json:"teamSubmissionRule"`
+		VoteTieBreak              string   `json:"vote_tie_break"`
+		VoteTieBreakCamel         string   `json:"voteTieBreak"`
+		AllowEarlyFinalization    *bool    `json:"allow_early_finalization"`
+		AllowEarlyFinalizationCam *bool    `json:"allowEarlyFinalization"`
+		TeamGradingMode           string   `json:"team_grading_mode"`
+		TeamGradingModeCamel      string   `json:"teamGradingMode"`
+		PeerSplitMinPercent       *float64 `json:"peer_split_min_percent"`
+		PeerSplitMinCamel         *float64 `json:"peerSplitMinPercent"`
+		PeerSplitMaxPercent       *float64 `json:"peer_split_max_percent"`
+		PeerSplitMaxCamel         *float64 `json:"peerSplitMaxPercent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
 	}
+	pickStr := func(a, b string) string {
+		if a != "" {
+			return a
+		}
+		return b
+	}
+	pickInt := func(a, b int) int {
+		if a != 0 {
+			return a
+		}
+		return b
+	}
+	pickBoolPtr := func(a, b *bool) *bool {
+		if a != nil {
+			return a
+		}
+		return b
+	}
+	fileIDs := req.FileIDs
+	if len(fileIDs) == 0 {
+		fileIDs = req.FileIDsCamel
+	}
+	maxGrade := req.MaxGrade
+	if maxGrade == 0 && req.MaxGradeCamel > 0 {
+		maxGrade = req.MaxGradeCamel
+	}
+	assignmentKind := pickStr(req.AssignmentKind, req.AssignmentKindCamel)
+	desiredTeamSize := pickInt(req.DesiredTeamSize, req.DesiredTeamSizeCamel)
+	teamDistribution := pickStr(req.TeamDistributionType, req.TeamDistributionCamel)
+	teamCount := pickInt(req.TeamCount, req.TeamCountCamel)
+	teamSubmissionRule := pickStr(req.TeamSubmissionRule, req.TeamSubmissionCamel)
+	voteTieBreak := pickStr(req.VoteTieBreak, req.VoteTieBreakCamel)
+	allowEarly := pickBoolPtr(req.AllowEarlyFinalization, req.AllowEarlyFinalizationCam)
+	teamGradingMode := pickStr(req.TeamGradingMode, req.TeamGradingModeCamel)
+	peerMin := 0.0
+	if req.PeerSplitMinPercent != nil {
+		peerMin = *req.PeerSplitMinPercent
+	} else if req.PeerSplitMinCamel != nil {
+		peerMin = *req.PeerSplitMinCamel
+	}
+	peerMax := 0.0
+	if req.PeerSplitMaxPercent != nil {
+		peerMax = *req.PeerSplitMaxPercent
+	} else if req.PeerSplitMaxCamel != nil {
+		peerMax = *req.PeerSplitMaxCamel
+	}
+
 	var deadline *time.Time
 	if req.Deadline != nil && *req.Deadline != "" {
 		t, err := time.Parse("2006-01-02T15:04:05Z07:00", *req.Deadline)
@@ -1025,19 +1084,19 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		Title:                  req.Title,
 		Body:                   req.Body,
 		Links:                  req.Links,
-		FileIDs:                req.FileIDs,
+		FileIDs:                fileIDs,
 		Deadline:               deadline,
-		MaxGrade:               req.MaxGrade,
-		AssignmentKind:         domain.AssignmentKind(req.AssignmentKind),
-		DesiredTeamSize:        req.DesiredTeamSize,
-		TeamDistributionType:   domain.TeamDistributionType(req.TeamDistributionType),
-		TeamCount:              req.TeamCount,
-		TeamSubmissionRule:     domain.TeamSubmissionRule(req.TeamSubmissionRule),
-		VoteTieBreak:           domain.VoteTieBreak(req.VoteTieBreak),
-		AllowEarlyFinalization: req.AllowEarlyFinalization,
-		TeamGradingMode:        domain.TeamGradingMode(req.TeamGradingMode),
-		PeerSplitMinPercent:    req.PeerSplitMinPercent,
-		PeerSplitMaxPercent:    req.PeerSplitMaxPercent,
+		MaxGrade:               maxGrade,
+		AssignmentKind:         domain.AssignmentKind(assignmentKind),
+		DesiredTeamSize:        desiredTeamSize,
+		TeamDistributionType:   domain.TeamDistributionType(teamDistribution),
+		TeamCount:              teamCount,
+		TeamSubmissionRule:     domain.TeamSubmissionRule(teamSubmissionRule),
+		VoteTieBreak:           domain.VoteTieBreak(voteTieBreak),
+		AllowEarlyFinalization: allowEarly,
+		TeamGradingMode:        domain.TeamGradingMode(teamGradingMode),
+		PeerSplitMinPercent:    peerMin,
+		PeerSplitMaxPercent:    peerMax,
 	})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {

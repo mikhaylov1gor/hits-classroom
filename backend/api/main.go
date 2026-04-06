@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"hits-classroom/internal/repository/gormrepo"
@@ -22,6 +23,12 @@ func main() {
 	}
 	if err := gormrepo.AutoMigrate(db); err != nil {
 		log.Fatal(err)
+	}
+	if os.Getenv("SEED_DEMO_DATA") != "false" {
+		if err := gormrepo.SeedDemoData(db); err != nil {
+			log.Fatal(err)
+		}
+		log.Println("demo seed data loaded")
 	}
 	userRepo := gormrepo.NewUserRepository(db)
 	hasher := usecase.BcryptHasher{}
