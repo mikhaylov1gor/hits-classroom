@@ -9,9 +9,12 @@ import type {
   Post,
   Submission,
   SubmissionWithAssignment,
+  Team,
+  TeamAuditEvent,
   TeamDistributionType,
   TeamGradingMode,
   TeamSubmissionRule,
+  TeamWithMembers,
   VoteTieBreak,
 } from '../model/types'
 
@@ -1131,5 +1134,221 @@ export async function updateMemberRole(
   role: 'teacher' | 'owner',
 ): Promise<Member> {
   return changeMemberRole(courseId, userId, role)
+}
+
+// ─── Teams API ────────────────────────────────────────────────────────────────
+
+function teamsBase(courseId: string, assignmentId: string): string {
+  return `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/teams`
+}
+
+export async function listTeams(
+  courseId: string,
+  assignmentId: string,
+): Promise<TeamWithMembers[]> {
+  const response = await fetch(teamsBase(courseId, assignmentId), {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('FETCH_TEAMS_FAILED')
+  return (await response.json()) as TeamWithMembers[]
+}
+
+export async function createTeam(
+  courseId: string,
+  assignmentId: string,
+  name?: string,
+): Promise<Team> {
+  const response = await fetch(teamsBase(courseId, assignmentId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(name ? { name } : {}),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('CREATE_TEAM_FAILED')
+  return (await response.json()) as Team
+}
+
+export async function saveTeams(
+  courseId: string,
+  assignmentId: string,
+  teams: { name: string; member_ids: string[] }[],
+): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ teams }),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('SAVE_TEAMS_FAILED')
+}
+
+export async function generateRandomTeams(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/generate-random`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('GENERATE_TEAMS_FAILED')
+}
+
+export async function generateBalancedTeams(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/generate-balanced`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('GENERATE_TEAMS_FAILED')
+}
+
+export async function joinTeam(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/${teamId}/join`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('JOIN_TEAM_FAILED')
+}
+
+export async function leaveTeam(courseId: string, assignmentId: string): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/leave`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('LEAVE_TEAM_FAILED')
+}
+
+export async function voteForSubmission(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+  submissionId: string,
+): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/${teamId}/votes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ submission_id: submissionId }),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('VOTE_FAILED')
+}
+
+export async function finalizeVote(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+): Promise<Submission> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/${teamId}/finalize-vote`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('FINALIZE_VOTE_FAILED')
+  return (await response.json()) as Submission
+}
+
+export async function lockRoster(courseId: string, assignmentId: string): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/lock-roster`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('LOCK_ROSTER_FAILED')
+}
+
+export async function getTeamAudit(
+  courseId: string,
+  assignmentId: string,
+  params?: { team_id?: string; limit?: number; offset?: number },
+): Promise<TeamAuditEvent[]> {
+  const url = new URL(`${teamsBase(courseId, assignmentId)}/audit`, window.location.origin)
+  if (params?.team_id) url.searchParams.set('team_id', params.team_id)
+  if (params?.limit != null) url.searchParams.set('limit', String(params.limit))
+  if (params?.offset != null) url.searchParams.set('offset', String(params.offset))
+  const response = await fetch(url.toString(), { method: 'GET', headers: getAuthHeaders() })
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('FETCH_AUDIT_FAILED')
+  return (await response.json()) as TeamAuditEvent[]
+}
+
+export async function submitPeerGradeSplit(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+  percents: Record<string, number>,
+): Promise<void> {
+  const response = await fetch(
+    `${teamsBase(courseId, assignmentId)}/${teamId}/peer-grade-split`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ percents }),
+    },
+  )
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('PEER_GRADE_SPLIT_FAILED')
+}
+
+export async function gradeTeamPeerSplit(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+  payload: { grade: number; grade_comment?: string },
+): Promise<void> {
+  const response = await fetch(
+    `${teamsBase(courseId, assignmentId)}/${teamId}/grade-peer-split`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(payload),
+    },
+  )
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('GRADE_PEER_SPLIT_FAILED')
 }
 

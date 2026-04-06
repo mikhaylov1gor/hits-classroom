@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  Alert,
   Avatar,
   Box,
   Button,
@@ -85,6 +86,8 @@ import {
 import { SubmitAssignmentConfirmDialog } from '../../../features/courses/ui/SubmitAssignmentConfirmDialog/SubmitAssignmentConfirmDialog'
 import { ReturnSubmissionConfirmDialog } from '../../../features/courses/ui/ReturnSubmissionConfirmDialog/ReturnSubmissionConfirmDialog'
 import { FileAttachmentLink } from '../../../features/courses/ui/FileAttachmentLink/FileAttachmentLink'
+import { TeamBlock } from '../../../features/courses/ui/TeamBlock/TeamBlock'
+import { TeamsPanel } from '../../../features/courses/ui/TeamsPanel/TeamsPanel'
 
 const DRAFT_STORAGE_KEY = 'assignment-draft'
 
@@ -407,6 +410,8 @@ export function AssignmentPage() {
   const [showReturnConfirm, setShowReturnConfirm] = useState(false)
   const [draftSaving, setDraftSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const submitSectionRef = useRef<HTMLDivElement>(null)
+  const [canSubmit, setCanSubmit] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (!courseId || !assignmentId) {
@@ -1305,7 +1310,31 @@ export function AssignmentPage() {
 
         {!isTeacher && activeTab === 'instructions' && (
           <Box className="lg:w-80 shrink-0 flex flex-col gap-4">
-            <Box className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-4">
+            {/* TeamBlock: shown only for group assignments to students */}
+            {assignment?.assignment_kind === 'group' && courseId && assignmentId && authUser && (
+              <TeamBlock
+                courseId={courseId}
+                assignmentId={assignmentId}
+                assignment={assignment}
+                myUserId={authUser.id}
+                submissions={submissions}
+                onRefresh={() => {
+                  if (courseId && assignmentId) {
+                    getMySubmission(courseId, assignmentId).then((s) => {
+                      if (s) setSubmissions((prev) => {
+                        const without = prev.filter((x) => x.user_id !== authUser.id)
+                        return [...without, s]
+                      })
+                    }).catch(() => {})
+                  }
+                }}
+                onProposeClick={() =>
+                  submitSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+                }
+                onCanSubmitChange={(can) => setCanSubmit(can)}
+              />
+            )}
+            <Box ref={submitSectionRef} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-4">
               <Box className="flex items-center justify-between mb-4">
                 <Typography variant="h6" className="font-bold text-slate-900">
                   Мои задания
@@ -1374,6 +1403,10 @@ export function AssignmentPage() {
                     </Typography>
                   )}
                 </>
+              ) : assignment?.team_submission_rule === 'top_student_only' && canSubmit === false ? (
+                <Alert severity="info">
+                  Только участник с наивысшим баллом вашей команды может сдать финальное решение.
+                </Alert>
               ) : (
                 <Box component="form" onSubmit={handleSubmitAnswer} className="flex flex-col gap-2">
                   <input
@@ -1671,6 +1704,27 @@ export function AssignmentPage() {
           </Box>
         )}
       </Box>
+      )}
+
+      {activeTab === 'student-work' && isTeacher && (
+        <Box className="flex flex-col gap-4">
+          {/* TeamsPanel: shown only for group assignments */}
+          {assignment?.assignment_kind === 'group' && courseId && assignmentId && (
+            <TeamsPanel
+              courseId={courseId}
+              assignmentId={assignmentId}
+              assignment={assignment}
+              submissions={submissions}
+              onRefresh={() => {
+                if (courseId && assignmentId) {
+                  listSubmissions(courseId, assignmentId)
+                    .then(setSubmissions)
+                    .catch(() => {})
+                }
+              }}
+            />
+          )}
+        </Box>
       )}
 
       {activeTab === 'student-work' && isTeacher && (
