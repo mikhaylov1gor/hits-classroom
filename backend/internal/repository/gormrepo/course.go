@@ -3,6 +3,7 @@ package gormrepo
 import (
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -84,6 +85,12 @@ func NewCourseMemberRepository(db *gorm.DB) *CourseMemberRepository {
 }
 
 func (r *CourseMemberRepository) Create(member *domain.CourseMember) error {
+	if member.Status == "" {
+		member.Status = domain.MemberStatusApproved
+	}
+	if member.RequestedAt.IsZero() {
+		member.RequestedAt = time.Now().UTC()
+	}
 	return r.db.Create(toCourseMemberModel(member)).Error
 }
 
@@ -94,6 +101,10 @@ func (r *CourseMemberRepository) GetUserRole(courseID, userID string) (domain.Co
 			return "", nil
 		}
 		return "", err
+	}
+	// Students can access course features only after teacher approval.
+	if domain.CourseRole(m.Role) == domain.RoleStudent && domain.CourseMemberStatus(m.Status) != domain.MemberStatusApproved {
+		return "", nil
 	}
 	return domain.CourseRole(m.Role), nil
 }
@@ -118,6 +129,18 @@ func (r *CourseMemberRepository) Update(member *domain.CourseMember) error {
 func (r *CourseMemberRepository) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	var rows []courseMemberModel
 	if err := r.db.Where("course_id = ?", courseID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.CourseMember, 0, len(rows))
+	for i := range rows {
+		out = append(out, toCourseMemberDomain(&rows[i]))
+	}
+	return out, nil
+}
+
+func (r *CourseMemberRepository) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
+	var rows []courseMemberModel
+	if err := r.db.Where("course_id = ? AND status = ?", courseID, string(status)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*domain.CourseMember, 0, len(rows))
@@ -152,9 +175,14 @@ func toCourseMemberModel(m *domain.CourseMember) *courseMemberModel {
 		return nil
 	}
 	return &courseMemberModel{
-		CourseID: m.CourseID,
-		UserID:   m.UserID,
-		Role:     string(m.Role),
+		CourseID:     m.CourseID,
+		UserID:       m.UserID,
+		Role:         string(m.Role),
+		Status:       string(m.Status),
+		RequestedAt:  m.RequestedAt,
+		DecidedAt:    m.DecidedAt,
+		DecidedBy:    m.DecidedBy,
+		DecisionNote: m.DecisionNote,
 	}
 }
 
@@ -163,9 +191,14 @@ func toCourseMemberDomain(m *courseMemberModel) *domain.CourseMember {
 		return nil
 	}
 	return &domain.CourseMember{
-		CourseID: m.CourseID,
-		UserID:   m.UserID,
-		Role:     domain.CourseRole(m.Role),
+		CourseID:     m.CourseID,
+		UserID:       m.UserID,
+		Role:         domain.CourseRole(m.Role),
+		Status:       domain.CourseMemberStatus(m.Status),
+		RequestedAt:  m.RequestedAt,
+		DecidedAt:    m.DecidedAt,
+		DecidedBy:    m.DecidedBy,
+		DecisionNote: m.DecisionNote,
 	}
 }
 

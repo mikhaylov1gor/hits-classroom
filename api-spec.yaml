@@ -522,6 +522,84 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/join-requests:
+    get:
+      tags: [members]
+      summary: Список заявок на вступление с фильтром по статусу (owner/teacher)
+      operationId: listJoinRequests
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/CourseMemberStatus"
+          description: По умолчанию pending
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Member"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/join-requests/{userId}/{action}:
+    post:
+      tags: [members]
+      summary: Подтвердить или отклонить заявку на вступление (owner/teacher)
+      operationId: decideJoinRequest
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/UserId"
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [approve, reject]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinRequestDecisionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  status:
+                    $ref: "#/components/schemas/CourseMemberStatus"
+                  decided_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       tags: [members]
       summary: Назначить участника преподавателем (F-07). Только владелец.
@@ -1067,6 +1145,36 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [assignments]
+      summary: Обновление задания и групповых параметров (owner/teacher)
+      operationId: updateAssignment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssignmentRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       tags: [assignments]
       summary: Удаление задания (каскадно удаляет ответы и комментарии). Только owner/teacher.
@@ -1307,6 +1415,114 @@ paths:
           description: No Content
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/submissions:
+    get:
+      tags: [teams]
+      summary: Список решений команды для голосования со статистикой голосов и лайков
+      operationId: listTeamSubmissionsForVote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamSubmissionForVote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/submissions/{submissionId}/like:
+    post:
+      tags: [teams]
+      summary: Поставить/снять лайк на решении (toggle, student)
+      operationId: toggleTeamSubmissionLike
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  liked:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [teams]
+      summary: Поставить/снять лайк на решении (toggle, student)
+      operationId: toggleTeamSubmissionLikeDelete
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/AssignmentId"
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  liked:
+                    type: boolean
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2028,6 +2244,8 @@ components:
             role:
               type: string
               enum: [owner, teacher, student]
+            membership_status:
+              $ref: "#/components/schemas/CourseMemberStatus"
 
     InviteCode:
       type: object
@@ -2074,6 +2292,30 @@ components:
         role:
           type: string
           enum: [owner, teacher, student]
+        status:
+          $ref: "#/components/schemas/CourseMemberStatus"
+        requested_at:
+          type: string
+          format: date-time
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+        decided_by:
+          type: string
+          format: uuid
+        decision_note:
+          type: string
+
+    CourseMemberStatus:
+      type: string
+      enum: [pending, approved, rejected]
+
+    JoinRequestDecisionRequest:
+      type: object
+      properties:
+        note:
+          type: string
 
     AssignTeacherRequest:
       type: object
@@ -2561,6 +2803,28 @@ components:
         submission_id:
           type: string
           format: uuid
+
+    TeamSubmissionVoteStats:
+      type: object
+      properties:
+        submission_id:
+          type: string
+          format: uuid
+        vote_weight:
+          type: number
+          format: float
+        vote_count:
+          type: integer
+        like_count:
+          type: integer
+
+    TeamSubmissionForVote:
+      type: object
+      properties:
+        submission:
+          $ref: "#/components/schemas/Submission"
+        stats:
+          $ref: "#/components/schemas/TeamSubmissionVoteStats"
 
     # ── Comments ──────────────────────────────────────────────────────────────
 

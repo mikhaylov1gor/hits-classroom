@@ -38,9 +38,9 @@ const (
 type TeamGradingMode string
 
 const (
-	TeamGradingIndividual   TeamGradingMode = "individual"
-	TeamGradingTeamUniform  TeamGradingMode = "team_uniform"
-	TeamGradingPeerSplit    TeamGradingMode = "team_peer_split"
+	TeamGradingIndividual  TeamGradingMode = "individual"
+	TeamGradingTeamUniform TeamGradingMode = "team_uniform"
+	TeamGradingPeerSplit   TeamGradingMode = "team_peer_split"
 )
 
 // IsGroup returns true for group assignments (explicit kind or legacy team_count > 0).
@@ -79,28 +79,28 @@ type Material struct {
 }
 
 type Assignment struct {
-	ID                       string
-	CourseID                 string
-	Title                    string
-	Body                     string
-	Links                    []string
-	FileIDs                  []string
-	Deadline                 *time.Time
-	MaxGrade                 int
-	AssignmentKind           AssignmentKind
-	DesiredTeamSize          int
-	TeamDistributionType     TeamDistributionType
-	TeamCount                int
-	MaxTeamSize              int
-	TeamSubmissionRule       TeamSubmissionRule
-	VoteTieBreak             VoteTieBreak
-	AllowEarlyFinalization   bool
-	TeamGradingMode          TeamGradingMode
-	PeerSplitMinPercent      float64
-	PeerSplitMaxPercent      float64
-	RosterLockedAt           *time.Time
-	DeadlineAutoFinalizedAt  *time.Time
-	CreatedAt                time.Time
+	ID                      string
+	CourseID                string
+	Title                   string
+	Body                    string
+	Links                   []string
+	FileIDs                 []string
+	Deadline                *time.Time
+	MaxGrade                int
+	AssignmentKind          AssignmentKind
+	DesiredTeamSize         int
+	TeamDistributionType    TeamDistributionType
+	TeamCount               int
+	MaxTeamSize             int
+	TeamSubmissionRule      TeamSubmissionRule
+	VoteTieBreak            VoteTieBreak
+	AllowEarlyFinalization  bool
+	TeamGradingMode         TeamGradingMode
+	PeerSplitMinPercent     float64
+	PeerSplitMaxPercent     float64
+	RosterLockedAt          *time.Time
+	DeadlineAutoFinalizedAt *time.Time
+	CreatedAt               time.Time
 }
 
 type Submission struct {
@@ -166,6 +166,15 @@ type TeamSubmissionVote struct {
 	CreatedAt    time.Time
 }
 
+type TeamSubmissionLike struct {
+	ID           string
+	AssignmentID string
+	TeamID       string
+	SubmissionID string
+	UserID       string
+	CreatedAt    time.Time
+}
+
 // TeamPeerGradeAllocation splits 100% of a team grade among members (team_peer_split mode).
 type TeamPeerGradeAllocation struct {
 	ID           string
@@ -179,14 +188,15 @@ type TeamPeerGradeAllocation struct {
 type TeamAuditEventType string
 
 const (
-	TeamAuditRosterChanged          TeamAuditEventType = "roster_changed"
-	TeamAuditVoteCast             TeamAuditEventType = "vote_cast"
-	TeamAuditVoteFinalized        TeamAuditEventType = "vote_finalized"
-	TeamAuditSubmissionAttached   TeamAuditEventType = "submission_attached"
-	TeamAuditDeadlineAutoFinal    TeamAuditEventType = "deadline_auto_finalized"
-	TeamAuditGradeApplied         TeamAuditEventType = "grade_applied"
-	TeamAuditRosterLocked         TeamAuditEventType = "roster_locked"
-	TeamAuditPeerSplitSubmitted   TeamAuditEventType = "peer_split_submitted"
+	TeamAuditRosterChanged      TeamAuditEventType = "roster_changed"
+	TeamAuditVoteCast           TeamAuditEventType = "vote_cast"
+	TeamAuditVoteFinalized      TeamAuditEventType = "vote_finalized"
+	TeamAuditSubmissionAttached TeamAuditEventType = "submission_attached"
+	TeamAuditDeadlineAutoFinal  TeamAuditEventType = "deadline_auto_finalized"
+	TeamAuditGradeApplied       TeamAuditEventType = "grade_applied"
+	TeamAuditRosterLocked       TeamAuditEventType = "roster_locked"
+	TeamAuditPeerSplitSubmitted TeamAuditEventType = "peer_split_submitted"
+	TeamAuditSubmissionLiked    TeamAuditEventType = "submission_liked"
 )
 
 type TeamAuditEvent struct {

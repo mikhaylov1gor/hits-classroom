@@ -29,6 +29,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&teamModel{},
 		&teamMemberModel{},
 		&teamSubmissionVoteModel{},
+		&teamSubmissionLikeModel{},
 		&teamPeerGradeModel{},
 		&teamAuditModel{},
 	)

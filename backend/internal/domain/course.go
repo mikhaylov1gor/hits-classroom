@@ -17,8 +17,21 @@ const (
 	RoleStudent CourseRole = "student"
 )
 
+type CourseMemberStatus string
+
+const (
+	MemberStatusPending  CourseMemberStatus = "pending"
+	MemberStatusApproved CourseMemberStatus = "approved"
+	MemberStatusRejected CourseMemberStatus = "rejected"
+)
+
 type CourseMember struct {
-	CourseID string
-	UserID   string
-	Role     CourseRole
+	CourseID     string
+	UserID       string
+	Role         CourseRole
+	Status       CourseMemberStatus
+	RequestedAt  time.Time
+	DecidedAt    *time.Time
+	DecidedBy    string
+	DecisionNote string
 }

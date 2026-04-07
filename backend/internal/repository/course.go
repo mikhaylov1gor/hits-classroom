@@ -16,6 +16,7 @@ type CourseMemberRepository interface {
 	Get(courseID, userID string) (*domain.CourseMember, error)
 	Update(member *domain.CourseMember) error
 	ListByCourse(courseID string) ([]*domain.CourseMember, error)
+	ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error)
 	ListByUser(userID string) ([]*domain.CourseMember, error)
 	DeleteByCourse(courseID string) error
 	Delete(courseID, userID string) error

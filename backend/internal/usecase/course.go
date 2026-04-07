@@ -74,9 +74,11 @@ func (uc *CreateCourse) CreateCourse(in CreateCourseInput) (*domain.Course, erro
 		return nil, err
 	}
 	member := &domain.CourseMember{
-		CourseID: course.ID,
-		UserID:   in.OwnerID,
-		Role:     domain.RoleOwner,
+		CourseID:    course.ID,
+		UserID:      in.OwnerID,
+		Role:        domain.RoleOwner,
+		Status:      domain.MemberStatusApproved,
+		RequestedAt: time.Now().UTC(),
 	}
 	if err := uc.memberRepo.Create(member); err != nil {
 		return nil, err
@@ -110,17 +112,30 @@ func (uc *JoinCourse) JoinCourse(in JoinCourseInput) (*domain.Course, domain.Cou
 	if course == nil {
 		return nil, "", ErrCourseNotFound
 	}
-	role, err := uc.memberRepo.GetUserRole(course.ID, in.UserID)
+	member, err := uc.memberRepo.Get(course.ID, in.UserID)
 	if err != nil {
 		return nil, "", err
 	}
-	if role != "" {
-		return nil, "", ErrAlreadyMember
+	if member != nil {
+		if member.Role != domain.RoleStudent || member.Status == domain.MemberStatusApproved {
+			return nil, "", ErrAlreadyMember
+		}
+		member.Status = domain.MemberStatusPending
+		member.RequestedAt = time.Now().UTC()
+		member.DecidedAt = nil
+		member.DecidedBy = ""
+		member.DecisionNote = ""
+		if err := uc.memberRepo.Update(member); err != nil {
+			return nil, "", err
+		}
+		return course, domain.RoleStudent, nil
 	}
-	member := &domain.CourseMember{
-		CourseID: course.ID,
-		UserID:   in.UserID,
-		Role:     domain.RoleStudent,
+	member = &domain.CourseMember{
+		CourseID:    course.ID,
+		UserID:      in.UserID,
+		Role:        domain.RoleStudent,
+		Status:      domain.MemberStatusPending,
+		RequestedAt: time.Now().UTC(),
 	}
 	if err := uc.memberRepo.Create(member); err != nil {
 		return nil, "", err
@@ -279,11 +294,16 @@ func (uc *UpdateCourse) UpdateCourse(in UpdateCourseInput) (*domain.Course, erro
 }
 
 type MemberWithUser struct {
-	UserID    string
-	Email     string
-	FirstName string
-	LastName  string
-	Role      domain.CourseRole
+	UserID       string
+	Email        string
+	FirstName    string
+	LastName     string
+	Role         domain.CourseRole
+	Status       domain.CourseMemberStatus
+	RequestedAt  time.Time
+	DecidedAt    *time.Time
+	DecidedBy    string
+	DecisionNote string
 }
 
 type ListCourseMembers struct {
@@ -312,11 +332,103 @@ func (uc *ListCourseMembers) ListCourseMembers(courseID, userID string) ([]Membe
 			email, firstName, lastName = u.Email, u.FirstName, u.LastName
 		}
 		out = append(out, MemberWithUser{
-			UserID:    m.UserID,
-			Email:     email,
-			FirstName: firstName,
-			LastName:  lastName,
-			Role:      m.Role,
+			UserID:       m.UserID,
+			Email:        email,
+			FirstName:    firstName,
+			LastName:     lastName,
+			Role:         m.Role,
+			Status:       m.Status,
+			RequestedAt:  m.RequestedAt,
+			DecidedAt:    m.DecidedAt,
+			DecidedBy:    m.DecidedBy,
+			DecisionNote: m.DecisionNote,
+		})
+	}
+	return out, nil
+}
+
+type DecideJoinRequestInput struct {
+	CourseID  string
+	TeacherID string
+	UserID    string
+	Approve   bool
+	Note      string
+}
+
+type DecideJoinRequest struct {
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewDecideJoinRequest(memberRepo repository.CourseMemberRepository) *DecideJoinRequest {
+	return &DecideJoinRequest{memberRepo: memberRepo}
+}
+
+func (uc *DecideJoinRequest) Decide(in DecideJoinRequestInput) (*domain.CourseMember, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.TeacherID)
+	if err != nil || (role != domain.RoleOwner && role != domain.RoleTeacher) {
+		return nil, ErrForbidden
+	}
+	member, err := uc.memberRepo.Get(in.CourseID, in.UserID)
+	if err != nil || member == nil {
+		return nil, ErrCourseNotFound
+	}
+	if member.Role != domain.RoleStudent {
+		return nil, &ValidationError{Message: "only student requests can be decided"}
+	}
+	if member.Status != domain.MemberStatusPending {
+		return nil, &ValidationError{Message: "request is already decided"}
+	}
+	now := time.Now().UTC()
+	if in.Approve {
+		member.Status = domain.MemberStatusApproved
+	} else {
+		member.Status = domain.MemberStatusRejected
+	}
+	member.DecidedAt = &now
+	member.DecidedBy = in.TeacherID
+	member.DecisionNote = strings.TrimSpace(in.Note)
+	if err := uc.memberRepo.Update(member); err != nil {
+		return nil, err
+	}
+	return member, nil
+}
+
+type ListJoinRequests struct {
+	memberRepo repository.CourseMemberRepository
+	userRepo   repository.UserRepository
+}
+
+func NewListJoinRequests(memberRepo repository.CourseMemberRepository, userRepo repository.UserRepository) *ListJoinRequests {
+	return &ListJoinRequests{memberRepo: memberRepo, userRepo: userRepo}
+}
+
+func (uc *ListJoinRequests) List(courseID, teacherID string, status domain.CourseMemberStatus) ([]MemberWithUser, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, teacherID)
+	if err != nil || (role != domain.RoleOwner && role != domain.RoleTeacher) {
+		return nil, ErrForbidden
+	}
+	rows, err := uc.memberRepo.ListByCourseAndStatus(courseID, status)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MemberWithUser, 0, len(rows))
+	for _, m := range rows {
+		u, _ := uc.userRepo.GetByID(m.UserID)
+		email, firstName, lastName := "", "", ""
+		if u != nil {
+			email, firstName, lastName = u.Email, u.FirstName, u.LastName
+		}
+		out = append(out, MemberWithUser{
+			UserID:       m.UserID,
+			Email:        email,
+			FirstName:    firstName,
+			LastName:     lastName,
+			Role:         m.Role,
+			Status:       m.Status,
+			RequestedAt:  m.RequestedAt,
+			DecidedAt:    m.DecidedAt,
+			DecidedBy:    m.DecidedBy,
+			DecisionNote: m.DecisionNote,
 		})
 	}
 	return out, nil
@@ -346,6 +458,7 @@ func (uc *AssignTeacher) AssignTeacher(in AssignTeacherInput) error {
 		return ErrCourseNotFound
 	}
 	member.Role = domain.RoleTeacher
+	member.Status = domain.MemberStatusApproved
 	return uc.memberRepo.Update(member)
 }
 
@@ -409,6 +522,7 @@ func (uc *InviteTeacher) InviteTeacher(in InviteTeacherInput) (*domain.CourseMem
 		case domain.RoleStudent:
 			// Обновляем роль студента до учителя
 			existing.Role = domain.RoleTeacher
+			existing.Status = domain.MemberStatusApproved
 			if err := uc.memberRepo.Update(existing); err != nil {
 				return nil, err
 			}
@@ -418,9 +532,11 @@ func (uc *InviteTeacher) InviteTeacher(in InviteTeacherInput) (*domain.CourseMem
 
 	// Пользователь не в курсе — добавляем сразу как учителя
 	member := &domain.CourseMember{
-		CourseID: in.CourseID,
-		UserID:   target.ID,
-		Role:     domain.RoleTeacher,
+		CourseID:    in.CourseID,
+		UserID:      target.ID,
+		Role:        domain.RoleTeacher,
+		Status:      domain.MemberStatusApproved,
+		RequestedAt: time.Now().UTC(),
 	}
 	if err := uc.memberRepo.Create(member); err != nil {
 		return nil, err

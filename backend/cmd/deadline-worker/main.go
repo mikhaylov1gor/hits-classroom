@@ -21,11 +21,12 @@ func main() {
 	teamMemberRepo := gormrepo.NewTeamMemberRepository(db)
 	submissionRepo := gormrepo.NewSubmissionRepository(db)
 	teamVoteRepo := gormrepo.NewTeamVoteRepository(db)
+	teamLikeRepo := gormrepo.NewTeamSubmissionLikeRepository(db)
 	teamAuditRepo := gormrepo.NewTeamAuditRepository(db)
 	memberRepo := gormrepo.NewCourseMemberRepository(db)
 
 	finalizeVote := usecase.NewFinalizeTeamVoteSubmission(
-		memberRepo, assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, teamVoteRepo, teamAuditRepo,
+		memberRepo, assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, teamVoteRepo, teamLikeRepo, teamAuditRepo,
 	)
 	auto := usecase.NewAutoFinalizeDeadline(
 		assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, finalizeVote, teamAuditRepo,

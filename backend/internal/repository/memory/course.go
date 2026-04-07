@@ -2,6 +2,7 @@ package memory
 
 import (
 	"sync"
+	"time"
 
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
@@ -75,6 +76,12 @@ func NewCourseMemberRepository() *CourseMemberRepository {
 func (r *CourseMemberRepository) Create(m *domain.CourseMember) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if m.Status == "" {
+		m.Status = domain.MemberStatusApproved
+	}
+	if m.RequestedAt.IsZero() {
+		m.RequestedAt = time.Now().UTC()
+	}
 	r.members = append(r.members, m)
 	return nil
 }
@@ -84,6 +91,9 @@ func (r *CourseMemberRepository) GetUserRole(courseID, userID string) (domain.Co
 	defer r.mu.RUnlock()
 	for _, m := range r.members {
 		if m.CourseID == courseID && m.UserID == userID {
+			if m.Role == domain.RoleStudent && m.Status != domain.MemberStatusApproved {
+				return "", nil
+			}
 			return m.Role, nil
 		}
 	}
@@ -119,6 +129,18 @@ func (r *CourseMemberRepository) ListByCourse(courseID string) ([]*domain.Course
 	var out []*domain.CourseMember
 	for _, m := range r.members {
 		if m.CourseID == courseID {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (r *CourseMemberRepository) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []*domain.CourseMember
+	for _, m := range r.members {
+		if m.CourseID == courseID && m.Status == status {
 			out = append(out, m)
 		}
 	}

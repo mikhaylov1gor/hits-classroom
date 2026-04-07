@@ -70,6 +70,32 @@ func TestJoinCourse_Success(t *testing.T) {
 	if len(memberRepo.members) != 1 || memberRepo.members[0].UserID != "user-1" || memberRepo.members[0].Role != domain.RoleStudent {
 		t.Errorf("members = %+v", memberRepo.members)
 	}
+	if memberRepo.members[0].Status != domain.MemberStatusPending {
+		t.Errorf("status = %s, want pending", memberRepo.members[0].Status)
+	}
+}
+
+func TestDecideJoinRequest_Approve(t *testing.T) {
+	memberRepo := &stubCourseMemberRepo{
+		members: []*domain.CourseMember{
+			{
+				CourseID: "c1", UserID: "teacher-1", Role: domain.RoleTeacher, Status: domain.MemberStatusApproved,
+			},
+			{
+				CourseID: "c1", UserID: "student-1", Role: domain.RoleStudent, Status: domain.MemberStatusPending,
+			},
+		},
+	}
+	uc := NewDecideJoinRequest(memberRepo)
+	m, err := uc.Decide(DecideJoinRequestInput{
+		CourseID: "c1", TeacherID: "teacher-1", UserID: "student-1", Approve: true,
+	})
+	if err != nil {
+		t.Fatalf("Decide() err = %v", err)
+	}
+	if m.Status != domain.MemberStatusApproved {
+		t.Fatalf("status = %s, want approved", m.Status)
+	}
 }
 
 func TestJoinCourse_AlreadyMember(t *testing.T) {
@@ -412,6 +438,9 @@ func (s *stubCourseMemberRepo) Update(m *domain.CourseMember) error {
 func (s *stubCourseMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
+func (s *stubCourseMemberRepo) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
+	return nil, nil
+}
 func (s *stubCourseMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
@@ -469,6 +498,9 @@ func (s *stubJoinMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubJoinMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
+func (s *stubJoinMemberRepo) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
+	return nil, nil
+}
 func (s *stubJoinMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
@@ -502,6 +534,9 @@ func (s *stubListMemberRepo) Get(courseID, userID string) (*domain.CourseMember,
 }
 func (s *stubListMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubListMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubListMemberRepo) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
 func (s *stubListMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
@@ -539,6 +574,9 @@ func (s *stubGetCourseMemberRepo) Update(m *domain.CourseMember) error { return 
 func (s *stubGetCourseMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
+func (s *stubGetCourseMemberRepo) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
+	return nil, nil
+}
 func (s *stubGetCourseMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
@@ -572,6 +610,9 @@ func (s *stubInviteMemberRepo) Get(courseID, userID string) (*domain.CourseMembe
 }
 func (s *stubInviteMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubInviteMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubInviteMemberRepo) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
 func (s *stubInviteMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {
@@ -611,6 +652,9 @@ func (s *stubDeleteMemberRepo) Get(courseID, userID string) (*domain.CourseMembe
 }
 func (s *stubDeleteMemberRepo) Update(m *domain.CourseMember) error { return nil }
 func (s *stubDeleteMemberRepo) ListByCourse(courseID string) ([]*domain.CourseMember, error) {
+	return nil, nil
+}
+func (s *stubDeleteMemberRepo) ListByCourseAndStatus(courseID string, status domain.CourseMemberStatus) ([]*domain.CourseMember, error) {
 	return nil, nil
 }
 func (s *stubDeleteMemberRepo) ListByUser(userID string) ([]*domain.CourseMember, error) {

@@ -80,6 +80,12 @@ type TeamVoteRepository interface {
 	DeleteByAssignment(assignmentID string) error
 }
 
+type TeamSubmissionLikeRepository interface {
+	Toggle(assignmentID, teamID, submissionID, userID string) (bool, error)
+	ListByTeam(assignmentID, teamID string) ([]*domain.TeamSubmissionLike, error)
+	DeleteByAssignment(assignmentID string) error
+}
+
 type TeamPeerGradeRepository interface {
 	ReplaceTeamAllocations(assignmentID, teamID string, rows []*domain.TeamPeerGradeAllocation) error
 	ListByTeam(assignmentID, teamID string) ([]*domain.TeamPeerGradeAllocation, error)

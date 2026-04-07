@@ -39,6 +39,7 @@ func (r *PostRepository) ListByCourse(courseID string) ([]*domain.Post, error) {
 func (r *PostRepository) Delete(id string) error {
 	return r.db.Where("id = ?", id).Delete(&postModel{}).Error
 }
+
 var _ repository.PostRepository = (*PostRepository)(nil)
 
 type MaterialRepository struct{ db *gorm.DB }
@@ -71,6 +72,7 @@ func (r *MaterialRepository) ListByCourse(courseID string) ([]*domain.Material, 
 func (r *MaterialRepository) Delete(id string) error {
 	return r.db.Where("id = ?", id).Delete(&materialModel{}).Error
 }
+
 var _ repository.MaterialRepository = (*MaterialRepository)(nil)
 
 type AssignmentRepository struct{ db *gorm.DB }
@@ -167,6 +169,7 @@ func (r *SubmissionRepository) Update(s *domain.Submission) error {
 func (r *SubmissionRepository) DeleteByAssignment(assignmentID string) error {
 	return r.db.Where("assignment_id = ?", assignmentID).Delete(&submissionModel{}).Error
 }
+
 var _ repository.SubmissionRepository = (*SubmissionRepository)(nil)
 
 type CommentRepository struct{ db *gorm.DB }
@@ -217,6 +220,7 @@ func (r *CommentRepository) listBy(query string, arg string) ([]*domain.Comment,
 	}
 	return out, nil
 }
+
 var _ repository.CommentRepository = (*CommentRepository)(nil)
 
 type FileRepository struct{ db *gorm.DB }
@@ -246,6 +250,7 @@ func (r *FileRepository) ListByUser(userID string) ([]*domain.File, error) {
 	}
 	return out, nil
 }
+
 var _ repository.FileRepository = (*FileRepository)(nil)
 
 func toPostModel(p *domain.Post) *postModel {
@@ -279,9 +284,9 @@ func toAssignmentDomain(m *assignmentModel) *domain.Assignment {
 		Deadline: m.Deadline, MaxGrade: m.MaxGrade,
 		AssignmentKind: domain.AssignmentKind(m.AssignmentKind), DesiredTeamSize: m.DesiredTeamSize,
 		TeamDistributionType: domain.TeamDistributionType(m.TeamDistributionType),
-		TeamCount: m.TeamCount, MaxTeamSize: m.MaxTeamSize, TeamSubmissionRule: domain.TeamSubmissionRule(m.TeamSubmissionRule),
+		TeamCount:            m.TeamCount, MaxTeamSize: m.MaxTeamSize, TeamSubmissionRule: domain.TeamSubmissionRule(m.TeamSubmissionRule),
 		VoteTieBreak: domain.VoteTieBreak(m.VoteTieBreak), AllowEarlyFinalization: m.AllowEarlyFinalization,
-		TeamGradingMode: domain.TeamGradingMode(m.TeamGradingMode),
+		TeamGradingMode:     domain.TeamGradingMode(m.TeamGradingMode),
 		PeerSplitMinPercent: m.PeerSplitMinPercent, PeerSplitMaxPercent: m.PeerSplitMaxPercent,
 		RosterLockedAt: m.RosterLockedAt, DeadlineAutoFinalizedAt: m.DeadlineAutoFinalizedAt,
 		CreatedAt: m.CreatedAt,

@@ -163,7 +163,9 @@ func (h *GenerateRandomTeamsHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type GenerateBalancedTeamsHandler struct{ uc *usecase.GenerateBalancedTeams }
+type GenerateBalancedTeamsHandler struct {
+	uc *usecase.GenerateBalancedTeams
+}
 
 func NewGenerateBalancedTeamsHandler(uc *usecase.GenerateBalancedTeams) *GenerateBalancedTeamsHandler {
 	return &GenerateBalancedTeamsHandler{uc: uc}
@@ -193,7 +195,9 @@ func (h *GenerateBalancedTeamsHandler) ServeHTTP(w http.ResponseWriter, r *http.
 
 type CreateTeamHandler struct{ uc *usecase.CreateTeam }
 
-func NewCreateTeamHandler(uc *usecase.CreateTeam) *CreateTeamHandler { return &CreateTeamHandler{uc: uc} }
+func NewCreateTeamHandler(uc *usecase.CreateTeam) *CreateTeamHandler {
+	return &CreateTeamHandler{uc: uc}
+}
 
 func (h *CreateTeamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -315,7 +319,9 @@ func (h *VoteTeamSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type FinalizeTeamVoteSubmissionHandler struct{ uc *usecase.FinalizeTeamVoteSubmission }
+type FinalizeTeamVoteSubmissionHandler struct {
+	uc *usecase.FinalizeTeamVoteSubmission
+}
 
 func NewFinalizeTeamVoteSubmissionHandler(uc *usecase.FinalizeTeamVoteSubmission) *FinalizeTeamVoteSubmissionHandler {
 	return &FinalizeTeamVoteSubmissionHandler{uc: uc}
@@ -342,6 +348,79 @@ func (h *FinalizeTeamVoteSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(submissionResponse(s))
+}
+
+type ListTeamSubmissionsForVoteHandler struct {
+	uc *usecase.ListTeamSubmissionsForVote
+}
+
+func NewListTeamSubmissionsForVoteHandler(uc *usecase.ListTeamSubmissionsForVote) *ListTeamSubmissionsForVoteHandler {
+	return &ListTeamSubmissionsForVoteHandler{uc: uc}
+}
+
+func (h *ListTeamSubmissionsForVoteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	teamID := r.PathValue("teamId")
+	items, err := h.uc.List(courseID, assignmentID, teamID, userID)
+	if err != nil {
+		respondTeamError(w, err)
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]interface{}{
+			"submission": submissionResponse(it.Submission),
+			"stats": map[string]interface{}{
+				"submission_id": it.Stats.SubmissionID,
+				"vote_weight":   it.Stats.VoteWeight,
+				"vote_count":    it.Stats.VoteCount,
+				"like_count":    it.Stats.LikeCount,
+			},
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+type ToggleSubmissionLikeHandler struct{ uc *usecase.ToggleSubmissionLike }
+
+func NewToggleSubmissionLikeHandler(uc *usecase.ToggleSubmissionLike) *ToggleSubmissionLikeHandler {
+	return &ToggleSubmissionLikeHandler{uc: uc}
+}
+
+func (h *ToggleSubmissionLikeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	teamID := r.PathValue("teamId")
+	submissionID := r.PathValue("submissionId")
+	liked, err := h.uc.Toggle(courseID, assignmentID, teamID, submissionID, userID)
+	if err != nil {
+		respondTeamError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]bool{"liked": liked})
 }
 
 func respondTeamError(w http.ResponseWriter, err error) {

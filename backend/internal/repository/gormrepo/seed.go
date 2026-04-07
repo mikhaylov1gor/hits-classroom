@@ -108,19 +108,21 @@ func SeedDemoData(db *gorm.DB) error {
 	}
 
 	members := []courseMemberModel{
-		{CourseID: course.ID, UserID: userIDs["admin@hits.local"], Role: "owner"},
-		{CourseID: course.ID, UserID: userIDs["teacher1@hits.local"], Role: "teacher"},
-		{CourseID: course.ID, UserID: userIDs["teacher2@hits.local"], Role: "teacher"},
-		{CourseID: course.ID, UserID: userIDs["student1@hits.local"], Role: "student"},
-		{CourseID: course.ID, UserID: userIDs["student2@hits.local"], Role: "student"},
-		{CourseID: course.ID, UserID: userIDs["student3@hits.local"], Role: "student"},
-		{CourseID: course.ID, UserID: userIDs["student4@hits.local"], Role: "student"},
+		{CourseID: course.ID, UserID: userIDs["admin@hits.local"], Role: "owner", Status: "approved", RequestedAt: now},
+		{CourseID: course.ID, UserID: userIDs["teacher1@hits.local"], Role: "teacher", Status: "approved", RequestedAt: now},
+		{CourseID: course.ID, UserID: userIDs["teacher2@hits.local"], Role: "teacher", Status: "approved", RequestedAt: now},
+		{CourseID: course.ID, UserID: userIDs["student1@hits.local"], Role: "student", Status: "approved", RequestedAt: now},
+		{CourseID: course.ID, UserID: userIDs["student2@hits.local"], Role: "student", Status: "approved", RequestedAt: now},
+		{CourseID: course.ID, UserID: userIDs["student3@hits.local"], Role: "student", Status: "approved", RequestedAt: now},
+		{CourseID: course.ID, UserID: userIDs["student4@hits.local"], Role: "student", Status: "approved", RequestedAt: now},
 	}
 	for _, m := range members {
 		if err := db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "course_id"}, {Name: "user_id"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{
-				"role": m.Role,
+				"role":         m.Role,
+				"status":       m.Status,
+				"requested_at": m.RequestedAt,
 			}),
 		}).Create(&m).Error; err != nil {
 			return err

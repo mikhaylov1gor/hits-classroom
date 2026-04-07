@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"hits-classroom/internal/domain"
@@ -125,7 +126,10 @@ func (h *JoinCourseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(courseWithRoleResponse(course, role))
+	out := courseWithRoleResponse(course, role)
+	out["membership_status"] = "pending"
+	out["message"] = "request submitted, waiting for teacher approval"
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 type ListCoursesHandler struct {
@@ -414,13 +418,156 @@ func (h *UpdateCourseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 func memberResponse(m usecase.MemberWithUser) map[string]interface{} {
-	return map[string]interface{}{
+	out := map[string]interface{}{
 		"user_id":    m.UserID,
 		"email":      m.Email,
 		"first_name": m.FirstName,
 		"last_name":  m.LastName,
 		"role":       string(m.Role),
 	}
+	if m.Status != "" {
+		out["status"] = string(m.Status)
+	}
+	if !m.RequestedAt.IsZero() {
+		out["requested_at"] = m.RequestedAt.Format(time.RFC3339)
+	}
+	if m.DecidedAt != nil {
+		out["decided_at"] = m.DecidedAt.Format(time.RFC3339)
+	}
+	if m.DecidedBy != "" {
+		out["decided_by"] = m.DecidedBy
+	}
+	if m.DecisionNote != "" {
+		out["decision_note"] = m.DecisionNote
+	}
+	return out
+}
+
+type ListJoinRequestsHandler struct {
+	listRequests *usecase.ListJoinRequests
+}
+
+func NewListJoinRequestsHandler(listRequests *usecase.ListJoinRequests) *ListJoinRequestsHandler {
+	return &ListJoinRequestsHandler{listRequests: listRequests}
+}
+
+func (h *ListJoinRequestsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	if courseID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	status := domain.CourseMemberStatus(strings.TrimSpace(r.URL.Query().Get("status")))
+	if status == "" {
+		status = domain.MemberStatusPending
+	}
+	if status != domain.MemberStatusPending && status != domain.MemberStatusApproved && status != domain.MemberStatusRejected {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid status"})
+		return
+	}
+	items, err := h.listRequests.List(courseID, userID, status)
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, m := range items {
+		out = append(out, memberResponse(m))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+type DecideJoinRequestHandler struct {
+	decide *usecase.DecideJoinRequest
+}
+
+func NewDecideJoinRequestHandler(decide *usecase.DecideJoinRequest) *DecideJoinRequestHandler {
+	return &DecideJoinRequestHandler{decide: decide}
+}
+
+func (h *DecideJoinRequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	teacherID := UserIDFromContext(r.Context())
+	if teacherID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	targetUserID := r.PathValue("userId")
+	action := r.PathValue("action")
+	if courseID == "" || targetUserID == "" || action == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	approve := action == "approve"
+	if !approve && action != "reject" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid action"})
+		return
+	}
+	member, err := h.decide.Decide(usecase.DecideJoinRequestInput{
+		CourseID:  courseID,
+		TeacherID: teacherID,
+		UserID:    targetUserID,
+		Approve:   approve,
+		Note:      req.Note,
+	})
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	resp := map[string]interface{}{
+		"user_id": targetUserID,
+		"status":  string(member.Status),
+	}
+	if member.DecidedAt != nil {
+		resp["decided_at"] = member.DecidedAt.Format(time.RFC3339)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 type ListCourseMembersHandler struct {
@@ -969,6 +1116,112 @@ type CreateAssignmentHandler struct {
 
 func NewCreateAssignmentHandler(createAssignment *usecase.CreateAssignment) *CreateAssignmentHandler {
 	return &CreateAssignmentHandler{createAssignment: createAssignment}
+}
+
+type UpdateAssignmentHandler struct {
+	updateAssignment *usecase.UpdateAssignment
+}
+
+func NewUpdateAssignmentHandler(updateAssignment *usecase.UpdateAssignment) *UpdateAssignmentHandler {
+	return &UpdateAssignmentHandler{updateAssignment: updateAssignment}
+}
+
+func (h *UpdateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	if courseID == "" || assignmentID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Title                  string   `json:"title"`
+		Body                   string   `json:"body"`
+		Links                  []string `json:"links"`
+		FileIDs                []string `json:"file_ids"`
+		Deadline               *string  `json:"deadline"`
+		MaxGrade               int      `json:"max_grade"`
+		AssignmentKind         string   `json:"assignment_kind"`
+		DesiredTeamSize        int      `json:"desired_team_size"`
+		TeamDistributionType   string   `json:"team_distribution_type"`
+		TeamCount              int      `json:"team_count"`
+		TeamSubmissionRule     string   `json:"team_submission_rule"`
+		VoteTieBreak           string   `json:"vote_tie_break"`
+		AllowEarlyFinalization *bool    `json:"allow_early_finalization"`
+		TeamGradingMode        string   `json:"team_grading_mode"`
+		PeerSplitMinPercent    float64  `json:"peer_split_min_percent"`
+		PeerSplitMaxPercent    float64  `json:"peer_split_max_percent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	var deadline *time.Time
+	if req.Deadline != nil && *req.Deadline != "" {
+		t, err := time.Parse(time.RFC3339, *req.Deadline)
+		if err == nil {
+			deadline = &t
+		}
+	}
+	a, err := h.updateAssignment.UpdateAssignment(usecase.UpdateAssignmentInput{
+		CourseID:               courseID,
+		AssignmentID:           assignmentID,
+		UserID:                 userID,
+		Title:                  req.Title,
+		Body:                   req.Body,
+		Links:                  req.Links,
+		FileIDs:                req.FileIDs,
+		Deadline:               deadline,
+		MaxGrade:               req.MaxGrade,
+		AssignmentKind:         domain.AssignmentKind(req.AssignmentKind),
+		DesiredTeamSize:        req.DesiredTeamSize,
+		TeamDistributionType:   domain.TeamDistributionType(req.TeamDistributionType),
+		TeamCount:              req.TeamCount,
+		TeamSubmissionRule:     domain.TeamSubmissionRule(req.TeamSubmissionRule),
+		VoteTieBreak:           domain.VoteTieBreak(req.VoteTieBreak),
+		AllowEarlyFinalization: req.AllowEarlyFinalization,
+		TeamGradingMode:        domain.TeamGradingMode(req.TeamGradingMode),
+		PeerSplitMinPercent:    req.PeerSplitMinPercent,
+		PeerSplitMaxPercent:    req.PeerSplitMaxPercent,
+	})
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		if errors.Is(err, usecase.ErrValidation) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(assignmentResponse(a))
 }
 
 func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

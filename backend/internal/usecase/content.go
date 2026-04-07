@@ -116,7 +116,7 @@ type CreateAssignmentInput struct {
 	MaxGrade               int
 	AssignmentKind         domain.AssignmentKind
 	DesiredTeamSize        int
-	TeamDistributionType domain.TeamDistributionType
+	TeamDistributionType   domain.TeamDistributionType
 	TeamCount              int
 	TeamSubmissionRule     domain.TeamSubmissionRule
 	VoteTieBreak           domain.VoteTieBreak
@@ -253,6 +253,156 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 		CreatedAt:              time.Now().UTC(),
 	}
 	if err := uc.assignmentRepo.Create(a); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+type UpdateAssignmentInput struct {
+	CourseID               string
+	AssignmentID           string
+	UserID                 string
+	Title                  string
+	Body                   string
+	Links                  []string
+	FileIDs                []string
+	Deadline               *time.Time
+	MaxGrade               int
+	AssignmentKind         domain.AssignmentKind
+	DesiredTeamSize        int
+	TeamDistributionType   domain.TeamDistributionType
+	TeamCount              int
+	TeamSubmissionRule     domain.TeamSubmissionRule
+	VoteTieBreak           domain.VoteTieBreak
+	AllowEarlyFinalization *bool
+	TeamGradingMode        domain.TeamGradingMode
+	PeerSplitMinPercent    float64
+	PeerSplitMaxPercent    float64
+}
+
+type UpdateAssignment struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	teamRepo       repository.TeamRepository
+	teamMemberRepo repository.TeamMemberRepository
+}
+
+func NewUpdateAssignment(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	teamRepo repository.TeamRepository,
+	teamMemberRepo repository.TeamMemberRepository,
+) *UpdateAssignment {
+	return &UpdateAssignment{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, teamRepo: teamRepo, teamMemberRepo: teamMemberRepo,
+	}
+}
+
+func (uc *UpdateAssignment) UpdateAssignment(in UpdateAssignmentInput) (*domain.Assignment, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.UserID)
+	if err != nil || (role != domain.RoleOwner && role != domain.RoleTeacher) {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return nil, ErrValidation
+	}
+	a.Title = title
+	a.Body = in.Body
+	a.Links = in.Links
+	a.FileIDs = in.FileIDs
+	a.Deadline = in.Deadline
+	if in.MaxGrade > 0 {
+		a.MaxGrade = in.MaxGrade
+	}
+	if in.AssignmentKind != "" {
+		a.AssignmentKind = in.AssignmentKind
+	}
+	a.DesiredTeamSize = in.DesiredTeamSize
+	if in.TeamDistributionType != "" {
+		a.TeamDistributionType = in.TeamDistributionType
+	}
+	a.TeamCount = in.TeamCount
+	if in.TeamSubmissionRule != "" {
+		a.TeamSubmissionRule = in.TeamSubmissionRule
+	}
+	if in.VoteTieBreak != "" {
+		a.VoteTieBreak = in.VoteTieBreak
+	}
+	if in.AllowEarlyFinalization != nil {
+		a.AllowEarlyFinalization = *in.AllowEarlyFinalization
+	}
+	if in.TeamGradingMode != "" {
+		a.TeamGradingMode = in.TeamGradingMode
+	}
+	a.PeerSplitMinPercent = in.PeerSplitMinPercent
+	a.PeerSplitMaxPercent = in.PeerSplitMaxPercent
+
+	// Recalculate team_count/max_team_size when desired_team_size is specified.
+	if a.DesiredTeamSize >= 2 {
+		students, serr := listStudentIDs(in.CourseID, uc.memberRepo)
+		if serr != nil {
+			return nil, serr
+		}
+		n := len(students)
+		if n == 0 {
+			a.TeamCount = 1
+			a.MaxTeamSize = a.DesiredTeamSize
+		} else {
+			a.TeamCount = int(math.Ceil(float64(n) / float64(a.DesiredTeamSize)))
+			if a.TeamCount < 1 {
+				a.TeamCount = 1
+			}
+			a.MaxTeamSize = int(math.Ceil(float64(n) / float64(a.TeamCount)))
+			if a.MaxTeamSize < 2 {
+				a.MaxTeamSize = 2
+			}
+		}
+	} else if a.TeamCount > 0 {
+		students, serr := listStudentIDs(in.CourseID, uc.memberRepo)
+		if serr != nil {
+			return nil, serr
+		}
+		maxTeamSize, cerr := calcMaxTeamSize(len(students), a.TeamCount)
+		if cerr != nil {
+			return nil, cerr
+		}
+		a.MaxTeamSize = maxTeamSize
+	}
+
+	if a.AssignmentKind == domain.AssignmentKindGroup && a.TeamCount <= 0 {
+		return nil, &ValidationError{Message: "group assignment requires desired_team_size >= 2 or team_count > 0"}
+	}
+	if a.AssignmentKind == domain.AssignmentKindIndividual {
+		a.TeamCount = 0
+		a.MaxTeamSize = 0
+	}
+	if a.DesiredTeamSize > 0 && a.DesiredTeamSize < 2 {
+		return nil, &ValidationError{Message: "team size must be at least 2"}
+	}
+	if a.TeamGradingMode == domain.TeamGradingPeerSplit {
+		if a.AssignmentKind != domain.AssignmentKindGroup {
+			return nil, &ValidationError{Message: "peer_split grading applies only to group assignments"}
+		}
+		if a.PeerSplitMinPercent < 0 || a.PeerSplitMaxPercent > 100 || a.PeerSplitMinPercent > a.PeerSplitMaxPercent {
+			return nil, &ValidationError{Message: "peer_split_min_percent and peer_split_max_percent must be between 0 and 100 with min <= max"}
+		}
+	}
+	if uc.teamRepo != nil && uc.teamMemberRepo != nil && a.MaxTeamSize > 0 {
+		teams, _ := uc.teamRepo.ListByAssignment(a.ID)
+		for _, t := range teams {
+			members, _ := uc.teamMemberRepo.ListByTeam(t.ID)
+			if len(members) > a.MaxTeamSize {
+				return nil, &ValidationError{Message: "existing teams exceed new max_team_size; manual intervention required"}
+			}
+		}
+	}
+
+	if err := uc.assignmentRepo.Update(a); err != nil {
 		return nil, err
 	}
 	return a, nil

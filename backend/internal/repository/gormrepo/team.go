@@ -3,6 +3,7 @@ package gormrepo
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
 
@@ -161,6 +162,60 @@ func (r *TeamVoteRepository) DeleteByAssignment(assignmentID string) error {
 }
 
 var _ repository.TeamVoteRepository = (*TeamVoteRepository)(nil)
+
+type TeamSubmissionLikeRepository struct{ db *gorm.DB }
+
+func NewTeamSubmissionLikeRepository(db *gorm.DB) *TeamSubmissionLikeRepository {
+	return &TeamSubmissionLikeRepository{db: db}
+}
+
+func (r *TeamSubmissionLikeRepository) Toggle(assignmentID, teamID, submissionID, userID string) (bool, error) {
+	var row teamSubmissionLikeModel
+	err := r.db.Where("assignment_id = ? AND team_id = ? AND submission_id = ? AND user_id = ?", assignmentID, teamID, submissionID, userID).
+		First(&row).Error
+	if err == nil {
+		if derr := r.db.Delete(&row).Error; derr != nil {
+			return false, derr
+		}
+		return false, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return false, err
+	}
+	row = teamSubmissionLikeModel{
+		ID:           uuid.NewString(),
+		AssignmentID: assignmentID,
+		TeamID:       teamID,
+		SubmissionID: submissionID,
+		UserID:       userID,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if cerr := r.db.Create(&row).Error; cerr != nil {
+		return false, cerr
+	}
+	return true, nil
+}
+
+func (r *TeamSubmissionLikeRepository) ListByTeam(assignmentID, teamID string) ([]*domain.TeamSubmissionLike, error) {
+	var rows []teamSubmissionLikeModel
+	if err := r.db.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.TeamSubmissionLike, 0, len(rows))
+	for i := range rows {
+		out = append(out, &domain.TeamSubmissionLike{
+			ID: rows[i].ID, AssignmentID: rows[i].AssignmentID, TeamID: rows[i].TeamID,
+			SubmissionID: rows[i].SubmissionID, UserID: rows[i].UserID, CreatedAt: rows[i].CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (r *TeamSubmissionLikeRepository) DeleteByAssignment(assignmentID string) error {
+	return r.db.Where("assignment_id = ?", assignmentID).Delete(&teamSubmissionLikeModel{}).Error
+}
+
+var _ repository.TeamSubmissionLikeRepository = (*TeamSubmissionLikeRepository)(nil)
 
 func toTeamDomain(m *teamModel) *domain.Team {
 	return &domain.Team{

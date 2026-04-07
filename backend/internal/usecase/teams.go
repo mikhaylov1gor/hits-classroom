@@ -479,7 +479,7 @@ func listStudentIDs(courseID string, memberRepo repository.CourseMemberRepositor
 	}
 	out := make([]string, 0, len(members))
 	for _, m := range members {
-		if m.Role == domain.RoleStudent {
+		if m.Role == domain.RoleStudent && m.Status == domain.MemberStatusApproved {
 			out = append(out, m.UserID)
 		}
 	}
@@ -681,6 +681,7 @@ type FinalizeTeamVoteSubmission struct {
 	teamMemberRepo repository.TeamMemberRepository
 	submissionRepo repository.SubmissionRepository
 	voteRepo       repository.TeamVoteRepository
+	likeRepo       repository.TeamSubmissionLikeRepository
 	auditRepo      repository.TeamAuditRepository
 }
 
@@ -691,10 +692,11 @@ func NewFinalizeTeamVoteSubmission(
 	teamMemberRepo repository.TeamMemberRepository,
 	submissionRepo repository.SubmissionRepository,
 	voteRepo repository.TeamVoteRepository,
+	likeRepo repository.TeamSubmissionLikeRepository,
 	auditRepo repository.TeamAuditRepository,
 ) *FinalizeTeamVoteSubmission {
 	return &FinalizeTeamVoteSubmission{
-		memberRepo: memberRepo, assignmentRepo: assignmentRepo, teamRepo: teamRepo, teamMemberRepo: teamMemberRepo, submissionRepo: submissionRepo, voteRepo: voteRepo, auditRepo: auditRepo,
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, teamRepo: teamRepo, teamMemberRepo: teamMemberRepo, submissionRepo: submissionRepo, voteRepo: voteRepo, likeRepo: likeRepo, auditRepo: auditRepo,
 	}
 }
 
@@ -706,6 +708,7 @@ func resolveVoteWinner(
 	memberSet map[string]bool,
 	assignmentRepo repository.AssignmentRepository,
 	submissionRepo repository.SubmissionRepository,
+	likeCountBySubmission map[string]int,
 ) string {
 	type cand struct {
 		sid   string
@@ -744,16 +747,34 @@ func resolveVoteWinner(
 	if len(tied) == 1 {
 		return tied[0]
 	}
+	bestByLikes := tied[0]
+	bestLikes := likeCountBySubmission[bestByLikes]
+	for _, sid := range tied[1:] {
+		lc := likeCountBySubmission[sid]
+		if lc > bestLikes || (lc == bestLikes && sid < bestByLikes) {
+			bestLikes = lc
+			bestByLikes = sid
+		}
+	}
+	likeTied := make([]string, 0, len(tied))
+	for _, sid := range tied {
+		if likeCountBySubmission[sid] == bestLikes {
+			likeTied = append(likeTied, sid)
+		}
+	}
+	if len(likeTied) == 1 {
+		return likeTied[0]
+	}
 	tb := a.VoteTieBreak
 	if tb == domain.VoteTieBreakRandom {
-		h := sha256.Sum256([]byte(assignmentID + teamID + tied[0]))
+		h := sha256.Sum256([]byte(assignmentID + teamID + likeTied[0]))
 		seed := int64(binary.BigEndian.Uint64(h[:8]))
 		r := rand.New(rand.NewSource(seed))
-		return tied[r.Intn(len(tied))]
+		return likeTied[r.Intn(len(likeTied))]
 	}
-	bestSID := tied[0]
+	bestSID := likeTied[0]
 	bestAvg := -1.0
-	for _, sid := range tied {
+	for _, sid := range likeTied {
 		var uid string
 		for i := range allSubs {
 			if allSubs[i].ID == sid {
@@ -832,7 +853,14 @@ func (uc *FinalizeTeamVoteSubmission) FinalizeVoteForTeam(courseID, assignmentID
 	if err != nil {
 		return nil, err
 	}
-	winnerID := resolveVoteWinner(a, courseID, assignmentID, teamID, scoreBySubmission, allSubs, memberSet, uc.assignmentRepo, uc.submissionRepo)
+	likeCountBySubmission := make(map[string]int)
+	if uc.likeRepo != nil {
+		likes, _ := uc.likeRepo.ListByTeam(assignmentID, teamID)
+		for _, l := range likes {
+			likeCountBySubmission[l.SubmissionID]++
+		}
+	}
+	winnerID := resolveVoteWinner(a, courseID, assignmentID, teamID, scoreBySubmission, allSubs, memberSet, uc.assignmentRepo, uc.submissionRepo, likeCountBySubmission)
 	if winnerID == "" {
 		if allowWithoutVotes {
 			return nil, nil
@@ -847,6 +875,180 @@ func (uc *FinalizeTeamVoteSubmission) FinalizeVoteForTeam(courseID, assignmentID
 		tryTeamAudit(uc.auditRepo, assignmentID, teamID, actorUserID, domain.TeamAuditVoteFinalized, map[string]string{"submission_id": winner.ID})
 	}
 	return winner, nil
+}
+
+type TeamSubmissionVoteStats struct {
+	SubmissionID string
+	VoteWeight   float64
+	VoteCount    int
+	LikeCount    int
+}
+
+type TeamSubmissionForVote struct {
+	Submission *domain.Submission
+	Stats      TeamSubmissionVoteStats
+}
+
+type ListTeamSubmissionsForVote struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	teamRepo       repository.TeamRepository
+	teamMemberRepo repository.TeamMemberRepository
+	submissionRepo repository.SubmissionRepository
+	voteRepo       repository.TeamVoteRepository
+	likeRepo       repository.TeamSubmissionLikeRepository
+}
+
+func NewListTeamSubmissionsForVote(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	teamRepo repository.TeamRepository,
+	teamMemberRepo repository.TeamMemberRepository,
+	submissionRepo repository.SubmissionRepository,
+	voteRepo repository.TeamVoteRepository,
+	likeRepo repository.TeamSubmissionLikeRepository,
+) *ListTeamSubmissionsForVote {
+	return &ListTeamSubmissionsForVote{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, teamRepo: teamRepo, teamMemberRepo: teamMemberRepo, submissionRepo: submissionRepo, voteRepo: voteRepo, likeRepo: likeRepo,
+	}
+}
+
+func (uc *ListTeamSubmissionsForVote) List(courseID, assignmentID, teamID, requesterID string) ([]TeamSubmissionForVote, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, requesterID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(assignmentID)
+	if err != nil || a == nil || a.CourseID != courseID {
+		return nil, ErrCourseNotFound
+	}
+	t, err := uc.teamRepo.GetByID(teamID)
+	if err != nil || t == nil || t.AssignmentID != assignmentID {
+		return nil, ErrCourseNotFound
+	}
+	if role == domain.RoleStudent {
+		myTeam, terr := uc.teamMemberRepo.GetTeamByUser(assignmentID, requesterID)
+		if terr != nil || myTeam == nil || myTeam.ID != teamID {
+			return nil, ErrForbidden
+		}
+	}
+	members, err := uc.teamMemberRepo.ListByTeam(teamID)
+	if err != nil {
+		return nil, err
+	}
+	memberSet := map[string]bool{}
+	for _, m := range members {
+		memberSet[m.UserID] = true
+	}
+	allSubs, err := uc.submissionRepo.ListByAssignment(assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	votes, _ := uc.voteRepo.ListByTeam(assignmentID, teamID)
+	voteWeight := map[string]float64{}
+	voteCount := map[string]int{}
+	for _, v := range votes {
+		voteWeight[v.SubmissionID] += v.Weight
+		voteCount[v.SubmissionID]++
+	}
+	likeCount := map[string]int{}
+	if uc.likeRepo != nil {
+		likes, _ := uc.likeRepo.ListByTeam(assignmentID, teamID)
+		for _, l := range likes {
+			likeCount[l.SubmissionID]++
+		}
+	}
+	out := make([]TeamSubmissionForVote, 0)
+	for _, s := range allSubs {
+		if !memberSet[s.UserID] {
+			continue
+		}
+		out = append(out, TeamSubmissionForVote{
+			Submission: s,
+			Stats: TeamSubmissionVoteStats{
+				SubmissionID: s.ID,
+				VoteWeight:   voteWeight[s.ID],
+				VoteCount:    voteCount[s.ID],
+				LikeCount:    likeCount[s.ID],
+			},
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Submission.SubmittedAt.Before(out[j].Submission.SubmittedAt) })
+	return out, nil
+}
+
+type ToggleSubmissionLike struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	teamRepo       repository.TeamRepository
+	teamMemberRepo repository.TeamMemberRepository
+	submissionRepo repository.SubmissionRepository
+	likeRepo       repository.TeamSubmissionLikeRepository
+	auditRepo      repository.TeamAuditRepository
+}
+
+func NewToggleSubmissionLike(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	teamRepo repository.TeamRepository,
+	teamMemberRepo repository.TeamMemberRepository,
+	submissionRepo repository.SubmissionRepository,
+	likeRepo repository.TeamSubmissionLikeRepository,
+	auditRepo repository.TeamAuditRepository,
+) *ToggleSubmissionLike {
+	return &ToggleSubmissionLike{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, teamRepo: teamRepo, teamMemberRepo: teamMemberRepo, submissionRepo: submissionRepo, likeRepo: likeRepo, auditRepo: auditRepo,
+	}
+}
+
+func (uc *ToggleSubmissionLike) Toggle(courseID, assignmentID, teamID, submissionID, userID string) (bool, error) {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role != domain.RoleStudent {
+		return false, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(assignmentID)
+	if err != nil || a == nil || a.CourseID != courseID {
+		return false, ErrCourseNotFound
+	}
+	t, err := uc.teamRepo.GetByID(teamID)
+	if err != nil || t == nil || t.AssignmentID != assignmentID {
+		return false, ErrCourseNotFound
+	}
+	myTeam, err := uc.teamMemberRepo.GetTeamByUser(assignmentID, userID)
+	if err != nil || myTeam == nil || myTeam.ID != teamID {
+		return false, ErrForbidden
+	}
+	sub, err := uc.submissionRepo.GetByID(submissionID)
+	if err != nil || sub == nil || sub.AssignmentID != assignmentID {
+		return false, ErrCourseNotFound
+	}
+	teamMembers, err := uc.teamMemberRepo.ListByTeam(teamID)
+	if err != nil {
+		return false, err
+	}
+	inTeam := false
+	for _, m := range teamMembers {
+		if m.UserID == sub.UserID {
+			inTeam = true
+			break
+		}
+	}
+	if !inTeam {
+		return false, ErrForbidden
+	}
+	liked, err := uc.likeRepo.Toggle(assignmentID, teamID, submissionID, userID)
+	if err != nil {
+		return false, err
+	}
+	state := "unliked"
+	if liked {
+		state = "liked"
+	}
+	tryTeamAudit(uc.auditRepo, assignmentID, teamID, userID, domain.TeamAuditSubmissionLiked, map[string]string{
+		"submission_id": submissionID,
+		"state":         state,
+	})
+	return liked, nil
 }
 
 func (uc *FinalizeTeamVoteSubmission) Finalize(courseID, assignmentID, teamID, teacherID string) (*domain.Submission, error) {
