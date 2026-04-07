@@ -97,10 +97,16 @@ export function AddCourseButton({ onCourseAdded, variant = 'icon' }: AddCourseBu
       setDialogOpen(false)
       addCourse(joined)
       onCourseAdded?.(joined)
-      setSuccessMessage(`Курс «${joined.title}» добавлен`)
+      if (joined.membership_status === 'pending') {
+        setSuccessMessage(`Заявка на вступление в «${joined.title}» отправлена, ожидает подтверждения преподавателем`)
+      } else {
+        setSuccessMessage(`Курс «${joined.title}» добавлен`)
+      }
     } catch (err) {
       if (err instanceof Error && err.message === 'COURSE_NOT_FOUND') {
         setJoinError('Неверный или недействительный код курса')
+      } else if (err instanceof Error && err.message === 'ALREADY_MEMBER') {
+        setJoinError('Вы уже являетесь участником этого курса или ваша заявка уже подана')
       } else {
         setJoinError('Не удалось присоединиться к курсу')
       }

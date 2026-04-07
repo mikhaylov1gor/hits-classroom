@@ -3,6 +3,7 @@ import {
   Alert,
   Avatar,
   Box,
+  Button,
   Chip,
   CircularProgress,
   Container,
@@ -19,9 +20,12 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import FavoriteIcon from '@mui/icons-material/Favorite'
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder'
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined'
 import HistoryIcon from '@mui/icons-material/History'
 import HowToVoteIcon from '@mui/icons-material/HowToVote'
+import ThumbUpAltOutlinedIcon from '@mui/icons-material/ThumbUpAltOutlined'
 import TimerOffIcon from '@mui/icons-material/TimerOff'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -30,12 +34,16 @@ import {
   listCourseMembers,
   listSubmissions,
   listTeams,
+  listTeamSubmissions,
+  toggleSubmissionLike,
+  voteForSubmission,
 } from '../../../features/courses/api/coursesApi'
 import type {
   Assignment,
   Member,
   Submission,
   TeamAuditEvent,
+  TeamSubmissionForVote,
   TeamWithMembers,
 } from '../../../features/courses/model/types'
 
@@ -58,6 +66,11 @@ const VOTING_EVENT_TYPES = new Set([
   'vote_finalized',
   'voting_started',
   'voting_open',
+  'submission_liked',
+])
+
+const PEER_SPLIT_EVENT_TYPES = new Set([
+  'peer_split_submitted',
 ])
 
 const DEADLINE_EVENT_TYPES = new Set([
@@ -72,7 +85,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   member_joined: 'Участник вступил в команду',
   member_left: 'Участник покинул команду',
   member_removed: 'Участник удалён из команды',
-  roster_locked: 'Состав закреплён',
+  roster_locked: 'Состав заблокирован',
   submission_proposed: 'Предложено решение',
   submission_created: 'Создано решение',
   submission_attached: 'Решение прикреплено',
@@ -80,6 +93,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   vote_finalized: 'Голосование завершено',
   voting_started: 'Голосование открыто',
   voting_open: 'Голосование открыто',
+  submission_liked: 'Лайк решения',
+  peer_split_submitted: 'Отправлено распределение оценок',
   deadline_auto_finalized: 'Автоматическая фиксация по дедлайну',
   deadline_finalized: 'Фиксация дедлайна',
   auto_finalized: 'Автоматическая фиксация',
@@ -183,14 +198,28 @@ function EventRow({
   // Try to get subject from payload (e.g., who joined/left)
   let detail = ''
   const payload = event.payload as Record<string, unknown>
-  if (payload.user_id && typeof payload.user_id === 'string') {
-    const targetName = getPersonName(payload.user_id as string, members, teamMembers)
-    if (payload.user_id !== event.actor_user_id) {
-      detail = `Участник: ${targetName}`
+  if (event.event_type === 'submission_liked') {
+    const sid = typeof payload.submission_id === 'string' ? payload.submission_id : null
+    const liked = payload.liked
+    detail = `Решение: ${sid ? sid.slice(0, 8) + '…' : '—'}, лайк: ${liked ? 'поставлен' : 'снят'}`
+  } else if (event.event_type === 'peer_split_submitted') {
+    const percents = payload.percents as Record<string, number> | undefined
+    if (percents) {
+      const parts = Object.entries(percents)
+        .map(([uid, pct]) => `${getPersonName(uid, members, teamMembers)}: ${pct}%`)
+        .join(', ')
+      detail = `Распределение: ${parts}`
     }
-  }
-  if (payload.first_name || payload.last_name) {
-    detail = `${payload.first_name ?? ''} ${payload.last_name ?? ''}`.trim()
+  } else {
+    if (payload.user_id && typeof payload.user_id === 'string') {
+      const targetName = getPersonName(payload.user_id as string, members, teamMembers)
+      if (payload.user_id !== event.actor_user_id) {
+        detail = `Участник: ${targetName}`
+      }
+    }
+    if (payload.first_name || payload.last_name) {
+      detail = `${payload.first_name ?? ''} ${payload.last_name ?? ''}`.trim()
+    }
   }
 
   return (
@@ -559,6 +588,116 @@ function DeadlineFixationRecord({
   )
 }
 
+// ── Team submissions for vote ─────────────────────────────────────────────────
+
+function TeamSubmissionsSection({
+  submissions,
+  members,
+  teamMembers,
+  onVote,
+  onLike,
+  voteLoading,
+  likeLoading,
+}: {
+  submissions: TeamSubmissionForVote[]
+  members: Member[]
+  teamMembers: TeamWithMembers['members']
+  onVote: (submissionId: string) => void
+  onLike: (submissionId: string, currentLiked: boolean) => void
+  voteLoading: string | null
+  likeLoading: string | null
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <SectionTitle icon={<ThumbUpAltOutlinedIcon color="action" />} title="Решения команды (голосование)" />
+      {submissions.length === 0 ? (
+        <EmptyState text="Нет решений для голосования" />
+      ) : (
+        <Box className="flex flex-col gap-2">
+          {submissions.map((item) => {
+            const { submission, stats } = item
+            const authorName = getPersonName(submission.user_id, members, teamMembers)
+            const isVoting = voteLoading === submission.id
+            const isLiking = likeLoading === submission.id
+            const body = submission.body?.trim()
+            const fileCount = submission.file_ids?.length ?? 0
+            return (
+              <Box
+                key={submission.id}
+                sx={{
+                  border: '1px solid',
+                  borderColor: submission.is_attached ? 'success.300' : 'grey.200',
+                  borderRadius: 1,
+                  p: 1.5,
+                  bgcolor: submission.is_attached ? 'success.50' : 'background.paper',
+                }}
+              >
+                <Box className="flex items-center gap-2 flex-wrap mb-1">
+                  <Avatar sx={{ width: 24, height: 24, fontSize: 10, bgcolor: 'secondary.light' }}>
+                    {getInitials(authorName)}
+                  </Avatar>
+                  <Typography variant="body2" fontWeight={500}>{authorName}</Typography>
+                  {submission.is_attached && (
+                    <Chip size="small" label="Финальное" color="success" sx={{ fontSize: '0.7rem' }} />
+                  )}
+                  <Box className="flex items-center gap-1 ml-auto">
+                    <Chip
+                      size="small"
+                      icon={<HowToVoteIcon sx={{ fontSize: '0.85rem !important' }} />}
+                      label={`${stats?.vote_count ?? 0} (${(stats?.vote_weight ?? 0).toFixed(1)})`}
+                      variant="outlined"
+                      sx={{ fontSize: '0.7rem' }}
+                    />
+                    <Chip
+                      size="small"
+                      icon={<FavoriteIcon sx={{ fontSize: '0.85rem !important', color: 'error.main' }} />}
+                      label={stats?.like_count ?? 0}
+                      variant="outlined"
+                      sx={{ fontSize: '0.7rem' }}
+                    />
+                  </Box>
+                </Box>
+                {body && (
+                  <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 80, overflow: 'hidden' }}>
+                    {body.length > 200 ? body.slice(0, 200) + '…' : body}
+                  </Typography>
+                )}
+                {fileCount > 0 && !body && (
+                  <Typography variant="caption" color="text.secondary">{fileCount} файл(ов)</Typography>
+                )}
+                <Box className="flex gap-2 mt-1.5">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<HowToVoteIcon fontSize="small" />}
+                    onClick={() => onVote(submission.id)}
+                    disabled={isVoting}
+                    sx={{ fontSize: '0.75rem', py: 0.25 }}
+                  >
+                    {isVoting ? 'Голосование…' : 'Голосовать'}
+                  </Button>
+                  <IconButton
+                    size="small"
+                    onClick={() => onLike(submission.id, false)}
+                    disabled={isLiking}
+                    aria-label="Лайк"
+                  >
+                    {isLiking ? (
+                      <CircularProgress size={16} />
+                    ) : (
+                      <FavoriteBorderIcon fontSize="small" sx={{ color: 'error.main' }} />
+                    )}
+                  </IconButton>
+                </Box>
+              </Box>
+            )
+          })}
+        </Box>
+      )}
+    </Paper>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function TeamDetailPage() {
@@ -572,10 +711,14 @@ export function TeamDetailPage() {
   const [assignment, setAssignment] = useState<Assignment | null>(null)
   const [team, setTeam] = useState<TeamWithMembers | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
+  const [teamSubmissionsForVote, setTeamSubmissionsForVote] = useState<TeamSubmissionForVote[]>([])
   const [auditEvents, setAuditEvents] = useState<TeamAuditEvent[]>([])
   const [courseMembers, setCourseMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [voteLoading, setVoteLoading] = useState<string | null>(null)
+  const [likeLoading, setLikeLoading] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!courseId || !assignmentId || !teamId) return
@@ -589,8 +732,9 @@ export function TeamDetailPage() {
       listSubmissions(courseId, assignmentId),
       getTeamAudit(courseId, assignmentId, { team_id: teamId, limit: 500 }),
       listCourseMembers(courseId),
+      listTeamSubmissions(courseId, assignmentId, teamId).catch(() => []),
     ])
-      .then(([asgn, teams, subs, audit, members]) => {
+      .then(([asgn, teams, subs, audit, members, teamSubs]) => {
         setAssignment(asgn)
         const found = teams.find((t) => t.id === teamId) ?? null
         setTeam(found)
@@ -600,6 +744,11 @@ export function TeamDetailPage() {
         }
         setAuditEvents(audit)
         setCourseMembers(members)
+        setTeamSubmissionsForVote(
+          (teamSubs as TeamSubmissionForVote[]).sort(
+            (a, b) => (b.stats?.vote_weight ?? 0) - (a.stats?.vote_weight ?? 0),
+          ),
+        )
       })
       .catch((e) => {
         setError(e instanceof Error ? e.message : 'Ошибка загрузки данных')
@@ -607,8 +756,49 @@ export function TeamDetailPage() {
       .finally(() => setLoading(false))
   }, [courseId, assignmentId, teamId])
 
+  const handleVote = async (submissionId: string) => {
+    if (!courseId || !assignmentId || !teamId) return
+    setVoteLoading(submissionId)
+    setActionError(null)
+    try {
+      await voteForSubmission(courseId, assignmentId, teamId, submissionId)
+      const updated = await listTeamSubmissions(courseId, assignmentId, teamId)
+      setTeamSubmissionsForVote(updated.sort((a, b) => (b.stats?.vote_weight ?? 0) - (a.stats?.vote_weight ?? 0)))
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Ошибка голосования')
+    } finally {
+      setVoteLoading(null)
+    }
+  }
+
+  const handleLike = async (submissionId: string) => {
+    if (!courseId || !assignmentId || !teamId) return
+    setLikeLoading(submissionId)
+    setActionError(null)
+    // Optimistic update
+    setTeamSubmissionsForVote((prev) =>
+      prev.map((item) =>
+        item.submission.id === submissionId
+          ? { ...item, stats: { ...item.stats, like_count: item.stats.like_count + 1 } }
+          : item,
+      ),
+    )
+    try {
+      await toggleSubmissionLike(courseId, assignmentId, teamId, submissionId)
+      const updated = await listTeamSubmissions(courseId, assignmentId, teamId)
+      setTeamSubmissionsForVote(updated.sort((a, b) => (b.stats?.vote_weight ?? 0) - (a.stats?.vote_weight ?? 0)))
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Ошибка лайка')
+      // Revert optimistic update
+      const reverted = await listTeamSubmissions(courseId, assignmentId, teamId).catch(() => teamSubmissionsForVote)
+      setTeamSubmissionsForVote((reverted as TeamSubmissionForVote[]).sort((a, b) => (b.stats?.vote_weight ?? 0) - (a.stats?.vote_weight ?? 0)))
+    } finally {
+      setLikeLoading(null)
+    }
+  }
+
   const compositionEvents = auditEvents.filter((e) => COMPOSITION_EVENT_TYPES.has(e.event_type))
-  const votingEvents = auditEvents.filter((e) => VOTING_EVENT_TYPES.has(e.event_type))
+  const votingEvents = auditEvents.filter((e) => VOTING_EVENT_TYPES.has(e.event_type) || PEER_SPLIT_EVENT_TYPES.has(e.event_type))
   const deadlineEvents = auditEvents.filter((e) => DEADLINE_EVENT_TYPES.has(e.event_type))
 
   const attachedSubmission = submissions.find((s) => s.is_attached === true)
@@ -683,6 +873,25 @@ export function TeamDetailPage() {
               </Box>
             )}
           </Paper>
+
+          {actionError && (
+            <Alert severity="error" sx={{ mb: 1 }} onClose={() => setActionError(null)}>
+              {actionError}
+            </Alert>
+          )}
+
+          {/* Team submissions for vote */}
+          {teamSubmissionsForVote.length > 0 && (
+            <TeamSubmissionsSection
+              submissions={teamSubmissionsForVote}
+              members={courseMembers}
+              teamMembers={teamMembers}
+              onVote={handleVote}
+              onLike={handleLike}
+              voteLoading={voteLoading}
+              likeLoading={likeLoading}
+            />
+          )}
 
           {/* Composition history */}
           <CompositionHistory

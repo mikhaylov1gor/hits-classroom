@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  Alert,
   Avatar,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -13,6 +15,7 @@ import {
   IconButton,
   Menu,
   MenuItem,
+  Snackbar,
   Tab,
   Tabs,
   TextField,
@@ -25,6 +28,9 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
 import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined'
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getCourse,
@@ -34,6 +40,9 @@ import {
   getCourseFeed,
   getMySubmission,
   listCourseMembers,
+  listJoinRequests,
+  approveJoinRequest,
+  rejectJoinRequest,
   deleteCourse,
   removeMember,
   changeMemberRole,
@@ -54,6 +63,7 @@ import { PostCard } from './PostCard/PostCard'
 import { MaterialCard } from './MaterialCard/MaterialCard'
 import { UserProfileDialog } from './UserProfileDialog'
 import {
+  type CourseMemberStatus,
   type CourseTabId,
   type CourseWithRole,
   type FeedItem,
@@ -194,6 +204,14 @@ export function CoursePage() {
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
   const [memberActionError, setMemberActionError] = useState<string | null>(null)
   const [submittedAssignmentIds, setSubmittedAssignmentIds] = useState<Set<string>>(new Set())
+  const [joinRequests, setJoinRequests] = useState<Member[]>([])
+  const [joinRequestsStatus, setJoinRequestsStatus] = useState<'pending' | 'approved' | 'rejected'>('pending')
+  const [joinRequestsLoading, setJoinRequestsLoading] = useState(false)
+  const [usersSubTab, setUsersSubTab] = useState<'members' | 'requests'>('members')
+  const [rejectDialogMember, setRejectDialogMember] = useState<Member | null>(null)
+  const [rejectNote, setRejectNote] = useState('')
+  const [requestActionLoading, setRequestActionLoading] = useState(false)
+  const [requestActionSnackbar, setRequestActionSnackbar] = useState<string | null>(null)
 
   const { user: authUser } = useAuth()
   const isTeacher = course?.role === 'teacher' || course?.role === 'owner'
@@ -367,6 +385,53 @@ export function CoursePage() {
   const refreshMembers = () => {
     if (courseId) {
       listCourseMembers(courseId).then(setMembers).catch(() => setMembers([]))
+    }
+  }
+
+  const loadJoinRequests = (status: CourseMemberStatus = 'pending') => {
+    if (!courseId || !isTeacher) return
+    setJoinRequestsLoading(true)
+    listJoinRequests(courseId, status)
+      .then(setJoinRequests)
+      .catch(() => setJoinRequests([]))
+      .finally(() => setJoinRequestsLoading(false))
+  }
+
+  useEffect(() => {
+    if (usersSubTab === 'requests' && isTeacher) {
+      loadJoinRequests(joinRequestsStatus)
+    }
+  }, [usersSubTab, joinRequestsStatus, courseId])
+
+  const handleApproveRequest = async (member: Member) => {
+    if (!courseId) return
+    setRequestActionLoading(true)
+    try {
+      await approveJoinRequest(courseId, member.user_id)
+      setRequestActionSnackbar('Заявка принята')
+      loadJoinRequests(joinRequestsStatus)
+      refreshMembers()
+    } catch (err) {
+      setRequestActionSnackbar(err instanceof Error ? err.message : 'Ошибка')
+    } finally {
+      setRequestActionLoading(false)
+    }
+  }
+
+  const handleRejectConfirm = async () => {
+    if (!courseId || !rejectDialogMember) return
+    setRequestActionLoading(true)
+    try {
+      await rejectJoinRequest(courseId, rejectDialogMember.user_id, rejectNote.trim() || undefined)
+      setRejectDialogMember(null)
+      setRejectNote('')
+      setRequestActionSnackbar('Заявка отклонена')
+      loadJoinRequests(joinRequestsStatus)
+      refreshMembers()
+    } catch (err) {
+      setRequestActionSnackbar(err instanceof Error ? err.message : 'Ошибка')
+    } finally {
+      setRequestActionLoading(false)
     }
   }
 
@@ -631,6 +696,20 @@ export function CoursePage() {
       </Tabs>
 
       <Box className="flex-1 overflow-auto min-w-0 px-3 sm:px-4 md:px-6">
+        {/* Content access restriction for non-approved students */}
+        {course.role === 'student' && course.membership_status === 'pending' && (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Ваша заявка на вступление в курс ожидает подтверждения преподавателем. Контент курса станет доступен после одобрения.
+          </Alert>
+        )}
+        {course.role === 'student' && course.membership_status === 'rejected' && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            Ваша заявка на вступление в курс была отклонена.
+          </Alert>
+        )}
+
+        {(course.role !== 'student' || !course.membership_status || course.membership_status === 'approved') && (
+        <>
         <TabPanel value={tabValue} index={0}>
           <Box className="flex flex-col lg:flex-row gap-6 py-4">
             {!isTeacher && (
@@ -871,57 +950,154 @@ export function CoursePage() {
             )}
           </Box>
         </TabPanel>
+        </>
+        )}
 
         <TabPanel value={tabValue} index={3}>
-          <Box className="flex flex-col">
-            {members.length === 0 ? (
-              <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
-                <Typography variant="body2" className="text-slate-500 text-center md:text-left">
-                  Нет участников
-                </Typography>
-              </Box>
-            ) : (
-              <>
-                {teachers.length > 0 && (
-                  <Box>
-                    <Typography
-                      variant="subtitle1"
-                      className="font-semibold text-slate-800 mb-2"
-                    >
-                      Преподаватели
-                    </Typography>
-                    {teachers.map((m) => (
-                      <Box key={m.user_id}>
-                        <MemberRow member={m} />
-                        <Divider light className="border-slate-200" />
-                      </Box>
-                    ))}
-                  </Box>
-                )}
-                {students.length > 0 && (
-                  <Box className={teachers.length > 0 ? 'mt-6' : ''}>
-                    <Box className="flex items-center justify-between mb-2">
+          {isTeacher && (
+            <Tabs
+              value={usersSubTab}
+              onChange={(_, v) => setUsersSubTab(v)}
+              sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}
+            >
+              <Tab label="Участники" value="members" />
+              <Tab label="Заявки" value="requests" />
+            </Tabs>
+          )}
+
+          {(!isTeacher || usersSubTab === 'members') && (
+            <Box className="flex flex-col">
+              {members.length === 0 ? (
+                <Box className="flex justify-center items-center py-12 md:py-4 md:justify-start md:items-stretch">
+                  <Typography variant="body2" className="text-slate-500 text-center md:text-left">
+                    Нет участников
+                  </Typography>
+                </Box>
+              ) : (
+                <>
+                  {teachers.length > 0 && (
+                    <Box>
                       <Typography
                         variant="subtitle1"
-                        className="font-semibold text-slate-800"
+                        className="font-semibold text-slate-800 mb-2"
                       >
-                        Другие учащиеся
+                        Преподаватели
                       </Typography>
-                      <Typography variant="body2" className="text-slate-500">
-                        {students.length} {students.length === 1 ? 'учащийся' : 'учащихся'}
-                      </Typography>
+                      {teachers.map((m) => (
+                        <Box key={m.user_id}>
+                          <MemberRow member={m} />
+                          <Divider light className="border-slate-200" />
+                        </Box>
+                      ))}
                     </Box>
-                    {students.map((m) => (
-                      <Box key={m.user_id}>
-                        <MemberRow member={m} />
-                        <Divider light className="border-slate-200" />
+                  )}
+                  {students.length > 0 && (
+                    <Box className={teachers.length > 0 ? 'mt-6' : ''}>
+                      <Box className="flex items-center justify-between mb-2">
+                        <Typography
+                          variant="subtitle1"
+                          className="font-semibold text-slate-800"
+                        >
+                          Другие учащиеся
+                        </Typography>
+                        <Typography variant="body2" className="text-slate-500">
+                          {students.length} {students.length === 1 ? 'учащийся' : 'учащихся'}
+                        </Typography>
                       </Box>
-                    ))}
-                  </Box>
-                )}
-              </>
-            )}
-          </Box>
+                      {students.map((m) => (
+                        <Box key={m.user_id}>
+                          <MemberRow member={m} />
+                          <Divider light className="border-slate-200" />
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                </>
+              )}
+            </Box>
+          )}
+
+          {isTeacher && usersSubTab === 'requests' && (
+            <Box className="flex flex-col gap-3">
+              <Box className="flex gap-2 flex-wrap">
+                {(['pending', 'approved', 'rejected'] as const).map((s) => (
+                  <Chip
+                    key={s}
+                    label={s === 'pending' ? 'Ожидающие' : s === 'approved' ? 'Принятые' : 'Отклонённые'}
+                    variant={joinRequestsStatus === s ? 'filled' : 'outlined'}
+                    color={s === 'approved' ? 'success' : s === 'rejected' ? 'error' : 'default'}
+                    onClick={() => setJoinRequestsStatus(s)}
+                    size="small"
+                  />
+                ))}
+              </Box>
+
+              {joinRequestsLoading ? (
+                <Box className="flex justify-center py-6"><CircularProgress size={28} /></Box>
+              ) : joinRequests.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                  Нет заявок
+                </Typography>
+              ) : (
+                joinRequests.map((m) => {
+                  const name = `${m.first_name} ${m.last_name}`.trim() || m.email
+                  const requestedAt = m.requested_at
+                    ? new Date(m.requested_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : '—'
+                  const decidedAt = m.decided_at
+                    ? new Date(m.decided_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : null
+                  return (
+                    <Box key={m.user_id} className="flex items-center justify-between gap-3 py-3">
+                      <Box className="flex items-center gap-3 flex-1 min-w-0">
+                        <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40, fontSize: '1rem' }}>
+                          {getMemberInitials(m)}
+                        </Avatar>
+                        <Box className="min-w-0 flex-1">
+                          <Typography variant="body1" className="text-slate-800 font-medium">{name}</Typography>
+                          <Typography variant="body2" color="text.secondary">{m.email}</Typography>
+                          <Box className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <Box className="flex items-center gap-1">
+                              <HourglassEmptyIcon sx={{ fontSize: 12, color: 'text.disabled' }} />
+                              <Typography variant="caption" color="text.secondary">Подана: {requestedAt}</Typography>
+                            </Box>
+                            {decidedAt && (
+                              <Typography variant="caption" color="text.secondary">· Решено: {decidedAt}</Typography>
+                            )}
+                            {m.decision_note && (
+                              <Typography variant="caption" color="text.secondary">· Примечание: {m.decision_note}</Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      </Box>
+                      {joinRequestsStatus === 'pending' && (
+                        <Box className="flex items-center gap-1 shrink-0">
+                          <IconButton
+                            size="small"
+                            color="success"
+                            disabled={requestActionLoading}
+                            onClick={() => handleApproveRequest(m)}
+                            aria-label="Принять"
+                          >
+                            <CheckCircleOutlineIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            disabled={requestActionLoading}
+                            onClick={() => { setRejectDialogMember(m); setRejectNote('') }}
+                            aria-label="Отклонить"
+                          >
+                            <CancelOutlinedIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      )}
+                    </Box>
+                  )
+                })
+              )}
+            </Box>
+          )}
         </TabPanel>
         {showSettingsTab && (
           <>
@@ -1165,6 +1341,45 @@ export function CoursePage() {
             </TabPanel>
           </>
         )}
+
+        {/* Reject join request dialog */}
+        <Dialog
+          open={Boolean(rejectDialogMember)}
+          onClose={() => !requestActionLoading && setRejectDialogMember(null)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>Отклонить заявку</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Заявка от: <strong>{rejectDialogMember ? `${rejectDialogMember.first_name} ${rejectDialogMember.last_name}`.trim() || rejectDialogMember.email : ''}</strong>
+            </Typography>
+            <TextField
+              label="Причина отклонения (необязательно)"
+              fullWidth
+              size="small"
+              multiline
+              minRows={2}
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+              disabled={requestActionLoading}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setRejectDialogMember(null)} disabled={requestActionLoading}>Отмена</Button>
+            <Button color="error" variant="contained" onClick={handleRejectConfirm} disabled={requestActionLoading}>
+              {requestActionLoading ? 'Отклонение…' : 'Отклонить'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Snackbar
+          open={Boolean(requestActionSnackbar)}
+          autoHideDuration={3000}
+          onClose={() => setRequestActionSnackbar(null)}
+          message={requestActionSnackbar}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        />
 
         <CreatePostDialog
           open={createPostOpen}

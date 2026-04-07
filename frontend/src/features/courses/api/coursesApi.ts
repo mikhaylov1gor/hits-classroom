@@ -13,6 +13,7 @@ import type {
   TeamAuditEvent,
   TeamDistributionType,
   TeamGradingMode,
+  TeamSubmissionForVote,
   TeamSubmissionRule,
   TeamWithMembers,
   VoteTieBreak,
@@ -294,13 +295,84 @@ export async function joinCourse(code: string): Promise<CourseWithRole> {
   if (response.status === 404) {
     throw new Error('COURSE_NOT_FOUND')
   }
-
+  if (response.status === 409) {
+    throw new Error('ALREADY_MEMBER')
+  }
   if (!response.ok) {
     throw new Error('JOIN_COURSE_FAILED')
   }
 
   const course = (await response.json()) as CourseWithRole
   return course
+}
+
+export async function listJoinRequests(
+  courseId: string,
+  status: 'pending' | 'approved' | 'rejected' = 'pending',
+): Promise<Member[]> {
+  const url = new URL(`${API_BASE}/courses/${courseId}/join-requests`, window.location.origin)
+  url.searchParams.set('status', status)
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('COURSE_NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_JOIN_REQUESTS_FAILED')
+  return (await response.json()) as Member[]
+}
+
+export async function approveJoinRequest(
+  courseId: string,
+  userId: string,
+  note?: string,
+): Promise<{ user_id: string; status: string; decided_at: string }> {
+  const body: Record<string, unknown> = {}
+  if (note) body.note = note
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/join-requests/${userId}/approve`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(body),
+    },
+  )
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('APPROVE_REQUEST_FAILED')
+  return (await response.json()) as { user_id: string; status: string; decided_at: string }
+}
+
+export async function rejectJoinRequest(
+  courseId: string,
+  userId: string,
+  note?: string,
+): Promise<{ user_id: string; status: string; decided_at: string }> {
+  const body: Record<string, unknown> = {}
+  if (note) body.note = note
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/join-requests/${userId}/reject`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(body),
+    },
+  )
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('REJECT_REQUEST_FAILED')
+  return (await response.json()) as { user_id: string; status: string; decided_at: string }
 }
 
 export async function getCourse(courseId: string): Promise<CourseWithRole> {
@@ -604,7 +676,7 @@ export async function updateAssignment(
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/assignments/${assignmentId}`,
     {
-      method: 'PUT',
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
@@ -613,6 +685,10 @@ export async function updateAssignment(
     },
   )
 
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('NOT_FOUND')
@@ -1367,3 +1443,35 @@ export async function gradeTeamPeerSplit(
   if (!response.ok) throw new Error('GRADE_PEER_SPLIT_FAILED')
 }
 
+export async function listTeamSubmissions(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+): Promise<TeamSubmissionForVote[]> {
+  const response = await fetch(
+    `${teamsBase(courseId, assignmentId)}/${teamId}/submissions`,
+    { method: 'GET', headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('FETCH_TEAM_SUBMISSIONS_FAILED')
+  return (await response.json()) as TeamSubmissionForVote[]
+}
+
+export async function toggleSubmissionLike(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+  submissionId: string,
+): Promise<{ liked: boolean }> {
+  const response = await fetch(
+    `${teamsBase(courseId, assignmentId)}/${teamId}/submissions/${submissionId}/like`,
+    { method: 'POST', headers: getAuthHeaders() },
+  )
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('TOGGLE_LIKE_FAILED')
+  return (await response.json()) as { liked: boolean }
+}

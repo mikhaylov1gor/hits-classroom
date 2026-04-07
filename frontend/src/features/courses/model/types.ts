@@ -1,10 +1,13 @@
 export type CourseRole = 'student' | 'teacher' | 'owner'
 
+export type CourseMemberStatus = 'pending' | 'approved' | 'rejected'
+
 export type CourseWithRole = {
   id: string
   title: string
   role: CourseRole
   invite_code?: string
+  membership_status?: CourseMemberStatus
 }
 
 export type CourseTabId = 'assignments' | 'posts' | 'materials' | 'users' | 'settings'
@@ -224,6 +227,11 @@ export type Member = {
   last_name: string
   role: CourseRole
   birth_date?: string | null
+  status?: CourseMemberStatus
+  requested_at?: string
+  decided_at?: string | null
+  decided_by?: string | null
+  decision_note?: string | null
 }
 
 type MemberLike = {
@@ -413,4 +421,14 @@ export type SubmissionWithAssignment = {
   }
 }
 
+export type TeamSubmissionVoteStats = {
+  submission_id: string
+  vote_weight: number
+  vote_count: number
+  like_count: number
+}
 
+export type TeamSubmissionForVote = {
+  submission: Submission
+  stats: TeamSubmissionVoteStats
+}

@@ -4,13 +4,17 @@ import {
   Box,
   Card,
   CardContent,
+  Chip,
   CircularProgress,
   IconButton,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import HourglassEmptyOutlinedIcon from '@mui/icons-material/HourglassEmptyOutlined'
+import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined'
 import { useNavigate } from 'react-router-dom'
 import { listCourses, listCourseMembers } from '../../api/coursesApi'
 import { useCourses } from '../../model/CoursesContext'
@@ -148,90 +152,124 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
                 : course.role === 'teacher'
                   ? 'Роль: преподаватель'
                   : 'Роль: студент'
+            const memberStatus = course.membership_status
+            const isPending = memberStatus === 'pending'
+            const isRejected = memberStatus === 'rejected'
+            const isClickable = !isPending && !isRejected
             return (
-              <Card
+              <Tooltip
                 key={course.id}
-                component="button"
-                elevation={0}
-                className="overflow-visible cursor-pointer border border-slate-200 rounded-2xl transition-all duration-200 hover:shadow-lg hover:border-slate-300 text-left w-full"
-                onClick={() => navigate(`/course/${course.id}`)}
-                sx={{
-                  '&:hover': {
-                    boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
-                  },
-                }}
+                title={
+                  isPending
+                    ? 'Ожидает подтверждения преподавателем'
+                    : isRejected
+                      ? 'Заявка отклонена'
+                      : ''
+                }
+                placement="top"
               >
-                <Box className="relative">
-                  <Box
-                    className="h-28 sm:h-32 flex flex-col justify-end p-3 sm:p-4 pb-5 sm:pb-6 relative overflow-hidden"
-                    sx={{
-                      background: (() => {
-                        const [from, to] = getCourseGradient(course.id)
-                        return `linear-gradient(135deg, ${from} 0%, ${to} 100%)`
-                      })(),
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        inset: 0,
-                        background:
-                          'linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.06) 100%)',
-                        pointerEvents: 'none',
-                      },
-                    }}
-                  >
-                    <Typography
-                      variant="h6"
-                      className="font-medium text-slate-800 line-clamp-2 relative z-10"
+                <Card
+                  component="div"
+                  elevation={0}
+                  className={`overflow-visible border rounded-2xl transition-all duration-200 text-left w-full ${isClickable ? 'cursor-pointer hover:shadow-lg hover:border-slate-300' : 'cursor-default'} ${isPending ? 'border-slate-300 opacity-75' : isRejected ? 'border-red-200 opacity-60' : 'border-slate-200'}`}
+                  onClick={isClickable ? () => navigate(`/course/${course.id}`) : undefined}
+                  sx={{
+                    '&:hover': isClickable ? { boxShadow: '0 4px 16px rgba(0,0,0,0.1)' } : {},
+                  }}
+                >
+                  <Box className="relative">
+                    <Box
+                      className="h-28 sm:h-32 flex flex-col justify-end p-3 sm:p-4 pb-5 sm:pb-6 relative overflow-hidden"
                       sx={{
-                        textShadow: '0 1px 2px rgba(255,255,255,0.5)',
-                        fontSize: { xs: '1rem', sm: '1.05rem' },
+                        background: (() => {
+                          const [from, to] = getCourseGradient(course.id)
+                          return `linear-gradient(135deg, ${from} 0%, ${to} 100%)`
+                        })(),
+                        filter: (isPending || isRejected) ? 'grayscale(40%)' : undefined,
+                        '&::before': {
+                          content: '""',
+                          position: 'absolute',
+                          inset: 0,
+                          background:
+                            'linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.06) 100%)',
+                          pointerEvents: 'none',
+                        },
                       }}
                     >
-                      {course.title}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      className="text-slate-700 relative z-10 mt-0.5"
-                      sx={{ textShadow: '0 1px 2px rgba(255,255,255,0.5)' }}
+                      {isPending && (
+                        <Box sx={{ position: 'absolute', top: 8, left: 8, zIndex: 3 }}>
+                          <Chip
+                            size="small"
+                            icon={<HourglassEmptyOutlinedIcon fontSize="small" />}
+                            label="Ожидает"
+                            sx={{ bgcolor: 'rgba(255,255,255,0.85)', fontSize: '0.7rem' }}
+                          />
+                        </Box>
+                      )}
+                      {isRejected && (
+                        <Box sx={{ position: 'absolute', top: 8, left: 8, zIndex: 3 }}>
+                          <Chip
+                            size="small"
+                            icon={<BlockOutlinedIcon fontSize="small" />}
+                            label="Отклонено"
+                            color="error"
+                            sx={{ bgcolor: 'rgba(255,255,255,0.85)', fontSize: '0.7rem' }}
+                          />
+                        </Box>
+                      )}
+                      <Typography
+                        variant="h6"
+                        className="font-medium text-slate-800 line-clamp-2 relative z-10"
+                        sx={{
+                          textShadow: '0 1px 2px rgba(255,255,255,0.5)',
+                          fontSize: { xs: '1rem', sm: '1.05rem' },
+                        }}
+                      >
+                        {course.title}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        className="text-slate-700 relative z-10 mt-0.5"
+                        sx={{ textShadow: '0 1px 2px rgba(255,255,255,0.5)' }}
+                      >
+                        {ownerName}
+                      </Typography>
+                    </Box>
+                    <Avatar
+                      sx={{
+                        position: 'absolute',
+                        right: { xs: 10, sm: 12 },
+                        bottom: -18,
+                        width: { xs: 36, sm: 40 },
+                        height: { xs: 36, sm: 40 },
+                        fontSize: { xs: '0.875rem', sm: '1rem' },
+                        bgcolor: 'primary.main',
+                        border: '3px solid white',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                        zIndex: 2,
+                      }}
                     >
-                      {ownerName}
+                      {owner ? getInitials(owner) : '?'}
+                    </Avatar>
+                  </Box>
+                  <CardContent className="py-3 px-3 sm:py-4 sm:px-4 pt-5 sm:pt-6">
+                    <Typography variant="body2" className="text-slate-500 mb-3">
+                      {roleLabel}
                     </Typography>
-                  </Box>
-                  <Avatar
-                    sx={{
-                      position: 'absolute',
-                      right: { xs: 10, sm: 12 },
-                      bottom: -18,
-                      width: { xs: 36, sm: 40 },
-                      height: { xs: 36, sm: 40 },
-                      fontSize: { xs: '0.875rem', sm: '1rem' },
-                      bgcolor: 'primary.main',
-                      fontSize: '1rem',
-                      border: '3px solid white',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                      zIndex: 2,
-                    }}
-                  >
-                    {owner ? getInitials(owner) : '?'}
-                  </Avatar>
-                </Box>
-                <CardContent className="py-3 px-3 sm:py-4 sm:px-4 pt-5 sm:pt-6">
-                  <Typography variant="body2" className="text-slate-500 mb-3">
-                    {roleLabel}
-                  </Typography>
-                  <Box className="flex justify-end gap-0.5">
-                    <IconButton size="small" className="text-slate-400" disabled>
-                      <ImageOutlinedIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" className="text-slate-400" disabled>
-                      <FolderOutlinedIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" className="text-slate-400" disabled>
-                      <MoreVertIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
-                </CardContent>
-              </Card>
+                    <Box className="flex justify-end gap-0.5">
+                      <IconButton size="small" className="text-slate-400" disabled>
+                        <ImageOutlinedIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" className="text-slate-400" disabled>
+                        <FolderOutlinedIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" className="text-slate-400" disabled>
+                        <MoreVertIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Tooltip>
             )
           })}
         </Box>
