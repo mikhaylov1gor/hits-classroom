@@ -128,10 +128,10 @@ type teamMemberModel struct {
 
 type teamSubmissionVoteModel struct {
 	ID           string    `gorm:"primaryKey;type:text"`
-	AssignmentID string    `gorm:"index;type:text;not null"`
-	TeamID       string    `gorm:"index;type:text;not null"`
+	AssignmentID string    `gorm:"index;uniqueIndex:ux_vote_per_user;type:text;not null"`
+	TeamID       string    `gorm:"index;uniqueIndex:ux_vote_per_user;type:text;not null"`
 	SubmissionID string    `gorm:"index;type:text;not null"`
-	VoterID      string    `gorm:"index:ux_vote_per_user,unique;type:text;not null"`
+	VoterID      string    `gorm:"index;uniqueIndex:ux_vote_per_user;type:text;not null"`
 	Weight       float64   `gorm:"not null"`
 	CreatedAt    time.Time `gorm:"not null"`
 }

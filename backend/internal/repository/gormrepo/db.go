@@ -16,7 +16,7 @@ func OpenFromEnv() (*gorm.DB, error) {
 }
 
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&userModel{},
 		&courseModel{},
 		&courseMemberModel{},
@@ -32,5 +32,18 @@ func AutoMigrate(db *gorm.DB) error {
 		&teamSubmissionLikeModel{},
 		&teamPeerGradeModel{},
 		&teamAuditModel{},
-	)
+	); err != nil {
+		return err
+	}
+	// Keep voting uniqueness scoped to assignment+team+voter.
+	// Older schema versions had unique(voter_id), causing 500 on second vote in another team/assignment.
+	if db.Migrator().HasIndex(&teamSubmissionVoteModel{}, "ux_vote_per_user") {
+		if err := db.Migrator().DropIndex(&teamSubmissionVoteModel{}, "ux_vote_per_user"); err != nil {
+			return err
+		}
+	}
+	if err := db.Migrator().CreateIndex(&teamSubmissionVoteModel{}, "ux_vote_per_user"); err != nil {
+		return err
+	}
+	return nil
 }
