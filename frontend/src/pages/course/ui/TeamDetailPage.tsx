@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '../../../features/auth'
 import {
   Alert,
   Avatar,
@@ -56,6 +57,8 @@ const COMPOSITION_EVENT_TYPES = new Set([
   'member_left',
   'member_removed',
   'roster_locked',
+  'roster_change',
+  'roster_changed',
 ])
 
 const VOTING_EVENT_TYPES = new Set([
@@ -86,6 +89,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   member_left: 'Участник покинул команду',
   member_removed: 'Участник удалён из команды',
   roster_locked: 'Состав заблокирован',
+  roster_change: 'Изменение состава',
+  roster_changed: 'Изменение состава',
   submission_proposed: 'Предложено решение',
   submission_created: 'Создано решение',
   submission_attached: 'Решение прикреплено',
@@ -198,7 +203,14 @@ function EventRow({
   // Try to get subject from payload (e.g., who joined/left)
   let detail = ''
   const payload = event.payload as Record<string, unknown>
-  if (event.event_type === 'submission_liked') {
+  if (event.event_type === 'roster_change' || event.event_type === 'roster_changed') {
+    const action = typeof payload.action === 'string' ? payload.action : null
+    const targetId = typeof payload.user_id === 'string' ? payload.user_id : null
+    const targetName = targetId ? getPersonName(targetId, members, teamMembers) : null
+    const actionLabel =
+      action === 'join' ? 'Вступление' : action === 'leave' ? 'Выход' : action ?? '—'
+    detail = `${actionLabel}${targetName ? `: ${targetName}` : ''}`
+  } else if (event.event_type === 'submission_liked') {
     const sid = typeof payload.submission_id === 'string' ? payload.submission_id : null
     const liked = payload.liked
     detail = `Решение: ${sid ? sid.slice(0, 8) + '…' : '—'}, лайк: ${liked ? 'поставлен' : 'снят'}`
@@ -598,6 +610,7 @@ function TeamSubmissionsSection({
   onLike,
   voteLoading,
   likeLoading,
+  canVote,
 }: {
   submissions: TeamSubmissionForVote[]
   members: Member[]
@@ -606,7 +619,10 @@ function TeamSubmissionsSection({
   onLike: (submissionId: string, currentLiked: boolean) => void
   voteLoading: string | null
   likeLoading: string | null
+  canVote: boolean
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <SectionTitle icon={<ThumbUpAltOutlinedIcon color="action" />} title="Решения команды (голосование)" />
@@ -619,6 +635,7 @@ function TeamSubmissionsSection({
             const authorName = getPersonName(submission.user_id, members, teamMembers)
             const isVoting = voteLoading === submission.id
             const isLiking = likeLoading === submission.id
+            const isExpanded = expandedId === submission.id
             const body = submission.body?.trim()
             const fileCount = submission.file_ids?.length ?? 0
             return (
@@ -657,37 +674,83 @@ function TeamSubmissionsSection({
                     />
                   </Box>
                 </Box>
-                {body && (
-                  <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 80, overflow: 'hidden' }}>
-                    {body.length > 200 ? body.slice(0, 200) + '…' : body}
+
+                {/* Preview (collapsed) */}
+                {!isExpanded && body && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {body.length > 120 ? body.slice(0, 120) + '…' : body}
                   </Typography>
                 )}
-                {fileCount > 0 && !body && (
+                {!isExpanded && !body && fileCount > 0 && (
                   <Typography variant="caption" color="text.secondary">{fileCount} файл(ов)</Typography>
                 )}
-                <Box className="flex gap-2 mt-1.5">
+
+                {/* Full content (expanded) */}
+                {isExpanded && (
+                  <Box sx={{ mt: 1 }}>
+                    {body && (
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', mb: 1 }}>
+                        {body}
+                      </Typography>
+                    )}
+                    {submission.file_ids && submission.file_ids.length > 0 && (
+                      <Box sx={{ mb: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                          Прикреплённые файлы:
+                        </Typography>
+                        {submission.file_ids.map((fid) => (
+                          <Typography key={fid} variant="caption" color="text.secondary" sx={{ display: 'block', pl: 1 }}>
+                            {fid}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+                    {!body && fileCount === 0 && (
+                      <Typography variant="body2" color="text.secondary">(без содержимого)</Typography>
+                    )}
+                    {submission.submitted_at && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        Отправлено: {formatDateTime(submission.submitted_at)}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+
+                <Box className="flex gap-2 mt-1.5 flex-wrap items-center">
                   <Button
                     size="small"
-                    variant="outlined"
-                    startIcon={<HowToVoteIcon fontSize="small" />}
-                    onClick={() => onVote(submission.id)}
-                    disabled={isVoting}
+                    variant="text"
+                    onClick={() => setExpandedId(isExpanded ? null : submission.id)}
                     sx={{ fontSize: '0.75rem', py: 0.25 }}
                   >
-                    {isVoting ? 'Голосование…' : 'Голосовать'}
+                    {isExpanded ? 'Скрыть решение' : 'Посмотреть решение'}
                   </Button>
-                  <IconButton
-                    size="small"
-                    onClick={() => onLike(submission.id, false)}
-                    disabled={isLiking}
-                    aria-label="Лайк"
-                  >
-                    {isLiking ? (
-                      <CircularProgress size={16} />
-                    ) : (
-                      <FavoriteBorderIcon fontSize="small" sx={{ color: 'error.main' }} />
-                    )}
-                  </IconButton>
+                  {canVote && (
+                    <>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<HowToVoteIcon fontSize="small" />}
+                        onClick={() => onVote(submission.id)}
+                        disabled={isVoting}
+                        sx={{ fontSize: '0.75rem', py: 0.25 }}
+                      >
+                        {isVoting ? 'Голосование…' : 'Голосовать'}
+                      </Button>
+                      <IconButton
+                        size="small"
+                        onClick={() => onLike(submission.id, false)}
+                        disabled={isLiking}
+                        aria-label="Лайк"
+                      >
+                        {isLiking ? (
+                          <CircularProgress size={16} />
+                        ) : (
+                          <FavoriteBorderIcon fontSize="small" sx={{ color: 'error.main' }} />
+                        )}
+                      </IconButton>
+                    </>
+                  )}
                 </Box>
               </Box>
             )
@@ -707,6 +770,7 @@ export function TeamDetailPage() {
     teamId: string
   }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   const [assignment, setAssignment] = useState<Assignment | null>(null)
   const [team, setTeam] = useState<TeamWithMembers | null>(null)
@@ -881,17 +945,18 @@ export function TeamDetailPage() {
           )}
 
           {/* Team submissions for vote */}
-          {teamSubmissionsForVote.length > 0 && (
-            <TeamSubmissionsSection
-              submissions={teamSubmissionsForVote}
-              members={courseMembers}
-              teamMembers={teamMembers}
-              onVote={handleVote}
-              onLike={handleLike}
-              voteLoading={voteLoading}
-              likeLoading={likeLoading}
-            />
-          )}
+          <TeamSubmissionsSection
+            submissions={teamSubmissionsForVote}
+            members={courseMembers}
+            teamMembers={teamMembers}
+            onVote={handleVote}
+            onLike={handleLike}
+            voteLoading={voteLoading}
+            likeLoading={likeLoading}
+            canVote={
+              courseMembers.find((m) => m.user_id === user?.id)?.role === 'student'
+            }
+          />
 
           {/* Composition history */}
           <CompositionHistory

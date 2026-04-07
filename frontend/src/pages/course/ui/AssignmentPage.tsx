@@ -1331,7 +1331,6 @@ export function AssignmentPage() {
                 assignmentId={assignmentId}
                 assignment={assignment}
                 myUserId={authUser.id}
-                submissions={submissions}
                 onRefresh={() => {
                   if (courseId && assignmentId) {
                     getMySubmission(courseId, assignmentId).then((s) => {
