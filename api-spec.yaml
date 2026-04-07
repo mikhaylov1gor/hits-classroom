@@ -1391,7 +1391,7 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/votes:
     post:
       tags: [teams]
-      summary: Голос за решение команды (для правил vote_equal/vote_weighted)
+      summary: Голос за решение команды (для правил vote_equal/vote_weighted, только после lock-roster)
       operationId: voteTeamSubmission
       security:
         - bearerAuth: []
@@ -1533,7 +1533,7 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/finalize-vote:
     post:
       tags: [teams]
-      summary: Зафиксировать победившее решение по голосованию (owner/teacher)
+      summary: Зафиксировать победившее решение по голосованию (owner/teacher, только после lock-roster)
       operationId: finalizeTeamVote
       security:
         - bearerAuth: []
@@ -1626,7 +1626,7 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/peer-grade-split:
     post:
       tags: [teams]
-      summary: Отправить распределение процентов оценки между участниками команды (student)
+      summary: Отправить персональное распределение процентов оценки между участниками команды (student)
       operationId: submitPeerGradeSplit
       security:
         - bearerAuth: []
@@ -1660,7 +1660,9 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/grade-peer-split:
     post:
       tags: [teams]
-      summary: Выставить общую оценку команде с распределением по процентам (owner/teacher)
+      summary: >-
+        Выставить общую оценку команде с распределением по процентам (owner/teacher, только после lock-roster).
+        В режиме team_peer_split берётся раскладка автора победившего решения; если её нет — равномерное распределение.
       operationId: gradeTeamPeerSplit
       security:
         - bearerAuth: []
@@ -1805,6 +1807,7 @@ paths:
         Сохранить/отправить ответ на задание (F-11, F-12).
         is_attached=false — черновик (можно перезаписывать).
         is_attached=true — финальная сдача; после дедлайна невозможна (409).
+        Для групповых заданий финальная сдача доступна только после lock-roster.
       operationId: submitAssignment
       security:
         - bearerAuth: []
@@ -1912,7 +1915,7 @@ paths:
   /courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/grade:
     put:
       tags: [submissions]
-      summary: Выставление оценки (F-14). Оценка от 0 до max_grade задания.
+      summary: Выставление оценки (F-14). Оценка от 0 до max_grade задания. Для групповых заданий доступно только после lock-roster.
       operationId: gradeSubmission
       security:
         - bearerAuth: []
@@ -2480,11 +2483,11 @@ components:
         team_count:
           type: integer
           minimum: 0
-          description: Количество команд (legacy). Приоритет у desired_team_size, если задан.
+          description: Количество команд. Можно указывать вместе с desired_team_size; если оба заданы, team_count имеет приоритет для распределения.
         desired_team_size:
           type: integer
           minimum: 2
-          description: Желаемый размер команды; число команд = ceil(студенты / desired_team_size).
+          description: Желаемый размер команды. Если team_count не задан, число команд = ceil(студенты / desired_team_size).
         assignment_kind:
           $ref: "#/components/schemas/AssignmentKind"
         team_submission_rule:
@@ -2541,7 +2544,7 @@ components:
           $ref: "#/components/schemas/TeamDistributionType"
         team_count:
           type: integer
-          description: Количество команд
+          description: Количество команд (явное значение, используемое для распределения)
         max_team_size:
           type: integer
           description: Максимальный размер команды, рассчитанный по формуле ceil(students/team_count), минимум 2

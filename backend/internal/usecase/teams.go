@@ -490,6 +490,9 @@ func calcMaxTeamSize(studentsCount, teamCount int) (int, error) {
 	if teamCount <= 0 {
 		return 0, &ValidationError{Message: "team_count must be > 0"}
 	}
+	if studentsCount > 0 && teamCount > studentsCount {
+		return 0, &ValidationError{Message: "team_count cannot exceed approved students count"}
+	}
 	maxSize := int(math.Ceil(float64(studentsCount) / float64(teamCount)))
 	if maxSize < 2 {
 		maxSize = 2
@@ -621,6 +624,9 @@ func (uc *VoteTeamSubmission) Vote(courseID, assignmentID, teamID, submissionID,
 	a, err := uc.assignmentRepo.GetByID(assignmentID)
 	if err != nil || a == nil || a.CourseID != courseID {
 		return ErrCourseNotFound
+	}
+	if !assignmentRosterLocked(a, time.Now().UTC()) {
+		return &ValidationError{Message: "voting is not allowed before team roster is locked"}
 	}
 	if a.TeamSubmissionRule != domain.TeamRuleVoteEqual && a.TeamSubmissionRule != domain.TeamRuleVoteWeighted {
 		return &ValidationError{Message: "voting is available only for vote rules"}
@@ -819,6 +825,9 @@ func (uc *FinalizeTeamVoteSubmission) FinalizeVoteForTeam(courseID, assignmentID
 	a, err := uc.assignmentRepo.GetByID(assignmentID)
 	if err != nil || a == nil || a.CourseID != courseID {
 		return nil, ErrCourseNotFound
+	}
+	if !assignmentRosterLocked(a, time.Now().UTC()) {
+		return nil, &ValidationError{Message: "finalize is not allowed before team roster is locked"}
 	}
 	if a.TeamSubmissionRule != domain.TeamRuleVoteEqual && a.TeamSubmissionRule != domain.TeamRuleVoteWeighted {
 		return nil, &ValidationError{Message: "finalize voting is available only for vote rules"}

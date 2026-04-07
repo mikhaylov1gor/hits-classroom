@@ -13,14 +13,14 @@ func NewTeamPeerGradeRepository(db *gorm.DB) *TeamPeerGradeRepository {
 	return &TeamPeerGradeRepository{db: db}
 }
 
-func (r *TeamPeerGradeRepository) ReplaceTeamAllocations(assignmentID, teamID string, rows []*domain.TeamPeerGradeAllocation) error {
+func (r *TeamPeerGradeRepository) ReplaceTeamAllocations(assignmentID, teamID, submitterUserID string, rows []*domain.TeamPeerGradeAllocation) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Delete(&teamPeerGradeModel{}).Error; err != nil {
+		if err := tx.Where("assignment_id = ? AND team_id = ? AND submitter_user_id = ?", assignmentID, teamID, submitterUserID).Delete(&teamPeerGradeModel{}).Error; err != nil {
 			return err
 		}
 		for _, row := range rows {
 			m := &teamPeerGradeModel{
-				ID: row.ID, AssignmentID: row.AssignmentID, TeamID: row.TeamID, UserID: row.UserID,
+				ID: row.ID, AssignmentID: row.AssignmentID, TeamID: row.TeamID, SubmitterUserID: row.SubmitterUserID, UserID: row.UserID,
 				Percent: row.Percent, UpdatedAt: row.UpdatedAt,
 			}
 			if err := tx.Create(m).Error; err != nil {
@@ -31,15 +31,15 @@ func (r *TeamPeerGradeRepository) ReplaceTeamAllocations(assignmentID, teamID st
 	})
 }
 
-func (r *TeamPeerGradeRepository) ListByTeam(assignmentID, teamID string) ([]*domain.TeamPeerGradeAllocation, error) {
+func (r *TeamPeerGradeRepository) ListByTeamAndSubmitter(assignmentID, teamID, submitterUserID string) ([]*domain.TeamPeerGradeAllocation, error) {
 	var rows []teamPeerGradeModel
-	if err := r.db.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Find(&rows).Error; err != nil {
+	if err := r.db.Where("assignment_id = ? AND team_id = ? AND submitter_user_id = ?", assignmentID, teamID, submitterUserID).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*domain.TeamPeerGradeAllocation, 0, len(rows))
 	for i := range rows {
 		out = append(out, &domain.TeamPeerGradeAllocation{
-			ID: rows[i].ID, AssignmentID: rows[i].AssignmentID, TeamID: rows[i].TeamID, UserID: rows[i].UserID,
+			ID: rows[i].ID, AssignmentID: rows[i].AssignmentID, TeamID: rows[i].TeamID, SubmitterUserID: rows[i].SubmitterUserID, UserID: rows[i].UserID,
 			Percent: rows[i].Percent, UpdatedAt: rows[i].UpdatedAt,
 		})
 	}

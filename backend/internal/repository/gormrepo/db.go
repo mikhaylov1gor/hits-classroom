@@ -45,5 +45,14 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Migrator().CreateIndex(&teamSubmissionVoteModel{}, "ux_vote_per_user"); err != nil {
 		return err
 	}
+	// Keep peer split uniqueness scoped to assignment+team+submitter+target user.
+	if db.Migrator().HasIndex(&teamPeerGradeModel{}, "ux_team_peer_alloc") {
+		if err := db.Migrator().DropIndex(&teamPeerGradeModel{}, "ux_team_peer_alloc"); err != nil {
+			return err
+		}
+	}
+	if err := db.Migrator().CreateIndex(&teamPeerGradeModel{}, "ux_team_peer_alloc"); err != nil {
+		return err
+	}
 	return nil
 }

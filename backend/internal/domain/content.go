@@ -177,12 +177,13 @@ type TeamSubmissionLike struct {
 
 // TeamPeerGradeAllocation splits 100% of a team grade among members (team_peer_split mode).
 type TeamPeerGradeAllocation struct {
-	ID           string
-	AssignmentID string
-	TeamID       string
-	UserID       string
-	Percent      float64
-	UpdatedAt    time.Time
+	ID              string
+	AssignmentID    string
+	TeamID          string
+	SubmitterUserID string
+	UserID          string
+	Percent         float64
+	UpdatedAt       time.Time
 }
 
 type TeamAuditEventType string

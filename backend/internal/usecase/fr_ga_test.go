@@ -19,8 +19,8 @@ func TestResolveVoteWinner_RandomTieIsDeterministic(t *testing.T) {
 	}
 	memberSet := map[string]bool{"u1": true, "u2": true}
 	scores := map[string]float64{"sub-a": 2, "sub-b": 2}
-	w1 := resolveVoteWinner(a, "course-1", a.ID, "team-1", scores, subs, memberSet, nil, nil)
-	w2 := resolveVoteWinner(a, "course-1", a.ID, "team-1", scores, subs, memberSet, nil, nil)
+	w1 := resolveVoteWinner(a, "course-1", a.ID, "team-1", scores, subs, memberSet, nil, nil, map[string]int{})
+	w2 := resolveVoteWinner(a, "course-1", a.ID, "team-1", scores, subs, memberSet, nil, nil, map[string]int{})
 	if w1 != w2 {
 		t.Fatalf("expected same winner, got %q and %q", w1, w2)
 	}
@@ -62,7 +62,7 @@ func TestResolveVoteWinner_HighestAuthorUsesAverage(t *testing.T) {
 	}
 	memberSet := map[string]bool{"uhi": true, "ulo": true}
 	scores := map[string]float64{"s1": 1, "s2": 1}
-	w := resolveVoteWinner(a, courseID, a.ID, "t1", scores, subs, memberSet, assignRepo, subRepo)
+	w := resolveVoteWinner(a, courseID, a.ID, "t1", scores, subs, memberSet, assignRepo, subRepo, map[string]int{})
 	if w != "s2" {
 		t.Fatalf("expected higher-average author uhi (s2), got %q", w)
 	}

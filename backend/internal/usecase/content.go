@@ -159,9 +159,6 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 	if teamRule == "" {
 		teamRule = domain.TeamRuleFirstSubmission
 	}
-	if in.TeamCount < 0 {
-		return nil, &ValidationError{Message: "team_count cannot be negative"}
-	}
 	students, err := listStudentIDs(in.CourseID, uc.memberRepo)
 	if err != nil {
 		return nil, err
@@ -169,43 +166,26 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 	n := len(students)
 	teamCount := 0
 	maxTeamSize := 0
-	switch {
-	case in.DesiredTeamSize >= 2:
-		if n == 0 {
-			teamCount = 1
-			maxTeamSize = in.DesiredTeamSize
-		} else {
-			teamCount = int(math.Ceil(float64(n) / float64(in.DesiredTeamSize)))
-			if teamCount < 1 {
-				teamCount = 1
-			}
-			maxTeamSize = int(math.Ceil(float64(n) / float64(teamCount)))
-			if maxTeamSize < 2 {
-				maxTeamSize = 2
-			}
-		}
-	case in.TeamCount > 0:
-		teamCount = in.TeamCount
-		var cerr error
-		maxTeamSize, cerr = calcMaxTeamSize(n, teamCount)
-		if cerr != nil {
-			return nil, cerr
-		}
-	}
+	desiredTeamSize := in.DesiredTeamSize
 	kind := in.AssignmentKind
 	if kind == "" {
-		if teamCount > 0 {
+		if in.TeamCount > 0 || in.DesiredTeamSize >= 2 {
 			kind = domain.AssignmentKindGroup
 		} else {
 			kind = domain.AssignmentKindIndividual
 		}
 	}
+	if kind == domain.AssignmentKindGroup {
+		var serr error
+		desiredTeamSize, teamCount, maxTeamSize, serr = resolveGroupTeamSizing(n, in.DesiredTeamSize, in.TeamCount)
+		if serr != nil {
+			return nil, serr
+		}
+	}
 	if kind == domain.AssignmentKindIndividual {
+		desiredTeamSize = 0
 		teamCount = 0
 		maxTeamSize = 0
-	}
-	if kind == domain.AssignmentKindGroup && teamCount <= 0 {
-		return nil, &ValidationError{Message: "group assignment requires desired_team_size >= 2 or team_count > 0"}
 	}
 	gradingMode := in.TeamGradingMode
 	if gradingMode == "" {
@@ -240,7 +220,7 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 		Deadline:               in.Deadline,
 		MaxGrade:               maxGrade,
 		AssignmentKind:         kind,
-		DesiredTeamSize:        in.DesiredTeamSize,
+		DesiredTeamSize:        desiredTeamSize,
 		TeamDistributionType:   distributionType,
 		TeamCount:              teamCount,
 		MaxTeamSize:            maxTeamSize,
@@ -342,47 +322,29 @@ func (uc *UpdateAssignment) UpdateAssignment(in UpdateAssignmentInput) (*domain.
 	a.PeerSplitMinPercent = in.PeerSplitMinPercent
 	a.PeerSplitMaxPercent = in.PeerSplitMaxPercent
 
-	// Recalculate team_count/max_team_size when desired_team_size is specified.
-	if a.DesiredTeamSize >= 2 {
-		students, serr := listStudentIDs(in.CourseID, uc.memberRepo)
-		if serr != nil {
-			return nil, serr
-		}
-		n := len(students)
-		if n == 0 {
-			a.TeamCount = 1
-			a.MaxTeamSize = a.DesiredTeamSize
-		} else {
-			a.TeamCount = int(math.Ceil(float64(n) / float64(a.DesiredTeamSize)))
-			if a.TeamCount < 1 {
-				a.TeamCount = 1
-			}
-			a.MaxTeamSize = int(math.Ceil(float64(n) / float64(a.TeamCount)))
-			if a.MaxTeamSize < 2 {
-				a.MaxTeamSize = 2
-			}
-		}
-	} else if a.TeamCount > 0 {
-		students, serr := listStudentIDs(in.CourseID, uc.memberRepo)
-		if serr != nil {
-			return nil, serr
-		}
-		maxTeamSize, cerr := calcMaxTeamSize(len(students), a.TeamCount)
-		if cerr != nil {
-			return nil, cerr
-		}
-		a.MaxTeamSize = maxTeamSize
+	students, serr := listStudentIDs(in.CourseID, uc.memberRepo)
+	if serr != nil {
+		return nil, serr
 	}
-
-	if a.AssignmentKind == domain.AssignmentKindGroup && a.TeamCount <= 0 {
-		return nil, &ValidationError{Message: "group assignment requires desired_team_size >= 2 or team_count > 0"}
-	}
-	if a.AssignmentKind == domain.AssignmentKindIndividual {
+	// Recalculate group sizing from current desired/team_count.
+	if a.AssignmentKind == domain.AssignmentKindGroup {
+		resolvedDesired, resolvedTeamCount, resolvedMaxTeamSize, rerr := resolveGroupTeamSizing(len(students), a.DesiredTeamSize, a.TeamCount)
+		if rerr != nil {
+			return nil, rerr
+		}
+		a.DesiredTeamSize = resolvedDesired
+		a.TeamCount = resolvedTeamCount
+		a.MaxTeamSize = resolvedMaxTeamSize
+	} else if a.AssignmentKind == domain.AssignmentKindIndividual {
+		a.DesiredTeamSize = 0
 		a.TeamCount = 0
 		a.MaxTeamSize = 0
 	}
 	if a.DesiredTeamSize > 0 && a.DesiredTeamSize < 2 {
 		return nil, &ValidationError{Message: "team size must be at least 2"}
+	}
+	if a.AssignmentKind == domain.AssignmentKindGroup && a.TeamCount <= 0 {
+		return nil, &ValidationError{Message: "group assignment requires desired_team_size >= 2 or team_count > 0"}
 	}
 	if a.TeamGradingMode == domain.TeamGradingPeerSplit {
 		if a.AssignmentKind != domain.AssignmentKindGroup {
@@ -401,11 +363,51 @@ func (uc *UpdateAssignment) UpdateAssignment(in UpdateAssignmentInput) (*domain.
 			}
 		}
 	}
-
 	if err := uc.assignmentRepo.Update(a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+func resolveGroupTeamSizing(studentsCount, desiredTeamSize, teamCount int) (int, int, int, error) {
+	if teamCount < 0 {
+		return 0, 0, 0, &ValidationError{Message: "team_count cannot be negative"}
+	}
+	if desiredTeamSize > 0 && desiredTeamSize < 2 {
+		return 0, 0, 0, &ValidationError{Message: "team size must be at least 2"}
+	}
+	if teamCount <= 0 && desiredTeamSize < 2 {
+		return 0, 0, 0, &ValidationError{Message: "group assignment requires desired_team_size >= 2 or team_count > 0"}
+	}
+	if studentsCount > 0 && teamCount > studentsCount {
+		return 0, 0, 0, &ValidationError{Message: "team_count cannot exceed approved students count"}
+	}
+
+	// Explicit team_count has priority: it controls equal distribution buckets.
+	if teamCount > 0 {
+		maxTeamSize, err := calcMaxTeamSize(studentsCount, teamCount)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		if desiredTeamSize < 2 {
+			desiredTeamSize = maxTeamSize
+		}
+		return desiredTeamSize, teamCount, maxTeamSize, nil
+	}
+
+	// Fallback: derive team_count from desired size.
+	if studentsCount == 0 {
+		return desiredTeamSize, 1, desiredTeamSize, nil
+	}
+	teamCount = int(math.Ceil(float64(studentsCount) / float64(desiredTeamSize)))
+	if teamCount < 1 {
+		teamCount = 1
+	}
+	maxTeamSize := int(math.Ceil(float64(studentsCount) / float64(teamCount)))
+	if maxTeamSize < 2 {
+		maxTeamSize = 2
+	}
+	return desiredTeamSize, teamCount, maxTeamSize, nil
 }
 
 type GetAssignment struct {
@@ -516,6 +518,9 @@ func (uc *CreateSubmission) CreateSubmission(in CreateSubmissionInput) (*domain.
 		if team == nil {
 			return nil, ErrForbidden
 		}
+	}
+	if a.IsGroup() && in.IsAttached && !assignmentRosterLocked(a, time.Now().UTC()) {
+		return nil, &ValidationError{Message: "finalization is not allowed before team roster is locked"}
 	}
 
 	if in.IsAttached {
@@ -719,6 +724,9 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
 	if err != nil || a == nil || a.CourseID != in.CourseID {
 		return nil, ErrCourseNotFound
+	}
+	if a.IsGroup() && !assignmentRosterLocked(a, time.Now().UTC()) {
+		return nil, &ValidationError{Message: "grading is not allowed before team roster is locked"}
 	}
 	if a.TeamGradingMode == domain.TeamGradingPeerSplit {
 		return nil, &ValidationError{Message: "use POST .../teams/{teamId}/grade-peer-split for this assignment"}

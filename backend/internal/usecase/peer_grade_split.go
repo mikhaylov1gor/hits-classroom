@@ -69,6 +69,9 @@ func (uc *SubmitPeerGradeSplit) Submit(in SubmitPeerGradeSplitInput) error {
 	if err != nil {
 		return err
 	}
+	if len(members) == 0 {
+		return &ValidationError{Message: "team has no members"}
+	}
 	memberSet := make(map[string]bool, len(members))
 	for _, m := range members {
 		memberSet[m.UserID] = true
@@ -84,12 +87,13 @@ func (uc *SubmitPeerGradeSplit) Submit(in SubmitPeerGradeSplitInput) error {
 		}
 		sum += p
 		rows = append(rows, &domain.TeamPeerGradeAllocation{
-			ID:           uuid.NewString(),
-			AssignmentID: in.AssignmentID,
-			TeamID:       in.TeamID,
-			UserID:       uid,
-			Percent:      p,
-			UpdatedAt:    time.Now().UTC(),
+			ID:              uuid.NewString(),
+			AssignmentID:    in.AssignmentID,
+			TeamID:          in.TeamID,
+			SubmitterUserID: in.UserID,
+			UserID:          uid,
+			Percent:         p,
+			UpdatedAt:       time.Now().UTC(),
 		})
 	}
 	if len(rows) != len(members) {
@@ -98,7 +102,7 @@ func (uc *SubmitPeerGradeSplit) Submit(in SubmitPeerGradeSplitInput) error {
 	if math.Abs(sum-100.0) > peerPercentEpsilon {
 		return &ValidationError{Message: "percents must sum to 100% (±0.01)"}
 	}
-	if err := uc.peerRepo.ReplaceTeamAllocations(in.AssignmentID, in.TeamID, rows); err != nil {
+	if err := uc.peerRepo.ReplaceTeamAllocations(in.AssignmentID, in.TeamID, in.UserID, rows); err != nil {
 		return err
 	}
 	tryTeamAudit(uc.auditRepo, in.AssignmentID, in.TeamID, in.UserID, domain.TeamAuditPeerSplitSubmitted, map[string]string{"submitter": in.UserID})
@@ -151,6 +155,9 @@ func (uc *GradeTeamPeerSplit) GradeTeam(in GradeTeamPeerSplitInput) error {
 	if a.TeamGradingMode != domain.TeamGradingPeerSplit {
 		return &ValidationError{Message: "peer split grading is not enabled for this assignment"}
 	}
+	if !assignmentRosterLocked(a, time.Now().UTC()) {
+		return &ValidationError{Message: "grading is not allowed before team roster is locked"}
+	}
 	if in.Grade < 0 || in.Grade > a.MaxGrade {
 		return &ValidationError{Message: "grade must be between 0 and max_grade"}
 	}
@@ -158,28 +165,54 @@ func (uc *GradeTeamPeerSplit) GradeTeam(in GradeTeamPeerSplitInput) error {
 	if err != nil || t == nil || t.AssignmentID != in.AssignmentID {
 		return ErrCourseNotFound
 	}
-	allocs, err := uc.peerRepo.ListByTeam(in.AssignmentID, in.TeamID)
-	if err != nil {
-		return err
-	}
-	if len(allocs) == 0 {
-		return &ValidationError{Message: "team has not submitted peer split yet"}
-	}
 	members, err := uc.teamMemberRepo.ListByTeam(in.TeamID)
 	if err != nil {
 		return err
 	}
-	if len(allocs) != len(members) {
-		return &ValidationError{Message: "peer split incomplete for team"}
+	memberSet := make(map[string]bool, len(members))
+	for _, m := range members {
+		memberSet[m.UserID] = true
 	}
+	allSubs, err := uc.submissionRepo.ListByAssignment(in.AssignmentID)
+	if err != nil {
+		return err
+	}
+	var winner *domain.Submission
+	for _, s := range allSubs {
+		if !memberSet[s.UserID] || !s.IsAttached || s.IsReturned {
+			continue
+		}
+		if winner == nil || s.SubmittedAt.After(winner.SubmittedAt) || (s.SubmittedAt.Equal(winner.SubmittedAt) && s.ID < winner.ID) {
+			winner = s
+		}
+	}
+	if winner == nil {
+		return &ValidationError{Message: "winning submission is not finalized"}
+	}
+	allocs, err := uc.peerRepo.ListByTeamAndSubmitter(in.AssignmentID, in.TeamID, winner.UserID)
+	if err != nil {
+		return err
+	}
+
 	var sum float64
 	byUser := make(map[string]float64, len(allocs))
 	for _, row := range allocs {
 		sum += row.Percent
 		byUser[row.UserID] = row.Percent
 	}
-	if math.Abs(sum-100.0) > peerPercentEpsilon {
-		return &ValidationError{Message: "stored percents must sum to 100%"}
+	// Fallback: if winner did not submit complete allocation, distribute equally.
+	if len(allocs) != len(members) || math.Abs(sum-100.0) > peerPercentEpsilon {
+		byUser = make(map[string]float64, len(members))
+		eq := 100.0 / float64(len(members))
+		acc := 0.0
+		for i, m := range members {
+			if i == len(members)-1 {
+				byUser[m.UserID] = 100.0 - acc
+			} else {
+				byUser[m.UserID] = eq
+				acc += eq
+			}
+		}
 	}
 	remaining := in.Grade
 	for i, m := range members {

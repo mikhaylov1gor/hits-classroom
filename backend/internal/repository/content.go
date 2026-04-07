@@ -87,8 +87,8 @@ type TeamSubmissionLikeRepository interface {
 }
 
 type TeamPeerGradeRepository interface {
-	ReplaceTeamAllocations(assignmentID, teamID string, rows []*domain.TeamPeerGradeAllocation) error
-	ListByTeam(assignmentID, teamID string) ([]*domain.TeamPeerGradeAllocation, error)
+	ReplaceTeamAllocations(assignmentID, teamID, submitterUserID string, rows []*domain.TeamPeerGradeAllocation) error
+	ListByTeamAndSubmitter(assignmentID, teamID, submitterUserID string) ([]*domain.TeamPeerGradeAllocation, error)
 	DeleteByAssignment(assignmentID string) error
 }
 

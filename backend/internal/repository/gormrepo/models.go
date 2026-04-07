@@ -146,12 +146,13 @@ type teamSubmissionLikeModel struct {
 }
 
 type teamPeerGradeModel struct {
-	ID           string    `gorm:"primaryKey;type:text"`
-	AssignmentID string    `gorm:"uniqueIndex:ux_team_peer_alloc;type:text;not null"`
-	TeamID       string    `gorm:"uniqueIndex:ux_team_peer_alloc;type:text;not null"`
-	UserID       string    `gorm:"uniqueIndex:ux_team_peer_alloc;type:text;not null"`
-	Percent      float64   `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	ID              string    `gorm:"primaryKey;type:text"`
+	AssignmentID    string    `gorm:"index;uniqueIndex:ux_team_peer_alloc;type:text;not null"`
+	TeamID          string    `gorm:"index;uniqueIndex:ux_team_peer_alloc;type:text;not null"`
+	SubmitterUserID string    `gorm:"index;uniqueIndex:ux_team_peer_alloc;type:text;not null"`
+	UserID          string    `gorm:"index;uniqueIndex:ux_team_peer_alloc;type:text;not null"`
+	Percent         float64   `gorm:"not null"`
+	UpdatedAt       time.Time `gorm:"not null"`
 }
 
 type teamAuditModel struct {
