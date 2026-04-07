@@ -94,7 +94,7 @@ func SeedDemoData(db *gorm.DB) error {
 	course := courseModel{
 		ID:         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		Title:      "Demo Course: Team Assignments",
-		InviteCode: "SEED-GO-2026",
+		InviteCode: "SEEDHC26",
 		CreatedAt:  now,
 	}
 	if err := db.Clauses(clause.OnConflict{

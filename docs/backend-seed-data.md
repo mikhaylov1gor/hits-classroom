@@ -21,7 +21,7 @@ This project now seeds demo data on backend startup (idempotent upsert).
 ## Seeded Course
 
 - **Title**: `Demo Course: Team Assignments`
-- **Invite code**: `SEED-GO-2026`
+- **Invite code**: `SEEDHC26`
 
 Course membership:
 - owner: `admin@hits.local`
