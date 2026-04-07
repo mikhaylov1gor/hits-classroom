@@ -748,7 +748,26 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 					}
 					o, _ := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, m.UserID)
 					if o == nil {
-						continue
+						o = &domain.Submission{
+							ID:           uuid.NewString(),
+							AssignmentID: in.AssignmentID,
+							UserID:       m.UserID,
+							Body:         "",
+							FileIDs:      nil,
+							SubmittedAt:  time.Now().UTC(),
+							IsAttached:   false,
+						}
+						if cerr := uc.submissionRepo.Create(o); cerr != nil {
+							// In rare races, row could be created between Get and Create.
+							existing, gerr := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, m.UserID)
+							if gerr != nil {
+								return nil, gerr
+							}
+							if existing == nil {
+								return nil, cerr
+							}
+							o = existing
+						}
 					}
 					g := in.Grade
 					o.Grade = &g
