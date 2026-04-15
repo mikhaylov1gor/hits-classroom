@@ -89,6 +89,7 @@ import { FileAttachmentLink } from '../../../features/courses/ui/FileAttachmentL
 import { TeamBlock } from '../../../features/courses/ui/TeamBlock/TeamBlock'
 import { TeamsPanel } from '../../../features/courses/ui/TeamsPanel/TeamsPanel'
 import { TeamsBlock } from '../../../features/courses/ui/Teams/TeamsBlock'
+import { EditAssignmentDialog } from '../../../features/courses/ui/CoursePage/EditAssignmentDialog/EditAssignmentDialog'
 
 const DRAFT_STORAGE_KEY = 'assignment-draft'
 
@@ -405,6 +406,7 @@ export function AssignmentPage() {
   const [studentSortBy, setStudentSortBy] = useState<string>('name')
   const [commentsTab, setCommentsTab] = useState<'general' | 'personal'>('general')
   const [assignmentMenuAnchor, setAssignmentMenuAnchor] = useState<HTMLElement | null>(null)
+  const [editAssignmentOpen, setEditAssignmentOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
@@ -710,6 +712,16 @@ export function AssignmentPage() {
     }
   }
 
+  const handleAssignmentSaved = async () => {
+    if (!courseId || !assignmentId) return
+    try {
+      const updated = await getAssignment(courseId, assignmentId)
+      setAssignment(updated)
+    } catch {
+      // Keep current assignment data if refresh fails.
+    }
+  }
+
   const handleAddComment = async (
     e: React.FormEvent,
     opts?: { isGeneral?: boolean; parent_id?: string | null },
@@ -939,6 +951,16 @@ export function AssignmentPage() {
                     <ContentCopyOutlinedIcon sx={{ mr: 1, fontSize: 20 }} />
                     Копировать ссылку
                   </MenuItem>
+                  {isTeacher && (
+                    <MenuItem
+                      onClick={() => {
+                        setAssignmentMenuAnchor(null)
+                        setEditAssignmentOpen(true)
+                      }}
+                    >
+                      Редактировать задание
+                    </MenuItem>
+                  )}
                   {isTeacher && (
                     <MenuItem
                       onClick={() => {
@@ -1347,15 +1369,16 @@ export function AssignmentPage() {
                 onCanSubmitChange={(can) => setCanSubmit(can)}
               />
             )}
-            <Box ref={submitSectionRef} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-4">
-              <Box className="flex items-center justify-between mb-4">
-                <Typography variant="h6" className="font-bold text-slate-900">
-                  Мои задания
-                </Typography>
-                <Typography variant="body2" className="text-slate-800">
-                  {statusLabel}
-                </Typography>
-              </Box>
+            {(assignment?.assignment_kind !== 'group' || !!assignment?.roster_locked_at) ? (
+              <Box ref={submitSectionRef} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sticky top-4">
+                <Box className="flex items-center justify-between mb-4">
+                  <Typography variant="h6" className="font-bold text-slate-900">
+                    Мое решение
+                  </Typography>
+                  <Typography variant="body2" className="text-slate-800">
+                    {statusLabel}
+                  </Typography>
+                </Box>
 
               {mySubmission && !canEditSubmission ? (
                 <>
@@ -1713,7 +1736,8 @@ export function AssignmentPage() {
                   )}
                 </Box>
               )}
-            </Box>
+              </Box>
+            ) : null}
           </Box>
         )}
       </Box>
@@ -2371,6 +2395,15 @@ export function AssignmentPage() {
           </Button>
         </DialogActions>
       </Dialog>
+      {assignmentId && isTeacher && (
+        <EditAssignmentDialog
+          open={editAssignmentOpen}
+          onClose={() => setEditAssignmentOpen(false)}
+          courseId={courseId}
+          assignmentId={assignmentId}
+          onSaved={handleAssignmentSaved}
+        />
+      )}
       {assignment && isTeacher && selectedSubmission && (
         <ReturnSubmissionConfirmDialog
           open={showReturnConfirm}

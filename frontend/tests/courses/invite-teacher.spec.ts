@@ -205,7 +205,7 @@ test.describe('Добавление преподавателей по email', ()
       await page.getByRole('tab', { name: /настройки/i }).click()
 
       await expect(page.getByLabel(/email преподавателя/i)).toBeVisible()
-      await expect(page.getByRole('button', { name: /добавить/i })).toBeVisible()
+      await expect(page.getByRole('button', { name: /отправить приглашение/i })).toBeVisible()
     })
 
     test('владелец может добавить преподавателя по email в существующий курс', async ({
@@ -236,6 +236,7 @@ test.describe('Добавление преподавателей по email', ()
             first_name: 'Новый',
             last_name: 'Преподаватель',
             role: 'teacher',
+            status: 'pending',
           }
           members = [...members, newMember]
           await route.fulfill({
@@ -253,7 +254,7 @@ test.describe('Добавление преподавателей по email', ()
       await page.getByRole('tab', { name: /настройки/i }).click()
 
       await page.getByLabel(/email преподавателя/i).fill('teacher@course.com')
-      await page.getByRole('button', { name: /добавить/i }).click()
+      await page.getByRole('button', { name: /отправить приглашение/i }).click()
 
       await page.getByRole('tab', { name: /пользователи/i }).click()
       await expect(page.getByText(/новый преподаватель|teacher@course.com/i)).toBeVisible()
@@ -279,7 +280,7 @@ test.describe('Добавление преподавателей по email', ()
       await page.getByRole('tab', { name: /настройки/i }).click()
 
       await page.getByLabel(/email преподавателя/i).fill('nonexistent@example.com')
-      await page.getByRole('button', { name: /добавить/i }).click()
+      await page.getByRole('button', { name: /отправить приглашение/i }).click()
 
       await expect(page.getByText(/не найден|пользователь с таким email/i)).toBeVisible()
     })

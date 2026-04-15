@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"encoding/json"
 	"math"
 	"time"
 
@@ -105,7 +106,11 @@ func (uc *SubmitPeerGradeSplit) Submit(in SubmitPeerGradeSplitInput) error {
 	if err := uc.peerRepo.ReplaceTeamAllocations(in.AssignmentID, in.TeamID, in.UserID, rows); err != nil {
 		return err
 	}
-	tryTeamAudit(uc.auditRepo, in.AssignmentID, in.TeamID, in.UserID, domain.TeamAuditPeerSplitSubmitted, map[string]string{"submitter": in.UserID})
+	payload := map[string]string{"submitter": in.UserID}
+	if b, jerr := json.Marshal(in.Percents); jerr == nil {
+		payload["percents"] = string(b)
+	}
+	tryTeamAudit(uc.auditRepo, in.AssignmentID, in.TeamID, in.UserID, domain.TeamAuditPeerSplitSubmitted, payload)
 	return nil
 }
 

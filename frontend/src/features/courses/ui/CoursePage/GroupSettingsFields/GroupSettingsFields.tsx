@@ -22,6 +22,7 @@ import type { AssignmentPayload } from '../../../api/coursesApi'
 
 export type GroupSettingsValue = {
   desiredTeamSize: string
+  teamCount: string
   teamDistributionType: TeamDistributionType
   teamSubmissionRule: TeamSubmissionRule
   voteTieBreak: VoteTieBreak
@@ -33,6 +34,7 @@ export type GroupSettingsValue = {
 
 export const DEFAULT_GROUP_SETTINGS: GroupSettingsValue = {
   desiredTeamSize: '2',
+  teamCount: '',
   teamDistributionType: 'free',
   teamSubmissionRule: 'last_submission',
   voteTieBreak: 'random',
@@ -53,6 +55,7 @@ export function groupSettingsFromAssignment(a: Assignment | null | undefined): G
   if (!isGroup) return DEFAULT_GROUP_SETTINGS
   return {
     desiredTeamSize: a.desired_team_size != null ? String(a.desired_team_size) : '2',
+    teamCount: a.team_count != null ? String(a.team_count) : '',
     teamDistributionType: a.team_distribution_type ?? 'free',
     teamSubmissionRule: a.team_submission_rule ?? 'last_submission',
     voteTieBreak: a.vote_tie_break ?? 'random',
@@ -68,17 +71,11 @@ export function validateGroupSettings(v: GroupSettingsValue): string | null {
   if (isNaN(size) || size < 2) {
     return 'Размер команды должен быть не менее 2 участников'
   }
-  if (v.teamSubmissionRule === 'vote_weighted') {
-    const min = v.peerSplitMinPercent.trim() ? parseFloat(v.peerSplitMinPercent) : NaN
-    const max = v.peerSplitMaxPercent.trim() ? parseFloat(v.peerSplitMaxPercent) : NaN
-    if (isNaN(min) || min < 1 || min > 99) {
-      return 'Минимальная доля голоса должна быть от 1 до 99%'
-    }
-    if (isNaN(max) || max < 1 || max > 99) {
-      return 'Максимальная доля голоса должна быть от 1 до 99%'
-    }
-    if (min >= max) {
-      return 'Минимальная доля голоса должна быть меньше максимальной'
+  const trimmedTeamCount = v.teamCount.trim()
+  if (trimmedTeamCount) {
+    const parsedTeamCount = parseInt(trimmedTeamCount, 10)
+    if (isNaN(parsedTeamCount) || parsedTeamCount < 1) {
+      return 'Количество команд должно быть не меньше 1'
     }
   }
   if (v.teamGradingMode === 'team_peer_split') {
@@ -106,13 +103,16 @@ export function buildGroupFields(v: GroupSettingsValue): Partial<AssignmentPaylo
     allow_early_finalization: v.allowEarlyFinalization,
     team_grading_mode: v.teamGradingMode,
   }
+  const trimmedTeamCount = v.teamCount.trim()
+  if (trimmedTeamCount) {
+    fields.team_count = parseInt(trimmedTeamCount, 10)
+  }
   const hasVoteTieBreak =
     v.teamSubmissionRule === 'vote_equal' || v.teamSubmissionRule === 'vote_weighted'
   if (hasVoteTieBreak) {
     fields.vote_tie_break = v.voteTieBreak
   }
-  const hasPeerSplit =
-    v.teamGradingMode === 'team_peer_split' || v.teamSubmissionRule === 'vote_weighted'
+  const hasPeerSplit = v.teamGradingMode === 'team_peer_split'
   if (hasPeerSplit) {
     fields.peer_split_min_percent = v.peerSplitMinPercent.trim()
       ? parseFloat(v.peerSplitMinPercent)
@@ -145,7 +145,7 @@ const VOTE_TIE_BREAK_OPTIONS: { value: VoteTieBreak; label: string }[] = [
 ]
 
 const TEAM_GRADING_MODE_OPTIONS: { value: TeamGradingMode; label: string }[] = [
-  { value: 'individual', label: 'Обычная оценка по каждому ответу' },
+  { value: 'individual', label: 'Отдельная оценка каждому студенту' },
   { value: 'team_uniform', label: 'Одна оценка на всю команду' },
   { value: 'team_peer_split', label: 'Студенты делят проценты (peer split)' },
 ]
@@ -159,8 +159,7 @@ type GroupSettingsFieldsProps = {
 export function GroupSettingsFields({ value, onChange, disabled }: GroupSettingsFieldsProps) {
   const hasVoteTieBreak =
     value.teamSubmissionRule === 'vote_equal' || value.teamSubmissionRule === 'vote_weighted'
-  const hasPeerSplit =
-    value.teamGradingMode === 'team_peer_split' || value.teamSubmissionRule === 'vote_weighted'
+  const hasPeerSplit = value.teamGradingMode === 'team_peer_split'
 
   const set = (patch: Partial<GroupSettingsValue>) => onChange({ ...value, ...patch })
 
@@ -182,6 +181,17 @@ export function GroupSettingsFields({ value, onChange, disabled }: GroupSettings
         disabled={disabled}
         inputProps={{ min: 2, 'aria-label': 'Желаемый размер команды' }}
         helperText="Минимум 2 участника"
+      />
+      <TextField
+        label="Количество команд (опционально)"
+        fullWidth
+        size="small"
+        type="number"
+        value={value.teamCount}
+        onChange={(e) => set({ teamCount: e.target.value })}
+        disabled={disabled}
+        inputProps={{ min: 1, 'aria-label': 'Количество команд' }}
+        helperText="Если не указано, количество команд вычислится автоматически"
       />
 
       <FormControl fullWidth size="small" disabled={disabled}>

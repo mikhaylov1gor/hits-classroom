@@ -33,6 +33,7 @@ import MaterialPage from './pages/course/ui/MaterialPage'
 import PostPage from './pages/course/ui/PostPage'
 import ProfileTab from './features/profile/ui/ProfileTab/ProfileTab'
 import { AddCourseButton } from './features/courses/ui/AddCourseButton/AddCourseButton'
+import { ClassInvitationsButton } from './features/courses/ui/ClassInvitationsButton/ClassInvitationsButton'
 import { CoursesLoader } from './features/courses/ui/CoursesLoader/CoursesLoader'
 import { CoursesProvider, useCourses } from './features/courses/model/CoursesContext'
 import { useAuth } from './features/auth/model/AuthContext'
@@ -109,9 +110,18 @@ function AppShellContent() {
 
               <Box className="flex items-center gap-1">
                 {isHomePage && (
-                  <Box sx={{ display: { xs: 'none', md: 'inline-flex' } }}>
-                    <AddCourseButton />
-                  </Box>
+                  <>
+                    <Box sx={{ display: { xs: 'inline-flex', md: 'none' } }}>
+                      <ClassInvitationsButton variant="icon" />
+                    </Box>
+                    <Box
+                      sx={{ display: { xs: 'none', md: 'inline-flex' } }}
+                      className="items-center gap-2"
+                    >
+                      <ClassInvitationsButton variant="button" />
+                      <AddCourseButton />
+                    </Box>
+                  </>
                 )}
                 <Box sx={{ display: { xs: 'inline-flex', md: 'none' } }}>
                   <IconButton

@@ -26,6 +26,7 @@ const inviteCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 type CourseWithRoleItem struct {
 	Course *domain.Course
 	Role   domain.CourseRole
+	Status domain.CourseMemberStatus
 }
 
 func generateInviteCode() (string, error) {
@@ -120,10 +121,11 @@ func (uc *JoinCourse) JoinCourse(in JoinCourseInput) (*domain.Course, domain.Cou
 		if member.Role != domain.RoleStudent || member.Status == domain.MemberStatusApproved {
 			return nil, "", ErrAlreadyMember
 		}
-		member.Status = domain.MemberStatusPending
+		member.Status = domain.MemberStatusApproved
 		member.RequestedAt = time.Now().UTC()
-		member.DecidedAt = nil
-		member.DecidedBy = ""
+		now := time.Now().UTC()
+		member.DecidedAt = &now
+		member.DecidedBy = in.UserID
 		member.DecisionNote = ""
 		if err := uc.memberRepo.Update(member); err != nil {
 			return nil, "", err
@@ -134,8 +136,9 @@ func (uc *JoinCourse) JoinCourse(in JoinCourseInput) (*domain.Course, domain.Cou
 		CourseID:    course.ID,
 		UserID:      in.UserID,
 		Role:        domain.RoleStudent,
-		Status:      domain.MemberStatusPending,
+		Status:      domain.MemberStatusApproved,
 		RequestedAt: time.Now().UTC(),
+		DecidedAt:   nil,
 	}
 	if err := uc.memberRepo.Create(member); err != nil {
 		return nil, "", err
@@ -163,7 +166,7 @@ func (uc *ListCourses) ListCourses(userID string) ([]CourseWithRoleItem, error) 
 		if err != nil || course == nil {
 			continue
 		}
-		out = append(out, CourseWithRoleItem{Course: course, Role: m.Role})
+		out = append(out, CourseWithRoleItem{Course: course, Role: m.Role, Status: m.Status})
 	}
 	return out, nil
 }
@@ -372,8 +375,8 @@ func (uc *DecideJoinRequest) Decide(in DecideJoinRequestInput) (*domain.CourseMe
 	if err != nil || member == nil {
 		return nil, ErrCourseNotFound
 	}
-	if member.Role != domain.RoleStudent {
-		return nil, &ValidationError{Message: "only student requests can be decided"}
+	if member.Role != domain.RoleStudent && member.Role != domain.RoleTeacher {
+		return nil, &ValidationError{Message: "only pending student or teacher requests can be decided"}
 	}
 	if member.Status != domain.MemberStatusPending {
 		return nil, &ValidationError{Message: "request is already decided"}
@@ -518,11 +521,21 @@ func (uc *InviteTeacher) InviteTeacher(in InviteTeacherInput) (*domain.CourseMem
 		case domain.RoleOwner:
 			return nil, &ValidationError{Message: "user is the course owner"}
 		case domain.RoleTeacher:
-			return nil, ErrAlreadyRole
+			if existing.Status == domain.MemberStatusApproved {
+				return nil, ErrAlreadyRole
+			}
+			return nil, &ValidationError{Message: "invitation already pending"}
 		case domain.RoleStudent:
-			// Обновляем роль студента до учителя
+			if existing.Status != domain.MemberStatusApproved {
+				return nil, &ValidationError{Message: "user has a pending join request"}
+			}
+			// Приглашение стать преподавателем — до принятия доступ как у ожидающего
 			existing.Role = domain.RoleTeacher
-			existing.Status = domain.MemberStatusApproved
+			existing.Status = domain.MemberStatusPending
+			existing.RequestedAt = time.Now().UTC()
+			existing.DecidedAt = nil
+			existing.DecidedBy = ""
+			existing.DecisionNote = ""
 			if err := uc.memberRepo.Update(existing); err != nil {
 				return nil, err
 			}
@@ -530,18 +543,48 @@ func (uc *InviteTeacher) InviteTeacher(in InviteTeacherInput) (*domain.CourseMem
 		}
 	}
 
-	// Пользователь не в курсе — добавляем сразу как учителя
+	// Приглашение: преподаватель подтверждает участие сам (или владелец через заявки)
 	member := &domain.CourseMember{
 		CourseID:    in.CourseID,
 		UserID:      target.ID,
 		Role:        domain.RoleTeacher,
-		Status:      domain.MemberStatusApproved,
+		Status:      domain.MemberStatusPending,
 		RequestedAt: time.Now().UTC(),
 	}
 	if err := uc.memberRepo.Create(member); err != nil {
 		return nil, err
 	}
 	return member, nil
+}
+
+// AcceptCourseInvitation — приглашённый преподаватель принимает приглашение (pending → approved).
+type AcceptCourseInvitation struct {
+	memberRepo repository.CourseMemberRepository
+}
+
+func NewAcceptCourseInvitation(memberRepo repository.CourseMemberRepository) *AcceptCourseInvitation {
+	return &AcceptCourseInvitation{memberRepo: memberRepo}
+}
+
+func (uc *AcceptCourseInvitation) Accept(courseID, userID string) (*domain.CourseMember, error) {
+	m, err := uc.memberRepo.Get(courseID, userID)
+	if err != nil || m == nil {
+		return nil, ErrForbidden
+	}
+	if m.Status != domain.MemberStatusPending {
+		return nil, &ValidationError{Message: "no pending invitation"}
+	}
+	if m.Role != domain.RoleTeacher {
+		return nil, &ValidationError{Message: "only teacher invitations can be accepted here"}
+	}
+	now := time.Now().UTC()
+	m.Status = domain.MemberStatusApproved
+	m.DecidedAt = &now
+	m.DecidedBy = userID
+	if err := uc.memberRepo.Update(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 var ErrLastOwner = errors.New("cannot remove the last owner")

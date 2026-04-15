@@ -91,7 +91,7 @@ func (r *CourseMemberRepository) GetUserRole(courseID, userID string) (domain.Co
 	defer r.mu.RUnlock()
 	for _, m := range r.members {
 		if m.CourseID == courseID && m.UserID == userID {
-			if m.Role == domain.RoleStudent && m.Status != domain.MemberStatusApproved {
+			if m.Status != domain.MemberStatusApproved {
 				return "", nil
 			}
 			return m.Role, nil

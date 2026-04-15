@@ -15,6 +15,9 @@ import {
   IconButton,
   Menu,
   MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
   Snackbar,
   Tab,
   Tabs,
@@ -64,6 +67,7 @@ import { MaterialCard } from './MaterialCard/MaterialCard'
 import { UserProfileDialog } from './UserProfileDialog'
 import {
   type CourseMemberStatus,
+  type CourseRole,
   type CourseTabId,
   type CourseWithRole,
   type FeedItem,
@@ -197,6 +201,7 @@ export function CoursePage() {
   const [createMaterialOpen, setCreateMaterialOpen] = useState(false)
   const [editAssignmentId, setEditAssignmentId] = useState<string | null>(null)
   const [inviteTeacherEmail, setInviteTeacherEmail] = useState('')
+  const [inviteUserRole, setInviteUserRole] = useState<CourseRole>('teacher')
   const [inviteTeacherLoading, setInviteTeacherLoading] = useState(false)
   const [inviteTeacherError, setInviteTeacherError] = useState<string | null>(null)
   const [inviteCodeRegenerating, setInviteCodeRegenerating] = useState(false)
@@ -205,7 +210,7 @@ export function CoursePage() {
   const [memberActionError, setMemberActionError] = useState<string | null>(null)
   const [submittedAssignmentIds, setSubmittedAssignmentIds] = useState<Set<string>>(new Set())
   const [joinRequests, setJoinRequests] = useState<Member[]>([])
-  const [joinRequestsStatus, setJoinRequestsStatus] = useState<'pending' | 'approved' | 'rejected'>('pending')
+  const joinRequestsStatus: CourseMemberStatus = 'pending'
   const [joinRequestsLoading, setJoinRequestsLoading] = useState(false)
   const [usersSubTab, setUsersSubTab] = useState<'members' | 'requests'>('members')
   const [rejectDialogMember, setRejectDialogMember] = useState<Member | null>(null)
@@ -446,6 +451,7 @@ export function CoursePage() {
   }
 
   const canChangeRole = (m: Member): boolean => {
+    if (m.status === 'pending') return false
     return isOwner && m.user_id !== authUser?.id
   }
 
@@ -453,6 +459,9 @@ export function CoursePage() {
     if (!courseId || !excludeMember) return
     setExcludeLoading(true)
     try {
+      if (excludeMember.role === 'owner') {
+        await changeMemberRole(courseId, excludeMember.user_id, 'student')
+      }
       await removeMember(courseId, excludeMember.user_id)
       setExcludeMember(null)
       refreshMembers()
@@ -600,6 +609,7 @@ export function CoursePage() {
         ? getNameByUserId(members, member.user_id, null)
         : `${member.first_name} ${member.last_name}`.trim() || member.email
     const showActions = canExclude(member) || canChangeRole(member)
+    const isTeacherInvitePending = member.role === 'teacher' && member.status === 'pending'
     return (
       <Box className="flex items-center justify-between gap-3 py-3 group">
         <Box
@@ -630,7 +640,9 @@ export function CoursePage() {
               {name}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Роль: {ROLE_LABELS[member.role] ?? member.role}
+              {`Роль: ${ROLE_LABELS[member.role] ?? member.role}${
+                isTeacherInvitePending ? ' · приглашение еще не принято' : ''
+              }`}
             </Typography>
           </Box>
         </Box>
@@ -1019,19 +1031,6 @@ export function CoursePage() {
 
           {isTeacher && usersSubTab === 'requests' && (
             <Box className="flex flex-col gap-3">
-              <Box className="flex gap-2 flex-wrap">
-                {(['pending', 'approved', 'rejected'] as const).map((s) => (
-                  <Chip
-                    key={s}
-                    label={s === 'pending' ? 'Ожидающие' : s === 'approved' ? 'Принятые' : 'Отклонённые'}
-                    variant={joinRequestsStatus === s ? 'filled' : 'outlined'}
-                    color={s === 'approved' ? 'success' : s === 'rejected' ? 'error' : 'default'}
-                    onClick={() => setJoinRequestsStatus(s)}
-                    size="small"
-                  />
-                ))}
-              </Box>
-
               {joinRequestsLoading ? (
                 <Box className="flex justify-center py-6"><CircularProgress size={28} /></Box>
               ) : joinRequests.length === 0 ? (
@@ -1070,28 +1069,6 @@ export function CoursePage() {
                           </Box>
                         </Box>
                       </Box>
-                      {joinRequestsStatus === 'pending' && (
-                        <Box className="flex items-center gap-1 shrink-0">
-                          <IconButton
-                            size="small"
-                            color="success"
-                            disabled={requestActionLoading}
-                            onClick={() => handleApproveRequest(m)}
-                            aria-label="Принять"
-                          >
-                            <CheckCircleOutlineIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            disabled={requestActionLoading}
-                            onClick={() => { setRejectDialogMember(m); setRejectNote('') }}
-                            aria-label="Отклонить"
-                          >
-                            <CancelOutlinedIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      )}
                     </Box>
                   )
                 })
@@ -1219,7 +1196,10 @@ export function CoursePage() {
                 {course.role === 'owner' && (
                   <Box className="flex flex-col gap-4 p-4 bg-slate-50 rounded-xl">
                     <Typography variant="subtitle2" className="text-slate-600">
-                      Добавить преподавателя по email
+                      Пригласить пользователя по email
+                    </Typography>
+                    <Typography variant="caption" className="text-slate-500 -mt-2">
+                      Сначала отправим приглашение, затем автоматически установим выбранную роль
                     </Typography>
                     <Box className="flex flex-col sm:flex-row gap-2">
                       <TextField
@@ -1236,6 +1216,20 @@ export function CoursePage() {
                         sx={{ minWidth: 240 }}
                         inputProps={{ 'aria-label': 'Email преподавателя' }}
                       />
+                      <FormControl size="small" sx={{ minWidth: 190 }}>
+                        <InputLabel id="invite-user-role-label">Роль</InputLabel>
+                        <Select
+                          labelId="invite-user-role-label"
+                          value={inviteUserRole}
+                          label="Роль"
+                          disabled={inviteTeacherLoading}
+                          onChange={(e) => setInviteUserRole(e.target.value as CourseRole)}
+                        >
+                          <MenuItem value="teacher">Преподаватель</MenuItem>
+                          <MenuItem value="owner">Владелец</MenuItem>
+                          <MenuItem value="student">Студент</MenuItem>
+                        </Select>
+                      </FormControl>
                       <Button
                         variant="outlined"
                         onClick={async () => {
@@ -1254,16 +1248,41 @@ export function CoursePage() {
                               setInviteTeacherError('Пользователь с таким email не найден')
                               return
                             }
-                            await inviteTeacherByEmail(courseId, email)
+                            const invitedMember = await inviteTeacherByEmail(courseId, email)
+                            if (inviteUserRole !== 'teacher') {
+                              await changeMemberRole(courseId, invitedMember.user_id, inviteUserRole)
+                            }
                             setInviteTeacherEmail('')
                             refreshMembers()
                           } catch (err) {
-                            const msg =
-                              err instanceof Error && err.message === 'USER_NOT_FOUND'
-                                ? 'Пользователь с таким email не найден'
-                                : err instanceof Error && err.message === 'ALREADY_TEACHER'
-                                  ? 'Пользователь уже является преподавателем'
-                                  : 'Не удалось пригласить'
+                            const msg = (() => {
+                              if (!(err instanceof Error)) return 'Не удалось отправить приглашение'
+                              if (err.message === 'USER_NOT_FOUND') {
+                                return 'Пользователь с таким email не найден'
+                              }
+                              if (err.message === 'ALREADY_TEACHER') {
+                                return 'Пользователь уже является преподавателем этого курса'
+                              }
+                              if (err.message === 'CHANGE_MEMBER_ROLE_FAILED') {
+                                return 'Приглашение отправлено, но не удалось установить выбранную роль'
+                              }
+                              if (err.message.startsWith('INVITE_TEACHER_VALIDATION:')) {
+                                const code = err.message.slice('INVITE_TEACHER_VALIDATION:'.length)
+                                if (code === 'invitation already pending') {
+                                  return 'Приглашение уже отправлено и ждёт ответа'
+                                }
+                                if (code === 'user has a pending join request') {
+                                  return 'У пользователя уже есть заявка на вступление по коду курса'
+                                }
+                                if (code === 'cannot invite yourself') {
+                                  return 'Нельзя пригласить самого себя'
+                                }
+                                if (code === 'user is the course owner') {
+                                  return 'Этот пользователь — владелец курса'
+                                }
+                              }
+                              return 'Не удалось отправить приглашение'
+                            })()
                             setInviteTeacherError(msg)
                           } finally {
                             setInviteTeacherLoading(false)
@@ -1271,7 +1290,7 @@ export function CoursePage() {
                         }}
                         disabled={inviteTeacherLoading || !inviteTeacherEmail.trim()}
                       >
-                        {inviteTeacherLoading ? 'Добавление…' : 'Добавить'}
+                        {inviteTeacherLoading ? 'Отправка…' : 'Отправить приглашение'}
                       </Button>
                     </Box>
                     {inviteTeacherError && (

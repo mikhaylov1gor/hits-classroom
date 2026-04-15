@@ -127,8 +127,8 @@ func (h *JoinCourseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	out := courseWithRoleResponse(course, role)
-	out["membership_status"] = "pending"
-	out["message"] = "request submitted, waiting for teacher approval"
+	out["membership_status"] = "approved"
+	out["message"] = "joined course successfully"
 	_ = json.NewEncoder(w).Encode(out)
 }
 
@@ -158,7 +158,11 @@ func (h *ListCoursesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]interface{}, 0, len(items))
 	for _, it := range items {
-		out = append(out, courseWithRoleResponse(it.Course, it.Role))
+		row := courseWithRoleResponse(it.Course, it.Role)
+		if it.Status != "" {
+			row["membership_status"] = string(it.Status)
+		}
+		out = append(out, row)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -742,13 +746,67 @@ func (h *InviteTeacherHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	u, _ := h.userRepo.GetByID(member.UserID)
-	m := usecase.MemberWithUser{UserID: member.UserID, Role: member.Role}
+	m := usecase.MemberWithUser{
+		UserID:      member.UserID,
+		Role:        member.Role,
+		Status:      member.Status,
+		RequestedAt: member.RequestedAt,
+	}
 	if u != nil {
 		m.Email, m.FirstName, m.LastName = u.Email, u.FirstName, u.LastName
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(memberResponse(m))
+}
+
+type AcceptCourseInvitationHandler struct {
+	accept *usecase.AcceptCourseInvitation
+}
+
+func NewAcceptCourseInvitationHandler(accept *usecase.AcceptCourseInvitation) *AcceptCourseInvitationHandler {
+	return &AcceptCourseInvitationHandler{accept: accept}
+}
+
+func (h *AcceptCourseInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	if courseID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	member, err := h.accept.Accept(courseID, userID)
+	if err != nil {
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"user_id": member.UserID,
+		"status":  string(member.Status),
+		"role":    string(member.Role),
+	})
 }
 
 func postResponse(p *domain.Post) map[string]interface{} {

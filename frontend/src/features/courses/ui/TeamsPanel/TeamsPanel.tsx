@@ -39,6 +39,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import type { Assignment, Member, Submission, TeamAuditEvent, TeamStatus, TeamWithMembers } from '../../model/types'
 import {
+  finalizeSubmissions,
   finalizeVote,
   generateBalancedTeams,
   generateRandomTeams,
@@ -423,10 +424,20 @@ function TeamRow({
   const isPeerSplit = assignment.team_grading_mode === 'team_peer_split'
   const isUniform = assignment.team_grading_mode === 'team_uniform'
   const isIndividual = assignment.team_grading_mode === 'individual'
+  const isLastSubmissionRule = assignment.team_submission_rule === 'last_submission'
 
   const memberIds = new Set(team.members.map((m) => m.user_id))
   const teamSubmissions = submissions.filter((s) => memberIds.has(s.user_id))
   const attachedSubmission = teamSubmissions.find((s) => s.is_attached)
+  const latestTeamSubmission = [...teamSubmissions].sort(
+    (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
+  )[0]
+  const gradeTargetSubmission = attachedSubmission ?? latestTeamSubmission
+  const canGradeAllByButton =
+    (isUniform || (isIndividual && isLastSubmissionRule)) &&
+    isDeadlinePassed &&
+    !!gradeTargetSubmission
+  const hasTeamGrade = teamSubmissions.some((s) => s.grade != null)
 
   const participantNames = team.members.map((m) => m.last_name).join(', ')
 
@@ -501,7 +512,13 @@ function TeamRow({
           <FinalSolutionCell submission={attachedSubmission} />
         </TableCell>
         <TableCell>
-          <GradeCell submission={attachedSubmission} maxGrade={assignment.max_grade ?? 100} />
+          {team.status === 'not_submitted' ? (
+            <Typography variant="body2" color="error.main">
+              0/{assignment.max_grade ?? 100}
+            </Typography>
+          ) : (
+            <GradeCell submission={attachedSubmission} maxGrade={assignment.max_grade ?? 100} />
+          )}
         </TableCell>
         <TableCell>
           <Box className="flex gap-1">
@@ -520,31 +537,41 @@ function TeamRow({
               </Tooltip>
             )}
             {isPeerSplit && (
-              <Tooltip title="Выставить оценку (peer split)">
-                <IconButton size="small" onClick={() => setGradeOpen(true)} color="secondary">
-                  <GavelIcon fontSize="small" />
-                </IconButton>
+              <Tooltip title={hasTeamGrade ? 'Изменить оценку (peer split)' : 'Выставить оценку (peer split)'}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<GavelIcon fontSize="small" />}
+                  onClick={() => setGradeOpen(true)}
+                >
+                  {hasTeamGrade ? 'Изменить оценку' : 'Оценить'}
+                </Button>
               </Tooltip>
             )}
-            {isUniform && (
+            {canGradeAllByButton && (
               <Tooltip
                 title={
                   !isDeadlinePassed
                     ? 'Оценивание доступно только после наступления дедлайна'
-                    : !attachedSubmission
+                    : !gradeTargetSubmission
                       ? 'Нет финальных сдач'
-                      : 'Выставить оценку команде'
+                      : isUniform
+                        ? 'Выставить оценку команде'
+                        : 'Выставить оценку всем участникам'
                 }
               >
                 <span>
-                  <IconButton
+                  <Button
                     size="small"
-                    disabled={!isDeadlinePassed || !attachedSubmission}
+                    variant="outlined"
+                    disabled={!isDeadlinePassed || !gradeTargetSubmission}
                     onClick={() => setGradeUniformOpen(true)}
                     color="primary"
+                    startIcon={<GavelIcon fontSize="small" />}
                   >
-                    <GavelIcon fontSize="small" />
-                  </IconButton>
+                    {hasTeamGrade ? 'Изменить оценку' : 'Оценить всех'}
+                  </Button>
                 </span>
               </Tooltip>
             )}
@@ -610,7 +637,7 @@ function TeamRow({
                         )}
                       </Box>
                     </Box>
-                    {isIndividual && isDeadlinePassed && (
+                    {isIndividual && isDeadlinePassed && !isLastSubmissionRule && (
                       memberSub ? (
                         <Box className="flex gap-2 items-start mt-1 flex-wrap">
                           <TextField
@@ -653,8 +680,8 @@ function TeamRow({
                           </Button>
                         </Box>
                       ) : (
-                        <Typography variant="caption" color="text.secondary">
-                          Работа не сдана — оценить нельзя
+                        <Typography variant="caption" color="error.main">
+                          Оценка: 0/{maxGrade}
                         </Typography>
                       )
                     )}
@@ -688,11 +715,11 @@ function TeamRow({
         />
       )}
 
-      {isUniform && attachedSubmission && (
+      {canGradeAllByButton && gradeTargetSubmission && (
         <TeamUniformGradeDialog
           courseId={courseId}
           assignmentId={assignmentId}
-          submissionId={attachedSubmission.id}
+          submissionId={gradeTargetSubmission.id}
           teamName={team.name}
           maxGrade={assignment.max_grade ?? 100}
           open={gradeUniformOpen}
@@ -723,17 +750,26 @@ export function TeamsPanel({
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rosterLockedLocal, setRosterLockedLocal] = useState(!!assignment.roster_locked_at)
+  const [manualFinalizeDone, setManualFinalizeDone] = useState(false)
 
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<TeamStatus | null>(null)
 
   const distributionType = assignment.team_distribution_type
   const rosterLocked = !!assignment.roster_locked_at
+  const effectiveRosterLocked = rosterLocked || rosterLockedLocal
   const isDeadlinePassed = assignment.deadline
     ? new Date(assignment.deadline) < new Date()
     : true
   const gradingMode = assignment.team_grading_mode ?? 'individual'
   const needsDeadline = gradingMode === 'individual' || gradingMode === 'team_uniform'
+  const canFinalizeSubmissions =
+    effectiveRosterLocked && !assignment.deadline_auto_finalized_at && !manualFinalizeDone
+
+  useEffect(() => {
+    setRosterLockedLocal(rosterLocked)
+  }, [rosterLocked])
 
   const fetchTeams = useCallback(async () => {
     setLoading(true)
@@ -803,12 +839,11 @@ export function TeamsPanel({
           <Typography variant="subtitle1" fontWeight={600}>
             Команды
           </Typography>
-          {rosterLocked && <Chip label="Состав закреплён" size="small" color="warning" />}
         </Box>
 
         {/* Teacher action buttons */}
         <Box className="flex gap-1 flex-wrap">
-          {distributionType === 'random' && (
+          {distributionType === 'random' && !effectiveRosterLocked && (
             <Button
               size="small"
               startIcon={<ShuffleIcon />}
@@ -818,7 +853,7 @@ export function TeamsPanel({
               Случайно
             </Button>
           )}
-          {distributionType === 'balanced' && (
+          {distributionType === 'balanced' && !effectiveRosterLocked && (
             <Button
               size="small"
               startIcon={<BalanceIcon />}
@@ -828,16 +863,37 @@ export function TeamsPanel({
               По баллам
             </Button>
           )}
-          {!rosterLocked && (
+          {!effectiveRosterLocked && teams.length > 0 && (
             <Button
               size="small"
               variant="outlined"
               color="warning"
               startIcon={<LockOutlinedIcon />}
               disabled={actionLoading}
-              onClick={() => runAction(() => lockRoster(courseId, assignmentId))}
+              onClick={() =>
+                runAction(async () => {
+                  await lockRoster(courseId, assignmentId)
+                  setRosterLockedLocal(true)
+                })
+              }
             >
               Закрепить состав
+            </Button>
+          )}
+          {canFinalizeSubmissions && (
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              disabled={actionLoading}
+              onClick={() =>
+                runAction(async () => {
+                  await finalizeSubmissions(courseId, assignmentId)
+                  setManualFinalizeDone(true)
+                })
+              }
+            >
+              Завершить прием решений
             </Button>
           )}
         </Box>

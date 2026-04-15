@@ -745,7 +745,12 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
 	}
-	if a.TeamGradingMode == domain.TeamGradingTeamUniform && a.IsGroup() && uc.teamMemberRepo != nil {
+	applyGradeToWholeTeam :=
+		a.IsGroup() &&
+			uc.teamMemberRepo != nil &&
+			(a.TeamGradingMode == domain.TeamGradingTeamUniform ||
+				(a.TeamGradingMode == domain.TeamGradingIndividual && a.TeamSubmissionRule == domain.TeamRuleLastSubmission))
+	if applyGradeToWholeTeam {
 		team, terr := uc.teamMemberRepo.GetTeamByUser(in.AssignmentID, s.UserID)
 		if terr == nil && team != nil {
 			mems, merr := uc.teamMemberRepo.ListByTeam(team.ID)
@@ -787,7 +792,11 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 						return nil, err
 					}
 				}
-				tryTeamAudit(uc.auditRepo, in.AssignmentID, team.ID, in.UserID, domain.TeamAuditGradeApplied, map[string]string{"mode": "team_uniform"})
+				mode := "team_uniform"
+				if a.TeamGradingMode == domain.TeamGradingIndividual {
+					mode = "individual_last_submission"
+				}
+				tryTeamAudit(uc.auditRepo, in.AssignmentID, team.ID, in.UserID, domain.TeamAuditGradeApplied, map[string]string{"mode": mode})
 			}
 		}
 	} else {

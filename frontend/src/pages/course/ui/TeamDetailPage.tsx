@@ -39,6 +39,8 @@ import {
   toggleSubmissionLike,
   voteForSubmission,
 } from '../../../features/courses/api/coursesApi'
+import { FileAttachmentLink } from '../../../features/courses/ui/FileAttachmentLink/FileAttachmentLink'
+import { getLinkHref, parseSubmissionBodyLinks } from '../../../features/courses/utils/urlValidation'
 import type {
   Assignment,
   Member,
@@ -215,7 +217,16 @@ function EventRow({
     const liked = payload.liked
     detail = `Решение: ${sid ? sid.slice(0, 8) + '…' : '—'}, лайк: ${liked ? 'поставлен' : 'снят'}`
   } else if (event.event_type === 'peer_split_submitted') {
-    const percents = payload.percents as Record<string, number> | undefined
+    let percents: Record<string, number> | undefined
+    if (typeof payload.percents === 'string') {
+      try {
+        percents = JSON.parse(payload.percents) as Record<string, number>
+      } catch {
+        percents = undefined
+      }
+    } else if (payload.percents && typeof payload.percents === 'object') {
+      percents = payload.percents as Record<string, number>
+    }
     if (percents) {
       const parts = Object.entries(percents)
         .map(([uid, pct]) => `${getPersonName(uid, members, teamMembers)}: ${pct}%`)
@@ -321,13 +332,13 @@ function VotingHistory({
   submissions,
   members,
   teamMembers,
-  attachedSubmission,
+  finalSubmissionId,
 }: {
   events: TeamAuditEvent[]
   submissions: Submission[]
   members: Member[]
   teamMembers: TeamWithMembers['members']
-  attachedSubmission: Submission | undefined
+  finalSubmissionId: string | null
 }) {
   // Group events: proposals and votes
   const proposalEvents = events.filter((e) =>
@@ -353,6 +364,11 @@ function VotingHistory({
     return submissions.find((s) => s.id === id)
   }
 
+  const finalSub = finalSubmissionId
+    ? submissions.find((s) => s.id === finalSubmissionId)
+    : undefined
+  const finalLinks = parseSubmissionBodyLinks(finalSub?.body)
+
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <SectionTitle icon={<HowToVoteIcon color="action" />} title="История решений и голосования" />
@@ -377,7 +393,7 @@ function VotingHistory({
             <TableBody>
               {submissions.map((sub) => {
                 const authorName = getPersonName(sub.user_id, members, teamMembers)
-                const isFinal = sub.is_attached === true
+                const isFinal = finalSubmissionId === sub.id
                 return (
                   <TableRow key={sub.id} hover sx={isFinal ? { bgcolor: 'success.50' } : undefined}>
                     <TableCell>
@@ -468,25 +484,47 @@ function VotingHistory({
       <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
         Итоговое финальное решение
       </Typography>
-      {attachedSubmission ? (
+      {finalSub ? (
         <Box sx={{ bgcolor: 'success.50', border: '1px solid', borderColor: 'success.200', borderRadius: 1, p: 1.5 }}>
           <Typography variant="body2" fontWeight={500}>
-            Автор: {getPersonName(attachedSubmission.user_id, members, teamMembers)}
+            Автор: {getPersonName(finalSub.user_id, members, teamMembers)}
           </Typography>
-          {attachedSubmission.submitted_at && (
+          {finalSub.submitted_at && (
             <Typography variant="caption" color="text.secondary">
-              Прикреплено: {formatDateTime(attachedSubmission.submitted_at)}
+              Прикреплено: {formatDateTime(finalSub.submitted_at)}
             </Typography>
           )}
-          {attachedSubmission.body && (
-            <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {attachedSubmission.body}
-            </Typography>
+          {finalLinks.length > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                Ссылки:
+              </Typography>
+              {finalLinks.map((url, idx) => (
+                <Typography
+                  key={`final-link-${idx}`}
+                  component="a"
+                  href={getLinkHref(url)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="body2"
+                  sx={{ display: 'block', wordBreak: 'break-all' }}
+                >
+                  {url}
+                </Typography>
+              ))}
+            </Box>
           )}
-          {(attachedSubmission.file_ids?.length ?? 0) > 0 && (
-            <Typography variant="caption" color="text.secondary">
-              Файлов: {attachedSubmission.file_ids!.length}
-            </Typography>
+          {(finalSub.file_ids?.length ?? 0) > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                Прикреплённые файлы:
+              </Typography>
+              {finalSub.file_ids?.map((fid) => (
+                <Box key={fid} sx={{ mt: 0.5 }}>
+                  <FileAttachmentLink attachment={{ id: fid, name: '' }} showDownload={true} />
+                </Box>
+              ))}
+            </Box>
           )}
         </Box>
       ) : (
@@ -534,7 +572,11 @@ function DeadlineFixationRecord({
 
   const selectedSub = selectedSubId
     ? submissions.find((s) => s.id === selectedSubId)
-    : attachedSubmission
+    : rule === 'last_submission'
+      ? [...submissions].sort(
+          (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
+        )[0]
+      : attachedSubmission
 
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
@@ -603,7 +645,10 @@ function DeadlineFixationRecord({
 // ── Team submissions for vote ─────────────────────────────────────────────────
 
 function TeamSubmissionsSection({
+  courseId,
+  assignmentId,
   submissions,
+  finalSubmissionId,
   members,
   teamMembers,
   onVote,
@@ -612,7 +657,10 @@ function TeamSubmissionsSection({
   likeLoading,
   canVote,
 }: {
+  courseId?: string
+  assignmentId?: string
   submissions: TeamSubmissionForVote[]
+  finalSubmissionId: string | null
   members: Member[]
   teamMembers: TeamWithMembers['members']
   onVote: (submissionId: string) => void
@@ -638,15 +686,17 @@ function TeamSubmissionsSection({
             const isExpanded = expandedId === submission.id
             const body = submission.body?.trim()
             const fileCount = submission.file_ids?.length ?? 0
+            const links = parseSubmissionBodyLinks(submission.body)
+            const isFinal = finalSubmissionId === submission.id
             return (
               <Box
                 key={submission.id}
                 sx={{
                   border: '1px solid',
-                  borderColor: submission.is_attached ? 'success.300' : 'grey.200',
+                  borderColor: isFinal ? 'success.300' : 'grey.200',
                   borderRadius: 1,
                   p: 1.5,
-                  bgcolor: submission.is_attached ? 'success.50' : 'background.paper',
+                  bgcolor: isFinal ? 'success.50' : 'background.paper',
                 }}
               >
                 <Box className="flex items-center gap-2 flex-wrap mb-1">
@@ -654,7 +704,7 @@ function TeamSubmissionsSection({
                     {getInitials(authorName)}
                   </Avatar>
                   <Typography variant="body2" fontWeight={500}>{authorName}</Typography>
-                  {submission.is_attached && (
+                  {isFinal && (
                     <Chip size="small" label="Финальное" color="success" sx={{ fontSize: '0.7rem' }} />
                   )}
                   <Box className="flex items-center gap-1 ml-auto">
@@ -675,38 +725,71 @@ function TeamSubmissionsSection({
                   </Box>
                 </Box>
 
-                {/* Preview (collapsed) */}
-                {!isExpanded && body && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {body.length > 120 ? body.slice(0, 120) + '…' : body}
-                  </Typography>
+                {!isExpanded && (
+                  <Box className="flex items-center gap-2 mt-1">
+                    {fileCount > 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        {fileCount} файл(ов)
+                      </Typography>
+                    )}
+                    {links.length > 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        {links.length} ссылка(ки)
+                      </Typography>
+                    )}
+                  </Box>
                 )}
-                {!isExpanded && !body && fileCount > 0 && (
-                  <Typography variant="caption" color="text.secondary">{fileCount} файл(ов)</Typography>
-                )}
+
+
+
 
                 {/* Full content (expanded) */}
                 {isExpanded && (
                   <Box sx={{ mt: 1 }}>
-                    {body && (
-                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', mb: 1 }}>
-                        {body}
-                      </Typography>
-                    )}
                     {submission.file_ids && submission.file_ids.length > 0 && (
                       <Box sx={{ mb: 1 }}>
                         <Typography variant="caption" color="text.secondary" fontWeight={600}>
                           Прикреплённые файлы:
                         </Typography>
                         {submission.file_ids.map((fid) => (
-                          <Typography key={fid} variant="caption" color="text.secondary" sx={{ display: 'block', pl: 1 }}>
-                            {fid}
-                          </Typography>
+                          <Box key={fid} sx={{ mt: 0.5 }}>
+                            <FileAttachmentLink
+                              attachment={{ id: fid, name: '' }}
+                              fileSource={
+                                courseId && assignmentId
+                                  ? {
+                                      type: 'submission',
+                                      courseId,
+                                      assignmentId,
+                                      submissionId: submission.id,
+                                    }
+                                  : undefined
+                              }
+                              showDownload={true}
+                            />
+                          </Box>
                         ))}
                       </Box>
                     )}
-                    {!body && fileCount === 0 && (
-                      <Typography variant="body2" color="text.secondary">(без содержимого)</Typography>
+                    {links.length > 0 && (
+                      <Box sx={{ mb: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                          Ссылки:
+                        </Typography>
+                        {links.map((url, idx) => (
+                          <Typography
+                            key={`submission-link-${submission.id}-${idx}`}
+                            component="a"
+                            href={getLinkHref(url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="body2"
+                            sx={{ display: 'block', wordBreak: 'break-all' }}
+                          >
+                            {url}
+                          </Typography>
+                        ))}
+                      </Box>
                     )}
                     {submission.submitted_at && (
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
@@ -866,6 +949,20 @@ export function TeamDetailPage() {
   const deadlineEvents = auditEvents.filter((e) => DEADLINE_EVENT_TYPES.has(e.event_type))
 
   const attachedSubmission = submissions.find((s) => s.is_attached === true)
+  const lastSubmission =
+    submissions.length > 0
+      ? [...submissions].sort(
+          (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
+        )[0]
+      : undefined
+  const finalSubmission =
+    assignment?.team_submission_rule === 'last_submission'
+      ? (lastSubmission ?? attachedSubmission)
+      : attachedSubmission
+  const gradedSubmission =
+    finalSubmission?.grade != null
+      ? finalSubmission
+      : submissions.find((s) => s.grade != null) ?? null
 
   const teamMembers = team?.members ?? []
 
@@ -924,12 +1021,12 @@ export function TeamDetailPage() {
                 />
               ))}
             </Box>
-            {attachedSubmission && (
+            {(finalSubmission || gradedSubmission) && (
               <Box className="flex items-center gap-2 mt-2">
                 <Typography variant="caption" color="text.secondary">Оценка:</Typography>
-                {attachedSubmission.grade != null ? (
+                {gradedSubmission?.grade != null ? (
                   <Typography variant="body2" fontWeight={600} color="success.main">
-                    {attachedSubmission.grade}/{assignment?.max_grade ?? 100}
+                    {gradedSubmission.grade}/{assignment?.max_grade ?? 100}
                   </Typography>
                 ) : (
                   <Typography variant="body2" color="text.secondary">Не выставлена</Typography>
@@ -946,7 +1043,10 @@ export function TeamDetailPage() {
 
           {/* Team submissions for vote */}
           <TeamSubmissionsSection
+            courseId={courseId}
+            assignmentId={assignmentId}
             submissions={teamSubmissionsForVote}
+            finalSubmissionId={finalSubmission?.id ?? null}
             members={courseMembers}
             teamMembers={teamMembers}
             onVote={handleVote}
@@ -971,7 +1071,7 @@ export function TeamDetailPage() {
             submissions={submissions}
             members={courseMembers}
             teamMembers={teamMembers}
-            attachedSubmission={attachedSubmission}
+            finalSubmissionId={finalSubmission?.id ?? null}
           />
 
           {/* Deadline fixation */}

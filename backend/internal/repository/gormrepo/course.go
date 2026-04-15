@@ -102,8 +102,8 @@ func (r *CourseMemberRepository) GetUserRole(courseID, userID string) (domain.Co
 		}
 		return "", err
 	}
-	// Students can access course features only after teacher approval.
-	if domain.CourseRole(m.Role) == domain.RoleStudent && domain.CourseMemberStatus(m.Status) != domain.MemberStatusApproved {
+	// Course access only after membership is approved (join requests, teacher invites, etc.).
+	if domain.CourseMemberStatus(m.Status) != domain.MemberStatusApproved {
 		return "", nil
 	}
 	return domain.CourseRole(m.Role), nil
@@ -123,7 +123,14 @@ func (r *CourseMemberRepository) Get(courseID, userID string) (*domain.CourseMem
 func (r *CourseMemberRepository) Update(member *domain.CourseMember) error {
 	return r.db.Model(&courseMemberModel{}).
 		Where("course_id = ? AND user_id = ?", member.CourseID, member.UserID).
-		Update("role", string(member.Role)).Error
+		Updates(map[string]interface{}{
+			"role":           string(member.Role),
+			"status":         string(member.Status),
+			"requested_at":   member.RequestedAt,
+			"decided_at":     member.DecidedAt,
+			"decided_by":     member.DecidedBy,
+			"decision_note":  member.DecisionNote,
+		}).Error
 }
 
 func (r *CourseMemberRepository) ListByCourse(courseID string) ([]*domain.CourseMember, error) {

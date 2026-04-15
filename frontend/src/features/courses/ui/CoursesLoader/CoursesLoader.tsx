@@ -10,7 +10,7 @@ export function CoursesLoader() {
     let cancelled = false
     listCourses()
       .then((data) => {
-        if (!cancelled) ctx.setCourses(data)
+        if (!cancelled) ctx.setCourses(data.filter((course) => course.membership_status !== 'pending'))
       })
       .catch(() => {
         if (!cancelled) ctx.setCourses([])

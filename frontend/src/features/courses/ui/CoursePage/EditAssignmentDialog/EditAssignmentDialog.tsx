@@ -46,9 +46,13 @@ function hasGroupSettingsChanged(
   if (original.assignment_kind !== 'group') return false
   if (newType !== 'group') return true
   const newSize = parseInt(newSettings.desiredTeamSize, 10)
+  const newTeamCount = newSettings.teamCount.trim()
+    ? parseInt(newSettings.teamCount, 10)
+    : null
   return (
     original.desired_team_size !== newSize ||
-    original.team_distribution_type !== newSettings.teamDistributionType
+    original.team_distribution_type !== newSettings.teamDistributionType ||
+    (original.team_count ?? null) !== newTeamCount
   )
 }
 

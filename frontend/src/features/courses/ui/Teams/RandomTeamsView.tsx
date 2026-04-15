@@ -29,6 +29,7 @@ export function RandomTeamsView({
   const lockMutation = useLockRosterMutation(courseId, assignmentId)
 
   const myTeam = teams.find((t) => t.members.some((m) => m.user_id === currentUserId))
+  const teamsForList = !isTeacher && myTeam ? teams.filter((team) => team.id !== myTeam.id) : teams
 
   const handleGenerate = async () => {
     setError(null)
@@ -93,15 +94,15 @@ export function RandomTeamsView({
 
       <Box>
         <Typography variant="subtitle1" className="font-semibold mb-2">
-          Все команды ({teams.length})
+          Все команды ({teamsForList.length})
         </Typography>
-        {teams.length === 0 ? (
+        {teamsForList.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             {isTeacher ? 'Нажмите «Сформировать команды»' : 'Команды ещё не сформированы'}
           </Typography>
         ) : (
           <Box className="flex flex-col gap-3">
-            {teams.map((team) => (
+            {teamsForList.map((team) => (
               <TeamCard key={team.id} team={team} highlighted={team.id === myTeam?.id} />
             ))}
           </Box>

@@ -738,7 +738,11 @@ export async function submitAssignment(
     },
   )
 
-  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string; message?: string }
+    const msg = (err.error ?? err.message ?? '').trim()
+    throw new Error(msg || 'BAD_REQUEST')
+  }
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('NOT_FOUND')
@@ -852,7 +856,11 @@ export async function inviteTeacherByEmail(
     },
   )
 
-  if (response.status === 400) throw new Error('BAD_REQUEST')
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    const code = err.error ?? 'BAD_REQUEST'
+    throw new Error(`INVITE_TEACHER_VALIDATION:${code}`)
+  }
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (response.status === 404) throw new Error('USER_NOT_FOUND')
@@ -860,6 +868,23 @@ export async function inviteTeacherByEmail(
   if (!response.ok) throw new Error('INVITE_TEACHER_FAILED')
 
   return (await response.json()) as Member
+}
+
+export async function acceptCourseInvitation(
+  courseId: string,
+): Promise<{ user_id: string; status: string; role: string }> {
+  const response = await fetch(`${API_BASE}/courses/${courseId}/invitations/accept`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'ACCEPT_INVITE_FAILED')
+  }
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('ACCEPT_INVITE_FAILED')
+  return (await response.json()) as { user_id: string; status: string; role: string }
 }
 
 export type Material = {
@@ -1380,8 +1405,25 @@ export async function lockRoster(courseId: string, assignmentId: string): Promis
     method: 'POST',
     headers: getAuthHeaders(),
   })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
   if (response.status === 403) throw new Error('FORBIDDEN')
   if (!response.ok) throw new Error('LOCK_ROSTER_FAILED')
+}
+
+export async function finalizeSubmissions(courseId: string, assignmentId: string): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/finalize-submissions`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (!response.ok) throw new Error('FINALIZE_SUBMISSIONS_FAILED')
 }
 
 export async function getTeamAudit(

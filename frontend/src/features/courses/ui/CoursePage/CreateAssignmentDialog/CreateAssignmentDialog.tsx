@@ -18,6 +18,7 @@ import {
 } from '@mui/material'
 import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined'
 import CloseIcon from '@mui/icons-material/Close'
+import LinkIcon from '@mui/icons-material/Link'
 import {
   createAssignment,
   deleteAssignment,
@@ -27,6 +28,7 @@ import {
   uploadFiles,
 } from '../../../api/coursesApi'
 import { isValidUrl } from '../../../utils/urlValidation'
+import { getLinkHref } from '../../../utils/urlValidation'
 import type { AssignmentKind, Member } from '../../../model/types'
 import {
   GroupSettingsFields,
@@ -55,7 +57,10 @@ export function CreateAssignmentDialog({
 }: CreateAssignmentDialogProps) {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
-  const [links, setLinks] = useState('')
+  const [links, setLinks] = useState<string[]>([])
+  const [showLinkDialog, setShowLinkDialog] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkUrlError, setLinkUrlError] = useState<string | null>(null)
   const [deadline, setDeadline] = useState('')
   const [maxGrade, setMaxGrade] = useState<string>('100')
   const [files, setFiles] = useState<File[]>([])
@@ -76,7 +81,10 @@ export function CreateAssignmentDialog({
   const resetForm = () => {
     setTitle('')
     setContent('')
-    setLinks('')
+    setLinks([])
+    setShowLinkDialog(false)
+    setLinkUrl('')
+    setLinkUrlError(null)
     setDeadline('')
     setMaxGrade('100')
     setFiles([])
@@ -91,6 +99,23 @@ export function CreateAssignmentDialog({
       resetForm()
       onClose()
     }
+  }
+
+  const handleAddLink = () => {
+    const trimmed = linkUrl.trim()
+    if (!trimmed) return
+    if (!isValidUrl(trimmed)) {
+      setLinkUrlError('Некорректная ссылка')
+      return
+    }
+    setLinkUrlError(null)
+    setLinks((prev) => [...prev, trimmed])
+    setLinkUrl('')
+    setShowLinkDialog(false)
+  }
+
+  const removeLink = (index: number) => {
+    setLinks((prev) => prev.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,22 +152,9 @@ export function CreateAssignmentDialog({
       }
     }
 
-    const linkLines = links
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-
-    if (linkLines.length > 0) {
-      const invalidIndex = linkLines.findIndex((line) => !isValidUrl(line))
-      if (invalidIndex >= 0) {
-        setError(`Некорректная ссылка в строке ${invalidIndex + 1}: «${linkLines[invalidIndex]}»`)
-        return
-      }
-    }
-
     if (assignmentKind === 'group') {
-      if (students.length < 4) {
-        setError('Для группового задания нужно не менее 4 студентов в классе')
+      if (students.length < 2) {
+        setError('Для группового задания нужно не менее 2 студентов в классе')
         return
       }
       const groupError = validateGroupSettings(groupSettings)
@@ -182,7 +194,7 @@ export function CreateAssignmentDialog({
       const created = await createAssignment(courseId, {
         title: trimmedTitle,
         body: trimmedContent,
-        links: linkLines.length > 0 ? linkLines : undefined,
+        links: links.length > 0 ? links : undefined,
         deadline: deadlineIso,
         max_grade: parsedMaxGrade,
         file_ids: fileIds,
@@ -244,6 +256,7 @@ export function CreateAssignmentDialog({
   }
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={handleClose}
@@ -274,17 +287,6 @@ export function CreateAssignmentDialog({
             value={content}
             onChange={(e) => setContent(e.target.value)}
             inputProps={{ 'aria-label': 'Описание задания' }}
-          />
-          <TextField
-            label="Ссылки (опционально, по одной на строку)"
-            fullWidth
-            multiline
-            minRows={2}
-            size="small"
-            value={links}
-            onChange={(e) => setLinks(e.target.value)}
-            placeholder="https://example.com"
-            inputProps={{ 'aria-label': 'Ссылки' }}
           />
           <TextField
             label="Дедлайн"
@@ -324,9 +326,9 @@ export function CreateAssignmentDialog({
             </Select>
           </FormControl>
 
-          {assignmentKind === 'group' && students.length < 4 && (
+          {assignmentKind === 'group' && students.length < 2 && (
             <Alert severity="warning">
-              В классе недостаточно студентов для группового задания (есть {students.length}, нужно минимум 4)
+              В классе недостаточно студентов для группового задания (есть {students.length}, нужно минимум 2)
             </Alert>
           )}
 
@@ -357,29 +359,64 @@ export function CreateAssignmentDialog({
           )}
 
           <Box>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handleFileChange}
-              aria-label="Прикрепить файлы"
-            />
-            <Button
-              component="span"
-              variant="outlined"
-              size="small"
-              startIcon={<AttachFileOutlinedIcon />}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Прикрепить файлы
-            </Button>
-            {files.length > 0 && (
-              <Box className="mt-2 flex flex-wrap gap-2">
+            <Box className="flex flex-wrap gap-2">
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<LinkIcon />}
+                onClick={() => setShowLinkDialog(true)}
+              >
+                Добавить ссылку
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileChange}
+                aria-label="Прикрепить файлы"
+              />
+              <Button
+                component="span"
+                variant="outlined"
+                size="small"
+                startIcon={<AttachFileOutlinedIcon />}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Прикрепить файлы
+              </Button>
+            </Box>
+            {(links.length > 0 || files.length > 0) && (
+              <Box className="mt-2 flex flex-col gap-2 w-full">
+                {links.map((url, i) => (
+                  <Box
+                    key={`link-${i}`}
+                    className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm w-full"
+                  >
+                    <LinkIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    <Typography
+                      variant="body2"
+                      component="a"
+                      href={getLinkHref(url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate max-w-[160px] text-primary-600 hover:underline"
+                    >
+                      {url}
+                    </Typography>
+                    <IconButton
+                      size="small"
+                      aria-label="Удалить ссылку"
+                      onClick={() => removeLink(i)}
+                    >
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
                 {files.map((f, i) => (
                   <Box
                     key={`${f.name}-${i}`}
-                    className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm"
+                    className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-sm w-full"
                   >
                     <Typography variant="body2" className="truncate max-w-[120px]">
                       {f.name}
@@ -413,5 +450,51 @@ export function CreateAssignmentDialog({
         </DialogActions>
       </Box>
     </Dialog>
+    <Dialog
+      open={showLinkDialog}
+      onClose={() => {
+        if (!loading) {
+          setShowLinkDialog(false)
+          setLinkUrl('')
+          setLinkUrlError(null)
+        }
+      }}
+      maxWidth="xs"
+      fullWidth
+      aria-labelledby="add-assignment-link-dialog-title"
+    >
+      <DialogTitle id="add-assignment-link-dialog-title">Добавить ссылку</DialogTitle>
+      <DialogContent className="flex flex-col gap-2">
+        <TextField
+          autoFocus
+          label="URL"
+          fullWidth
+          size="small"
+          value={linkUrl}
+          onChange={(e) => {
+            setLinkUrl(e.target.value)
+            if (linkUrlError) setLinkUrlError(null)
+          }}
+          error={Boolean(linkUrlError)}
+          helperText={linkUrlError ?? 'Пример: https://example.com'}
+          inputProps={{ 'aria-label': 'URL ссылки' }}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button
+          onClick={() => {
+            setShowLinkDialog(false)
+            setLinkUrl('')
+            setLinkUrlError(null)
+          }}
+        >
+          Отмена
+        </Button>
+        <Button onClick={handleAddLink} variant="contained" disabled={!linkUrl.trim()}>
+          Добавить
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </>
   )
 }

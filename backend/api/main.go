@@ -64,6 +64,7 @@ func main() {
 	decideJoinRequestUC := usecase.NewDecideJoinRequest(memberRepo)
 	assignTeacherUC := usecase.NewAssignTeacher(memberRepo)
 	inviteTeacherUC := usecase.NewInviteTeacher(memberRepo, userRepo)
+	acceptCourseInviteUC := usecase.NewAcceptCourseInvitation(memberRepo)
 	leaveCourseUC := usecase.NewLeaveCourse(memberRepo)
 	removeMemberUC := usecase.NewRemoveMember(memberRepo)
 	changeMemberRoleUC := usecase.NewChangeMemberRole(memberRepo)
@@ -125,6 +126,7 @@ func main() {
 	submitPeerGradeSplitUC := usecase.NewSubmitPeerGradeSplit(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, teamPeerGradeRepo, teamAuditRepo)
 	gradeTeamPeerSplitUC := usecase.NewGradeTeamPeerSplit(memberRepo, assignmentRepo, teamRepo, submissionRepo, teamMemberRepo, teamPeerGradeRepo, teamAuditRepo)
 	autoFinalizeUC := usecase.NewAutoFinalizeDeadline(assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, finalizeTeamVoteUC, teamAuditRepo)
+	finalizeTeamSubmissionsNowUC := usecase.NewFinalizeTeamSubmissionsNow(memberRepo, assignmentRepo, autoFinalizeUC)
 
 	coursesHandler := httphandler.NewCoursesHandler(
 		httphandler.NewListCoursesHandler(listCoursesUC),
@@ -144,6 +146,7 @@ func main() {
 	mux.Handle("DELETE /api/v1/courses/{courseId}/members/{userId}", authWrap(httphandler.NewRemoveMemberHandler(removeMemberUC, userRepo)))
 	mux.Handle("PATCH /api/v1/courses/{courseId}/members/{userId}/role", authWrap(httphandler.NewChangeMemberRoleHandler(changeMemberRoleUC, userRepo)))
 	mux.Handle("POST /api/v1/courses/{courseId}/invite-teacher", authWrap(httphandler.NewInviteTeacherHandler(inviteTeacherUC, userRepo)))
+	mux.Handle("POST /api/v1/courses/{courseId}/invitations/accept", authWrap(httphandler.NewAcceptCourseInvitationHandler(acceptCourseInviteUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/leave", authWrap(httphandler.NewLeaveCourseHandler(leaveCourseUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/feed", authWrap(httphandler.NewGetCourseFeedHandler(getCourseFeedUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/posts/{postId}", authWrap(httphandler.NewGetPostHandler(getPostUC)))
@@ -184,6 +187,7 @@ func main() {
 	mux.Handle("DELETE /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/submissions/{submissionId}/like", authWrap(httphandler.NewToggleSubmissionLikeHandler(toggleSubmissionLikeUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/finalize-vote", authWrap(httphandler.NewFinalizeTeamVoteSubmissionHandler(finalizeTeamVoteUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/lock-roster", authWrap(httphandler.NewLockTeamRosterHandler(lockTeamRosterUC)))
+	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/finalize-submissions", authWrap(httphandler.NewFinalizeTeamSubmissionsNowHandler(finalizeTeamSubmissionsNowUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/audit", authWrap(httphandler.NewListTeamAuditHandler(listTeamAuditUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/peer-grade-split", authWrap(httphandler.NewSubmitPeerGradeSplitHandler(submitPeerGradeSplitUC)))
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/teams/{teamId}/grade-peer-split", authWrap(httphandler.NewGradeTeamPeerSplitHandler(gradeTeamPeerSplitUC)))

@@ -118,6 +118,9 @@ func computeTeamStatus(a *domain.Assignment, memberSet map[string]bool, allSubs 
 	if attached > 0 {
 		return "submitted"
 	}
+	if a.DeadlineAutoFinalizedAt != nil {
+		return "not_submitted"
+	}
 	if a.TeamSubmissionRule == domain.TeamRuleVoteEqual || a.TeamSubmissionRule == domain.TeamRuleVoteWeighted {
 		if voteCount > 0 {
 			return "voting"
@@ -172,8 +175,8 @@ func (uc *SaveManualTeams) SaveManualTeams(in SaveManualTeamsInput) error {
 	if err != nil {
 		return err
 	}
-	if len(students) < 4 {
-		return &ValidationError{Message: "at least 4 students required for team distribution"}
+	if len(students) < 2 {
+		return &ValidationError{Message: "at least 2 students required for team distribution"}
 	}
 	if err := replaceTeams(in.AssignmentID, in.TeacherID, a.MaxTeamSize, in.Teams, uc.teamRepo); err != nil {
 		return err
@@ -215,8 +218,8 @@ func (uc *GenerateRandomTeams) GenerateRandomTeams(in GenerateRandomTeamsInput) 
 	if err != nil {
 		return err
 	}
-	if len(students) < 4 {
-		return &ValidationError{Message: "at least 4 students required for team distribution"}
+	if len(students) < 2 {
+		return &ValidationError{Message: "at least 2 students required for team distribution"}
 	}
 	if a.TeamCount < 1 {
 		return &ValidationError{Message: "assignment team_count must be > 0"}
@@ -265,8 +268,8 @@ func (uc *GenerateBalancedTeams) GenerateBalancedTeams(in GenerateRandomTeamsInp
 	if err != nil {
 		return err
 	}
-	if len(students) < 4 {
-		return &ValidationError{Message: "at least 4 students required for team distribution"}
+	if len(students) < 2 {
+		return &ValidationError{Message: "at least 2 students required for team distribution"}
 	}
 	if a.TeamCount < 1 {
 		return &ValidationError{Message: "assignment team_count must be > 0"}

@@ -70,8 +70,8 @@ func TestJoinCourse_Success(t *testing.T) {
 	if len(memberRepo.members) != 1 || memberRepo.members[0].UserID != "user-1" || memberRepo.members[0].Role != domain.RoleStudent {
 		t.Errorf("members = %+v", memberRepo.members)
 	}
-	if memberRepo.members[0].Status != domain.MemberStatusPending {
-		t.Errorf("status = %s, want pending", memberRepo.members[0].Status)
+	if memberRepo.members[0].Status != domain.MemberStatusApproved {
+		t.Errorf("status = %s, want approved", memberRepo.members[0].Status)
 	}
 }
 
@@ -102,7 +102,12 @@ func TestJoinCourse_AlreadyMember(t *testing.T) {
 	course := &domain.Course{ID: "c1", Title: "Math", InviteCode: "ABCD1234"}
 	courseRepo := &stubJoinCourseRepo{courses: map[string]*domain.Course{"ABCD1234": course}}
 	memberRepo := &stubJoinMemberRepo{
-		members: []*domain.CourseMember{{CourseID: "c1", UserID: "user-1", Role: domain.RoleStudent}},
+		members: []*domain.CourseMember{{
+			CourseID: "c1",
+			UserID:   "user-1",
+			Role:     domain.RoleStudent,
+			Status:   domain.MemberStatusApproved,
+		}},
 		role:    domain.RoleStudent,
 	}
 	uc := NewJoinCourse(courseRepo, memberRepo)

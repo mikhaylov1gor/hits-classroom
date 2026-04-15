@@ -38,6 +38,10 @@ export function FreeTeamsView({
   const leaveMutation = useLeaveTeamMutation(courseId, assignmentId)
   const lockMutation = useLockRosterMutation(courseId, assignmentId)
 
+  const teamsForList = !isTeacher && myTeam
+    ? teams.filter((team) => team.id !== myTeam.id)
+    : teams
+
   const handleCreate = async () => {
     setError(null)
     try {
@@ -162,15 +166,15 @@ export function FreeTeamsView({
       {/* Список всех команд */}
       <Box>
         <Typography variant="subtitle1" className="font-semibold mb-2">
-          Все команды ({teams.length})
+          Все команды ({teamsForList.length})
         </Typography>
-        {teams.length === 0 ? (
+        {teamsForList.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             Команд пока нет
           </Typography>
         ) : (
           <Box className="flex flex-col gap-3">
-            {teams.map((team) => {
+            {teamsForList.map((team) => {
               const isMine = team.id === myTeam?.id
               const isFull = team.members.length >= team.max_members
               const canJoin = !isTeacher && !isLocked && !myTeam && !isFull
@@ -204,7 +208,7 @@ export function FreeTeamsView({
       </Box>
 
       {/* Кнопка фиксации для преподавателя */}
-      {isTeacher && !isLocked && (
+      {isTeacher && !isLocked && teams.length > 0 && (
         <Box className="flex justify-end">
           <Button
             variant="contained"

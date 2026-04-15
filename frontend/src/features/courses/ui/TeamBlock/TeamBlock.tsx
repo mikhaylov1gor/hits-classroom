@@ -22,12 +22,14 @@ import EmojiEventsOutlinedIcon from '@mui/icons-material/EmojiEventsOutlined'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import type {
   Assignment,
+  TeamAuditEvent,
   TeamMemberInfo,
   TeamSubmissionForVote,
   TeamWithMembers,
 } from '../../model/types'
 import {
   createTeam,
+  getTeamAudit,
   joinTeam,
   leaveTeam,
   listTeamSubmissions,
@@ -246,15 +248,6 @@ function VotingPanel({
               )}
               {expandedId === sub.id && (
                 <Box sx={{ mt: 1, width: '100%' }}>
-                  {sub.body && (
-                    <Typography
-                      variant="body2"
-                      color="text.primary"
-                      sx={{ whiteSpace: 'pre-wrap', mb: 1 }}
-                    >
-                      {sub.body}
-                    </Typography>
-                  )}
                   {sub.file_ids && sub.file_ids.length > 0 && (
                     <Box sx={{ mb: 1 }}>
                       <Typography variant="caption" color="text.secondary" fontWeight={600}>
@@ -325,6 +318,7 @@ function PeerSplitPanel({
   minPercent,
   maxPercent,
   onRefresh,
+  initialPercents,
 }: {
   courseId: string
   assignmentId: string
@@ -333,6 +327,7 @@ function PeerSplitPanel({
   minPercent: number
   maxPercent: number
   onRefresh: () => void
+  initialPercents?: Record<string, number>
 }) {
   const members = team.members
   const equal = members.length > 0 ? parseFloat((100 / members.length).toFixed(2)) : 0
@@ -351,6 +346,23 @@ function PeerSplitPanel({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    if (!initialPercents) return
+    const next: Record<string, number> = {}
+    let hasAny = false
+    members.forEach((m) => {
+      const v = initialPercents[m.user_id]
+      if (typeof v === 'number' && !Number.isNaN(v)) {
+        next[m.user_id] = v
+        hasAny = true
+      }
+    })
+    if (hasAny) {
+      setPercents(next)
+      setDone(false)
+    }
+  }, [initialPercents, members])
 
   const total = Object.values(percents).reduce((s, v) => s + v, 0)
   const isValid =
@@ -428,6 +440,62 @@ function PeerSplitPanel({
       </Box>
     </Box>
   )
+}
+
+function PeerSplitResultPanel({
+  team,
+  percents,
+}: {
+  team: TeamWithMembers
+  percents: Record<string, number>
+}) {
+  return (
+    <Box className="flex flex-col gap-2 mt-2">
+      <Typography variant="subtitle2">Результат распределения вклада</Typography>
+      {team.members.map((m) => (
+        <Box key={m.user_id} className="flex items-center justify-between">
+          <Typography variant="body2">
+            {m.first_name} {m.last_name}
+          </Typography>
+          <Typography variant="body2" fontWeight={600}>
+            {typeof percents[m.user_id] === 'number' ? `${percents[m.user_id]}%` : '—'}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+function parsePeerSplitPercents(payload: unknown): Record<string, number> | null {
+  if (!payload || typeof payload !== 'object') return null
+  const obj = payload as Record<string, unknown>
+  const raw = obj.percents
+  if (!raw) return null
+
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const out: Record<string, number> = {}
+      for (const [k, v] of Object.entries(parsed)) {
+        const n = typeof v === 'number' ? v : Number(v)
+        if (!Number.isNaN(n)) out[k] = n
+      }
+      return Object.keys(out).length > 0 ? out : null
+    } catch {
+      return null
+    }
+  }
+
+  if (typeof raw === 'object') {
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      const n = typeof v === 'number' ? v : Number(v)
+      if (!Number.isNaN(n)) out[k] = n
+    }
+    return Object.keys(out).length > 0 ? out : null
+  }
+
+  return null
 }
 
 function TopStudentHint({ members, myUserId }: { members: TeamMemberInfo[]; myUserId: string }) {
@@ -517,6 +585,8 @@ export function TeamBlock({
   const [leaving, setLeaving] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [finalSubmissionAuthorId, setFinalSubmissionAuthorId] = useState<string | null>(null)
+  const [selectedPeerSplitResult, setSelectedPeerSplitResult] = useState<Record<string, number> | null>(null)
 
   const rule = assignment.team_submission_rule
   const distributionType = assignment.team_distribution_type
@@ -563,6 +633,59 @@ export function TeamBlock({
   }, [fetchTeams, onRefresh])
 
   const myTeam = teams.find((t) => t.members.some((m) => m.user_id === myUserId))
+  const isSingleMemberTeam = (myTeam?.members.length ?? 0) <= 1
+  const showLastSubmissionHint =
+    rule === 'last_submission' && myTeam?.status !== 'forming' && myTeam?.status !== 'graded'
+  const canShowPeerSplitPanel =
+    !isSingleMemberTeam && (myTeam?.status === 'submitted' || myTeam?.status === 'graded')
+
+  useEffect(() => {
+    if (!isPeerSplit || !myTeam || !canShowPeerSplitPanel) {
+      setFinalSubmissionAuthorId(null)
+      setSelectedPeerSplitResult(null)
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const submissions = await listTeamSubmissions(courseId, assignmentId, myTeam.id)
+        const finalSubmission = submissions.find((item) => item.submission.is_attached === true)?.submission
+        if (!finalSubmission || cancelled) {
+          if (!cancelled) {
+            setFinalSubmissionAuthorId(null)
+            setSelectedPeerSplitResult(null)
+          }
+          return
+        }
+        const authorId = finalSubmission.user_id
+        if (!cancelled) setFinalSubmissionAuthorId(authorId)
+
+        const events = await getTeamAudit(courseId, assignmentId, { team_id: myTeam.id, limit: 200 })
+        if (cancelled) return
+        const candidate = events
+          .filter((event) => event.event_type === 'peer_split_submitted')
+          .find((event) => {
+            const payload = event.payload as Record<string, unknown>
+            const submitter =
+              typeof payload?.submitter === 'string'
+                ? payload.submitter
+                : event.actor_user_id
+            return submitter === authorId
+          })
+        setSelectedPeerSplitResult(candidate ? parsePeerSplitPercents(candidate.payload) : null)
+      } catch {
+        if (!cancelled) {
+          setFinalSubmissionAuthorId(null)
+          setSelectedPeerSplitResult(null)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [assignmentId, canShowPeerSplitPanel, courseId, isPeerSplit, myTeam])
 
   const handleCreate = async () => {
     setCreating(true)
@@ -617,7 +740,6 @@ export function TeamBlock({
         <Typography variant="subtitle1" fontWeight={600}>
           Команда
         </Typography>
-        {rosterLocked && <Chip label="Состав закреплён" size="small" color="warning" />}
       </Box>
 
       {error && <Alert severity="error">{error}</Alert>}
@@ -658,7 +780,7 @@ export function TeamBlock({
             />
           )}
 
-          {isPeerSplit && !isVoteRule && (
+          {isPeerSplit && !isVoteRule && canShowPeerSplitPanel && finalSubmissionAuthorId === myUserId && (
             <PeerSplitPanel
               courseId={courseId}
               assignmentId={assignmentId}
@@ -667,8 +789,17 @@ export function TeamBlock({
               minPercent={assignment.peer_split_min_percent ?? 1}
               maxPercent={assignment.peer_split_max_percent ?? 99}
               onRefresh={handleRefresh}
+              initialPercents={selectedPeerSplitResult ?? undefined}
             />
           )}
+
+          {isPeerSplit &&
+            !isVoteRule &&
+            canShowPeerSplitPanel &&
+            finalSubmissionAuthorId !== myUserId &&
+            selectedPeerSplitResult && (
+              <PeerSplitResultPanel team={myTeam} percents={selectedPeerSplitResult} />
+            )}
 
           {/* first_submission hint */}
           {rule === 'first_submission' && (
@@ -678,7 +809,7 @@ export function TeamBlock({
           )}
 
           {/* last_submission hint */}
-          {rule === 'last_submission' && (
+          {showLastSubmissionHint && (
             <Alert severity="info" sx={{ mt: 1 }}>
               Ваша финальная сдача автоматически открепит предыдущие финальные решения
               участников команды.

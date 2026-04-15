@@ -469,6 +469,33 @@ func (h *LockTeamRosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type FinalizeTeamSubmissionsNowHandler struct {
+	uc *usecase.FinalizeTeamSubmissionsNow
+}
+
+func NewFinalizeTeamSubmissionsNowHandler(uc *usecase.FinalizeTeamSubmissionsNow) *FinalizeTeamSubmissionsNowHandler {
+	return &FinalizeTeamSubmissionsNowHandler{uc: uc}
+}
+
+func (h *FinalizeTeamSubmissionsNowHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	if err := h.uc.Finalize(courseID, assignmentID, userID); err != nil {
+		respondTeamError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type ListTeamAuditHandler struct{ uc *usecase.ListTeamAudit }
 
 func NewListTeamAuditHandler(uc *usecase.ListTeamAudit) *ListTeamAuditHandler {

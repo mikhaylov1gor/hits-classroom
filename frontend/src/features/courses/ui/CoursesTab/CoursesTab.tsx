@@ -67,8 +67,9 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
     listCourses()
       .then((data) => {
         if (!cancelled) {
-          setCourses(data)
-          onCoursesLoaded?.(data)
+          const visibleCourses = data.filter((course) => course.membership_status !== 'pending')
+          setCourses(visibleCourses)
+          onCoursesLoaded?.(visibleCourses)
         }
       })
       .catch(() => {
@@ -155,13 +156,16 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
             const memberStatus = course.membership_status
             const isPending = memberStatus === 'pending'
             const isRejected = memberStatus === 'rejected'
+            const isTeacherInvitePending = course.role === 'teacher' && isPending
             const isClickable = !isPending && !isRejected
             return (
               <Tooltip
                 key={course.id}
                 title={
                   isPending
-                    ? 'Ожидает подтверждения преподавателем'
+                    ? isTeacherInvitePending
+                      ? 'Вас пригласили преподавателем — ответьте в разделе «Приглашения»'
+                      : 'Ожидает подтверждения преподавателем'
                     : isRejected
                       ? 'Заявка отклонена'
                       : ''
@@ -201,7 +205,7 @@ export function CoursesTab({ onCoursesLoaded }: CoursesTabProps = {}) {
                           <Chip
                             size="small"
                             icon={<HourglassEmptyOutlinedIcon fontSize="small" />}
-                            label="Ожидает"
+                            label={isTeacherInvitePending ? 'Приглашение' : 'Ожидает'}
                             sx={{ bgcolor: 'rgba(255,255,255,0.85)', fontSize: '0.7rem' }}
                           />
                         </Box>
