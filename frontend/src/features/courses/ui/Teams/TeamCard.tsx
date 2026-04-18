@@ -1,5 +1,5 @@
 import { Avatar, Box, Chip, Typography } from '@mui/material'
-import type { TeamWithMembers } from '../../model/types'
+import { getTeamCreatorDisplayName, type Member, type TeamWithMembers } from '../../model/types'
 
 const STATUS_LABELS: Record<string, string> = {
   forming: 'Формируется',
@@ -25,9 +25,18 @@ type Props = {
   team: TeamWithMembers
   highlighted?: boolean
   actions?: React.ReactNode
+  /** Преподаватель / владелец: показать ФИО создателя */
+  showCreatorName?: boolean
+  courseMembers?: Member[]
 }
 
-export function TeamCard({ team, highlighted, actions }: Props) {
+export function TeamCard({
+  team,
+  highlighted,
+  actions,
+  showCreatorName,
+  courseMembers = [],
+}: Props) {
   return (
     <Box
       sx={{
@@ -39,9 +48,16 @@ export function TeamCard({ team, highlighted, actions }: Props) {
       }}
     >
       <Box className="flex items-center justify-between gap-2 mb-2">
-        <Typography variant="subtitle2" className="font-semibold truncate">
-          {team.name}
-        </Typography>
+        <Box className="min-w-0 flex-1">
+          <Typography variant="subtitle2" className="font-semibold truncate">
+            {team.name}
+          </Typography>
+          {showCreatorName && (
+            <Typography variant="caption" color="text.secondary" display="block" className="truncate">
+              Создатель: {getTeamCreatorDisplayName(team, courseMembers)}
+            </Typography>
+          )}
+        </Box>
         <Box className="flex items-center gap-1 shrink-0">
           <Chip
             label={STATUS_LABELS[team.status] ?? team.status}

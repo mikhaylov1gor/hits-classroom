@@ -78,6 +78,14 @@ export function CreateAssignmentDialog({
   const desiredSize = parseInt(groupSettings.desiredTeamSize, 10)
   const maxPerTeam = !isNaN(desiredSize) && desiredSize >= 2 ? desiredSize : undefined
 
+  const trimmedExpectedTeams = groupSettings.teamCount.trim()
+  const parsedExpectedTeams =
+    trimmedExpectedTeams !== '' ? parseInt(trimmedExpectedTeams, 10) : NaN
+  const hasValidExpectedTeamCount =
+    !isNaN(parsedExpectedTeams) && parsedExpectedTeams >= 1
+  const manualTeamsExceedExpected =
+    isManual && hasValidExpectedTeamCount && manualTeams.length > parsedExpectedTeams
+
   const resetForm = () => {
     setTitle('')
     setContent('')
@@ -165,6 +173,12 @@ export function CreateAssignmentDialog({
     }
 
     if (isManual) {
+      if (manualTeamsExceedExpected) {
+        setError(
+          `Создано команд (${manualTeams.length}) больше, чем указано в поле «Количество команд» (${parsedExpectedTeams}). Удалите лишние команды внизу списка или увеличьте число.`,
+        )
+        return
+      }
       if (manualTeams.length === 0) {
         setError('Добавьте хотя бы одну команду')
         return
@@ -347,11 +361,18 @@ export function CreateAssignmentDialog({
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
                   Распределение по командам
                 </Typography>
+                {manualTeamsExceedExpected && (
+                  <Alert severity="error" sx={{ mb: 1 }}>
+                    Команд больше, чем в поле «Количество команд» ({parsedExpectedTeams}). Лишние
+                    отмечены ниже — удалите их или измените число.
+                  </Alert>
+                )}
                 <ManualTeamsSetup
                   students={students}
                   teams={manualTeams}
                   onChange={setManualTeams}
                   maxMembersPerTeam={maxPerTeam}
+                  expectedTeamCount={hasValidExpectedTeamCount ? parsedExpectedTeams : null}
                   disabled={loading}
                 />
               </Box>
@@ -444,7 +465,7 @@ export function CreateAssignmentDialog({
           <Button onClick={handleClose} disabled={loading}>
             Отмена
           </Button>
-          <Button type="submit" variant="contained" disabled={loading}>
+          <Button type="submit" variant="contained" disabled={loading || manualTeamsExceedExpected}>
             {loading ? 'Создание…' : 'Создать'}
           </Button>
         </DialogActions>

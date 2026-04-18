@@ -4,6 +4,7 @@ import {
   Avatar,
   Box,
   Button,
+  Chip,
   IconButton,
   TextField,
   Tooltip,
@@ -26,6 +27,8 @@ type Props = {
   teams: ManualTeamDraft[]
   onChange: (teams: ManualTeamDraft[]) => void
   maxMembersPerTeam?: number
+  /** Заданное в настройках число команд — строки с индексом ≥ этого считаются лишними */
+  expectedTeamCount?: number | null
   disabled?: boolean
 }
 
@@ -39,7 +42,14 @@ function getName(m: Member): string {
   return `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || 'Участник'
 }
 
-export function ManualTeamsSetup({ students, teams, onChange, maxMembersPerTeam, disabled }: Props) {
+export function ManualTeamsSetup({
+  students,
+  teams,
+  onChange,
+  maxMembersPerTeam,
+  expectedTeamCount,
+  disabled,
+}: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [newTeamName, setNewTeamName] = useState('')
@@ -49,6 +59,12 @@ export function ManualTeamsSetup({ students, teams, onChange, maxMembersPerTeam,
 
   const assignedIds = new Set(teams.flatMap((t) => t.memberIds))
   const unassigned = students.filter((s) => !assignedIds.has(s.user_id))
+
+  const isExcessTeam = (index: number) =>
+    expectedTeamCount != null &&
+    expectedTeamCount >= 1 &&
+    teams.length > expectedTeamCount &&
+    index >= expectedTeamCount
 
   const handleDragStart = (userId: string, fromTeamId: string | null) => {
     if (disabled) return
@@ -176,18 +192,20 @@ export function ManualTeamsSetup({ students, teams, onChange, maxMembersPerTeam,
 
         {/* Команды */}
         <Box className="flex-1 flex flex-col gap-2">
-          {teams.map((team) => {
+          {teams.map((team, teamIndex) => {
             const isFull = maxMembersPerTeam !== undefined && team.memberIds.length >= maxMembersPerTeam
+            const excess = isExcessTeam(teamIndex)
             return (
               <Box
                 key={team.id}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => handleDropOnTeam(team.id)}
                 sx={{
-                  border: '1px solid',
-                  borderColor: isFull ? 'error.light' : 'grey.200',
+                  border: '2px solid',
+                  borderColor: excess ? 'error.main' : isFull ? 'error.light' : 'grey.200',
                   borderRadius: 1.5,
                   p: 1.5,
+                  bgcolor: excess ? 'error.50' : 'transparent',
                 }}
               >
                 <Box className="flex items-center gap-1 mb-1">
@@ -216,6 +234,14 @@ export function ManualTeamsSetup({ students, teams, onChange, maxMembersPerTeam,
                           </Typography>
                         )}
                       </Typography>
+                      {excess && (
+                        <Chip
+                          size="small"
+                          color="error"
+                          label="Лишняя команда"
+                          sx={{ height: 22, fontSize: '0.7rem' }}
+                        />
+                      )}
                       {!disabled && (
                         <>
                           <Tooltip title="Переименовать">

@@ -1,9 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Box, Button, CircularProgress, Typography } from '@mui/material'
 import BalanceIcon from '@mui/icons-material/Balance'
 import LockIcon from '@mui/icons-material/Lock'
-import type { TeamWithMembers } from '../../model/types'
-import { useGenerateBalancedMutation, useLockRosterMutation } from '../../model/teamsQueries'
+import type { Member, TeamWithMembers } from '../../model/types'
+import {
+  useDeleteTeamMutation,
+  useGenerateBalancedMutation,
+  useLockRosterMutation,
+} from '../../model/teamsQueries'
 import { TeamCard } from './TeamCard'
 
 type Props = {
@@ -13,6 +17,8 @@ type Props = {
   currentUserId: string | undefined
   isTeacher: boolean
   isLocked: boolean
+  courseMembers?: Member[]
+  onAssignmentUpdated?: () => void | Promise<void>
 }
 
 export function BalancedTeamsView({
@@ -22,11 +28,15 @@ export function BalancedTeamsView({
   currentUserId,
   isTeacher,
   isLocked,
+  courseMembers = [],
+  onAssignmentUpdated,
 }: Props) {
   const [error, setError] = useState<string | null>(null)
+  const [pendingTeacherDeleteId, setPendingTeacherDeleteId] = useState<string | null>(null)
 
   const generateMutation = useGenerateBalancedMutation(courseId, assignmentId)
   const lockMutation = useLockRosterMutation(courseId, assignmentId)
+  const deleteMutation = useDeleteTeamMutation(courseId, assignmentId)
 
   const myTeam = teams.find((t) => t.members.some((m) => m.user_id === currentUserId))
   const teamsForList = !isTeacher && myTeam ? teams.filter((team) => team.id !== myTeam.id) : teams
@@ -44,8 +54,26 @@ export function BalancedTeamsView({
     setError(null)
     try {
       await lockMutation.mutateAsync()
+      await onAssignmentUpdated?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось зафиксировать составы')
+    }
+  }
+
+  useEffect(() => {
+    if (pendingTeacherDeleteId && !teams.some((t) => t.id === pendingTeacherDeleteId)) {
+      setPendingTeacherDeleteId(null)
+    }
+  }, [teams, pendingTeacherDeleteId])
+
+  const handleDeleteTeamById = async (teamId: string) => {
+    setError(null)
+    try {
+      await deleteMutation.mutateAsync({ teamId })
+      setPendingTeacherDeleteId(null)
+      await onAssignmentUpdated?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить команду')
     }
   }
 
@@ -88,7 +116,12 @@ export function BalancedTeamsView({
           <Typography variant="subtitle1" className="font-semibold mb-2">
             Моя команда
           </Typography>
-          <TeamCard team={myTeam} highlighted />
+          <TeamCard
+            team={myTeam}
+            highlighted
+            showCreatorName={isTeacher}
+            courseMembers={courseMembers}
+          />
         </Box>
       )}
 
@@ -102,9 +135,54 @@ export function BalancedTeamsView({
           </Typography>
         ) : (
           <Box className="flex flex-col gap-3">
-            {teamsForList.map((team) => (
-              <TeamCard key={team.id} team={team} highlighted={team.id === myTeam?.id} />
-            ))}
+            {teamsForList.map((team) => {
+              let listActions: ReactNode = null
+              if (isTeacher && !isLocked) {
+                listActions =
+                  pendingTeacherDeleteId === team.id ? (
+                    <Box className="flex flex-wrap gap-1 items-center">
+                      <Button
+                        size="small"
+                        color="error"
+                        variant="contained"
+                        disabled={deleteMutation.isPending}
+                        onClick={() => void handleDeleteTeamById(team.id)}
+                      >
+                        {deleteMutation.isPending ? <CircularProgress size={16} /> : 'Да, удалить'}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="text"
+                        disabled={deleteMutation.isPending}
+                        onClick={() => setPendingTeacherDeleteId(null)}
+                      >
+                        Нет
+                      </Button>
+                    </Box>
+                  ) : (
+                    <Button
+                      size="small"
+                      color="error"
+                      variant="outlined"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => setPendingTeacherDeleteId(team.id)}
+                    >
+                      Удалить команду
+                    </Button>
+                  )
+              }
+
+              return (
+                <TeamCard
+                  key={team.id}
+                  team={team}
+                  highlighted={team.id === myTeam?.id}
+                  showCreatorName={isTeacher}
+                  courseMembers={courseMembers}
+                  actions={listActions}
+                />
+              )
+            })}
           </Box>
         )}
       </Box>

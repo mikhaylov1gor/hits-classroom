@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createTeam,
+  deleteTeamWithRosterCheck,
   generateBalancedTeams,
   generateRandomTeams,
   joinTeam,
-  leaveTeam,
+  leaveTeamWithRosterCheck,
   listTeams,
   lockRoster,
   saveTeams,
@@ -56,7 +57,16 @@ export function useJoinTeamMutation(courseId: string | undefined, assignmentId: 
 
 export function useLeaveTeamMutation(courseId: string | undefined, assignmentId: string | undefined) {
   return useTeamsMutation(
-    (_: void) => leaveTeam(courseId!, assignmentId!),
+    (_: void) => leaveTeamWithRosterCheck(courseId!, assignmentId!),
+    courseId,
+    assignmentId,
+  )
+}
+
+export function useDeleteTeamMutation(courseId: string | undefined, assignmentId: string | undefined) {
+  return useTeamsMutation(
+    ({ teamId }: { teamId: string }) =>
+      deleteTeamWithRosterCheck(courseId!, assignmentId!, teamId),
     courseId,
     assignmentId,
   )

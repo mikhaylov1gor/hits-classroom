@@ -42,6 +42,34 @@ func (r *TeamRepository) ListByAssignment(assignmentID string) ([]*domain.Team, 
 func (r *TeamRepository) DeleteByAssignment(assignmentID string) error {
 	return r.db.Where("assignment_id = ?", assignmentID).Delete(&teamModel{}).Error
 }
+
+func (r *TeamRepository) DeleteSingleTeam(assignmentID, teamID string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Delete(&teamSubmissionVoteModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Delete(&teamSubmissionLikeModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Delete(&teamPeerGradeModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("assignment_id = ? AND team_id = ?", assignmentID, teamID).Delete(&teamAuditModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("team_id = ?", teamID).Delete(&teamMemberModel{}).Error; err != nil {
+			return err
+		}
+		res := tx.Where("id = ? AND assignment_id = ?", teamID, assignmentID).Delete(&teamModel{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
 func (r *TeamRepository) ReplaceAssignmentTeams(assignmentID string, teams []*domain.Team, teamMembers map[string][]string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("assignment_id = ?", assignmentID).Delete(&teamSubmissionVoteModel{}).Error; err != nil {

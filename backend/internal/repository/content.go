@@ -61,6 +61,8 @@ type TeamRepository interface {
 	GetByID(id string) (*domain.Team, error)
 	ListByAssignment(assignmentID string) ([]*domain.Team, error)
 	DeleteByAssignment(assignmentID string) error
+	// DeleteSingleTeam removes one team and related votes, likes, peer grades, audit rows, members.
+	DeleteSingleTeam(assignmentID, teamID string) error
 	ReplaceAssignmentTeams(assignmentID string, teams []*domain.Team, teamMembers map[string][]string) error
 }
 

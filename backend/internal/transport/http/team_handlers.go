@@ -285,6 +285,30 @@ func (h *LeaveTeamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type DeleteTeamHandler struct{ uc *usecase.DeleteTeam }
+
+func NewDeleteTeamHandler(uc *usecase.DeleteTeam) *DeleteTeamHandler { return &DeleteTeamHandler{uc: uc} }
+
+func (h *DeleteTeamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	teamID := r.PathValue("teamId")
+	if err := h.uc.Delete(courseID, assignmentID, teamID, userID); err != nil {
+		respondTeamError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type VoteTeamSubmissionHandler struct{ uc *usecase.VoteTeamSubmission }
 
 func NewVoteTeamSubmissionHandler(uc *usecase.VoteTeamSubmission) *VoteTeamSubmissionHandler {

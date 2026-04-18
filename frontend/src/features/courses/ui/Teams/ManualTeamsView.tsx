@@ -16,7 +16,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import CheckIcon from '@mui/icons-material/Check'
 import LockIcon from '@mui/icons-material/Lock'
 import SaveIcon from '@mui/icons-material/Save'
-import type { Member, TeamMemberInfo, TeamWithMembers } from '../../model/types'
+import { getTeamCreatorDisplayName, type Member, type TeamMemberInfo, type TeamWithMembers } from '../../model/types'
 import { useLockRosterMutation, useSaveTeamsMutation } from '../../model/teamsQueries'
 
 type DraftTeam = {
@@ -31,6 +31,7 @@ type Props = {
   teams: TeamWithMembers[]
   courseMembers: Member[]
   isLocked: boolean
+  onAssignmentUpdated?: () => void | Promise<void>
 }
 
 function getMemberInitials(m: Member | TeamMemberInfo | undefined): string {
@@ -51,6 +52,7 @@ export function ManualTeamsView({
   teams,
   courseMembers,
   isLocked,
+  onAssignmentUpdated,
 }: Props) {
   const [draftTeams, setDraftTeams] = useState<DraftTeam[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -188,6 +190,7 @@ export function ManualTeamsView({
     setError(null)
     try {
       await lockMutation.mutateAsync()
+      await onAssignmentUpdated?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось зафиксировать составы')
     }
@@ -208,6 +211,9 @@ export function ManualTeamsView({
             >
               <Typography variant="subtitle2" className="font-semibold mb-1">
                 {team.name} ({team.members.length}/{team.max_members})
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Создатель: {getTeamCreatorDisplayName(team, courseMembers)}
               </Typography>
               <Box className="flex flex-col gap-1">
                 {team.members.map((m) => (
@@ -375,6 +381,11 @@ export function ManualTeamsView({
                     </>
                   )}
                 </Box>
+                {originalTeam && (
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                    Создатель: {getTeamCreatorDisplayName(originalTeam, courseMembers)}
+                  </Typography>
+                )}
 
                 <Box
                   sx={{

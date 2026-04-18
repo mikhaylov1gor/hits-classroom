@@ -37,7 +37,16 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import SearchIcon from '@mui/icons-material/Search'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
-import type { Assignment, Member, Submission, TeamAuditEvent, TeamStatus, TeamWithMembers } from '../../model/types'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import {
+  getTeamCreatorDisplayName,
+  type Assignment,
+  type Member,
+  type Submission,
+  type TeamAuditEvent,
+  type TeamStatus,
+  type TeamWithMembers,
+} from '../../model/types'
 import {
   finalizeSubmissions,
   finalizeVote,
@@ -46,6 +55,7 @@ import {
   getTeamAudit,
   gradeSubmission,
   gradeTeamPeerSplit,
+  deleteTeamWithRosterCheck,
   listCourseMembers,
   listTeams,
   lockRoster,
@@ -396,6 +406,9 @@ function TeamRow({
   submissions,
   isDeadlinePassed,
   onRefresh,
+  courseMembers,
+  allowDeleteTeam,
+  onAssignmentUpdated,
 }: {
   team: TeamWithMembers
   courseId: string
@@ -404,6 +417,10 @@ function TeamRow({
   submissions: Submission[]
   isDeadlinePassed: boolean
   onRefresh: () => void
+  courseMembers: Member[]
+  /** Пока состав не закреплён — можно удалить команду */
+  allowDeleteTeam: boolean
+  onAssignmentUpdated?: () => void | Promise<void>
 }) {
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
@@ -417,6 +434,8 @@ function TeamRow({
   const [memberGradeComments, setMemberGradeComments] = useState<Record<string, string>>({})
   const [memberGradeLoading, setMemberGradeLoading] = useState<Record<string, boolean>>({})
   const [memberGradeErrors, setMemberGradeErrors] = useState<Record<string, string>>({})
+  const [deleteTeamConfirm, setDeleteTeamConfirm] = useState(false)
+  const [deleteTeamLoading, setDeleteTeamLoading] = useState(false)
 
   const isVoteRule =
     assignment.team_submission_rule === 'vote_equal' ||
@@ -454,6 +473,21 @@ function TeamRow({
     }
   }
 
+  const handleDeleteTeamStaff = async () => {
+    setDeleteTeamLoading(true)
+    setError(null)
+    try {
+      await deleteTeamWithRosterCheck(courseId, assignmentId, team.id)
+      setDeleteTeamConfirm(false)
+      onRefresh()
+      await onAssignmentUpdated?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить команду')
+    } finally {
+      setDeleteTeamLoading(false)
+    }
+  }
+
   const handleSaveMemberGrade = async (memberId: string, submissionId: string) => {
     const maxGrade = assignment.max_grade ?? 100
     const valStr = memberGrades[memberId] ?? ''
@@ -488,14 +522,19 @@ function TeamRow({
             <IconButton size="small" onClick={() => setExpanded((v) => !v)}>
               {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
             </IconButton>
-            <Typography
-              variant="body2"
-              fontWeight={600}
-              sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline', color: 'primary.main' } }}
-              onClick={() => navigate(`/course/${courseId}/assignment/${assignmentId}/team/${team.id}`)}
-            >
-              {team.name}
-            </Typography>
+            <Box>
+              <Typography
+                variant="body2"
+                fontWeight={600}
+                sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline', color: 'primary.main' } }}
+                onClick={() => navigate(`/course/${courseId}/assignment/${assignmentId}/team/${team.id}`)}
+              >
+                {team.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Создатель: {getTeamCreatorDisplayName(team, courseMembers)}
+              </Typography>
+            </Box>
           </Box>
         </TableCell>
         <TableCell>
@@ -580,6 +619,34 @@ function TeamRow({
                 <HistoryIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            {allowDeleteTeam &&
+              (deleteTeamConfirm ? (
+                <Box className="flex items-center gap-0.5 flex-wrap">
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="error"
+                    disabled={deleteTeamLoading}
+                    onClick={handleDeleteTeamStaff}
+                  >
+                    {deleteTeamLoading ? <CircularProgress size={14} /> : 'Да, удалить'}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="text"
+                    disabled={deleteTeamLoading}
+                    onClick={() => setDeleteTeamConfirm(false)}
+                  >
+                    Нет
+                  </Button>
+                </Box>
+              ) : (
+                <Tooltip title="Удалить команду (до фиксации составов)">
+                  <IconButton size="small" color="error" onClick={() => setDeleteTeamConfirm(true)}>
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              ))}
             <Tooltip title="Подробнее">
               <IconButton
                 size="small"
@@ -737,6 +804,9 @@ type TeamsPanelProps = {
   assignment: Assignment
   submissions: Submission[]
   onRefresh: () => void
+  courseMembers: Member[]
+  /** После закрепления состава — обновить задание в родителе */
+  onAssignmentUpdated?: () => void | Promise<void>
 }
 
 export function TeamsPanel({
@@ -745,6 +815,8 @@ export function TeamsPanel({
   assignment,
   submissions,
   onRefresh,
+  courseMembers,
+  onAssignmentUpdated,
 }: TeamsPanelProps) {
   const [teams, setTeams] = useState<TeamWithMembers[]>([])
   const [loading, setLoading] = useState(true)
@@ -816,7 +888,8 @@ export function TeamsPanel({
           m.last_name.toLowerCase().includes(q) ||
           m.first_name.toLowerCase().includes(q),
       )
-      if (!nameMatch && !memberMatch) return false
+      const creatorMatch = getTeamCreatorDisplayName(team, courseMembers).toLowerCase().includes(q)
+      if (!nameMatch && !memberMatch && !creatorMatch) return false
     }
     return true
   })
@@ -874,6 +947,7 @@ export function TeamsPanel({
                 runAction(async () => {
                   await lockRoster(courseId, assignmentId)
                   setRosterLockedLocal(true)
+                  await onAssignmentUpdated?.()
                 })
               }
             >
@@ -997,6 +1071,9 @@ export function TeamsPanel({
                   submissions={submissions}
                   isDeadlinePassed={isDeadlinePassed}
                   onRefresh={handleRefresh}
+                  courseMembers={courseMembers}
+                  allowDeleteTeam={!effectiveRosterLocked}
+                  onAssignmentUpdated={onAssignmentUpdated}
                 />
               ))}
             </TableBody>

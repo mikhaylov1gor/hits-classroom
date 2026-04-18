@@ -256,6 +256,22 @@ export function getNameByUserId(
   return 'Участник'
 }
 
+/** ФИО создателя команды: из состава команды или из списка участников курса */
+export function getTeamCreatorDisplayName(
+  team: {
+    creator_id: string
+    members: { user_id: string; first_name: string; last_name: string }[]
+  },
+  courseMembers: MemberLike[],
+): string {
+  const inTeam = team.members.find((m) => m.user_id === team.creator_id)
+  if (inTeam) {
+    const name = `${inTeam.first_name ?? ''} ${inTeam.last_name ?? ''}`.trim()
+    if (name) return name
+  }
+  return getNameByUserId(courseMembers, team.creator_id)
+}
+
 export function getInitialsFromMember(
   members: MemberLike[],
   userId: string,

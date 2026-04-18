@@ -1030,6 +1030,7 @@ export function AssignmentPage() {
                 currentUserId={authUser?.id}
                 isTeacher={isTeacher}
                 courseMembers={courseMembers}
+                onAssignmentUpdated={handleAssignmentSaved}
               />
             </Box>
           )}
@@ -1363,6 +1364,7 @@ export function AssignmentPage() {
                     }).catch(() => {})
                   }
                 }}
+                onAssignmentUpdated={handleAssignmentSaved}
                 onProposeClick={() =>
                   submitSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
                 }
@@ -1752,6 +1754,7 @@ export function AssignmentPage() {
               assignmentId={assignmentId}
               assignment={assignment}
               submissions={submissions}
+              courseMembers={courseMembers}
               onRefresh={() => {
                 if (courseId && assignmentId) {
                   listSubmissions(courseId, assignmentId)
@@ -1759,6 +1762,7 @@ export function AssignmentPage() {
                     .catch(() => {})
                 }
               }}
+              onAssignmentUpdated={handleAssignmentSaved}
             />
           )}
         </Box>

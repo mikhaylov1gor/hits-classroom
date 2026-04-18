@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
@@ -29,15 +30,16 @@ import type {
 } from '../../model/types'
 import {
   createTeam,
+  deleteTeamWithRosterCheck,
   getTeamAudit,
   joinTeam,
-  leaveTeam,
+  leaveTeamWithRosterCheck,
   listTeamSubmissions,
-  listTeams,
   submitPeerGradeSplit,
   toggleSubmissionLike,
   voteForSubmission,
 } from '../../api/coursesApi'
+import { teamsQueryKey, useTeamsQuery } from '../../model/teamsQueries'
 
 const STATUS_LABELS: Record<string, string> = {
   forming: 'Формирование',
@@ -564,6 +566,8 @@ type TeamBlockProps = {
   assignment: Assignment
   myUserId: string
   onRefresh: () => void
+  /** После операций с командами — обновить задание с сервера (roster_locked и т.д.) */
+  onAssignmentUpdated?: () => void | Promise<void>
   onProposeClick?: () => void
   onCanSubmitChange?: (can: boolean) => void
 }
@@ -574,15 +578,21 @@ export function TeamBlock({
   assignment,
   myUserId,
   onRefresh,
+  onAssignmentUpdated,
   onProposeClick,
   onCanSubmitChange,
 }: TeamBlockProps) {
-  const [teams, setTeams] = useState<TeamWithMembers[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const { data: teamsData, isLoading: loading } = useTeamsQuery(courseId, assignmentId)
+  const teams = teamsData ?? []
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [joining, setJoining] = useState<string | null>(null)
   const [leaving, setLeaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  /** Выход последним участником-создателем: удалить команду или оставить пустой */
+  const [lastMemberLeaveChoice, setLastMemberLeaveChoice] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [finalSubmissionAuthorId, setFinalSubmissionAuthorId] = useState<string | null>(null)
@@ -598,24 +608,17 @@ export function TeamBlock({
   const isDeadlinePassed = assignment.deadline ? new Date(assignment.deadline) < new Date() : false
   const isAutoFinalized = !!assignment.deadline_auto_finalized_at
 
-  const fetchTeams = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await listTeams(courseId, assignmentId)
-      setTeams(data)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка загрузки команд')
-    } finally {
-      setLoading(false)
-    }
-  }, [courseId, assignmentId])
+  const teamCountLimit =
+    assignment.team_count != null && assignment.team_count > 0 ? assignment.team_count : null
+  const isAtTeamCreationLimit = teamCountLimit != null && teams.length >= teamCountLimit
 
-  useEffect(() => {
-    fetchTeams()
-  }, [fetchTeams])
+  const resolveMyTeam = useCallback(
+    (list: TeamWithMembers[]) =>
+      list.find((t) => t.members.some((m) => m.user_id === myUserId)) ?? undefined,
+    [myUserId],
+  )
 
-  const myTeamForCallback = teams.find((t) => t.members.some((m) => m.user_id === myUserId))
+  const myTeamForCallback = resolveMyTeam(teams)
   useEffect(() => {
     if (!onCanSubmitChange) return
     if (rule !== 'top_student_only') {
@@ -628,11 +631,16 @@ export function TeamBlock({
   }, [myTeamForCallback, myUserId, rule, onCanSubmitChange])
 
   const handleRefresh = useCallback(() => {
-    fetchTeams()
+    void queryClient.invalidateQueries({ queryKey: teamsQueryKey(courseId, assignmentId) })
     onRefresh()
-  }, [fetchTeams, onRefresh])
+  }, [queryClient, courseId, assignmentId, onRefresh])
 
-  const myTeam = teams.find((t) => t.members.some((m) => m.user_id === myUserId))
+  const myTeam = resolveMyTeam(teams)
+  useEffect(() => {
+    setDeleteConfirm(false)
+    setLastMemberLeaveChoice(false)
+  }, [myTeam?.id])
+
   const isSingleMemberTeam = (myTeam?.members.length ?? 0) <= 1
   const showLastSubmissionHint =
     rule === 'last_submission' && myTeam?.status !== 'forming' && myTeam?.status !== 'graded'
@@ -688,6 +696,10 @@ export function TeamBlock({
   }, [assignmentId, canShowPeerSplitPanel, courseId, isPeerSplit, myTeam])
 
   const handleCreate = async () => {
+    if (teamCountLimit != null && teams.length >= teamCountLimit) {
+      setError(`Достигнуто максимальное количество команд (${teamCountLimit})`)
+      return
+    }
     setCreating(true)
     setError(null)
     try {
@@ -719,12 +731,61 @@ export function TeamBlock({
     setLeaving(true)
     setError(null)
     try {
-      await leaveTeam(courseId, assignmentId)
+      await leaveTeamWithRosterCheck(courseId, assignmentId)
+      setLastMemberLeaveChoice(false)
       handleRefresh()
+      await onAssignmentUpdated?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка выхода из команды')
+      handleRefresh()
+      await onAssignmentUpdated?.()
     } finally {
       setLeaving(false)
+    }
+  }
+
+  const isLastMemberCreator =
+    myTeam != null &&
+    myTeam.members.length === 1 &&
+    myTeam.members[0].user_id === myUserId &&
+    myTeam.creator_id === myUserId
+
+  const onLeaveClick = () => {
+    if (!myTeam) return
+    if (
+      !rosterLocked &&
+      distributionType === 'free' &&
+      isLastMemberCreator
+    ) {
+      setLastMemberLeaveChoice(true)
+      return
+    }
+    void handleLeave()
+  }
+
+  const canDeleteMyTeam =
+    !rosterLocked &&
+    distributionType === 'free' &&
+    myTeam != null &&
+    myTeam.creator_id === myUserId &&
+    myTeam.members.some((m) => m.user_id === myTeam.creator_id)
+
+  const handleDeleteTeam = async () => {
+    if (!myTeam) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteTeamWithRosterCheck(courseId, assignmentId, myTeam.id)
+      setDeleteConfirm(false)
+      setLastMemberLeaveChoice(false)
+      handleRefresh()
+      await onAssignmentUpdated?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось удалить команду')
+      handleRefresh()
+      await onAssignmentUpdated?.()
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -819,15 +880,110 @@ export function TeamBlock({
           {!rosterLocked && distributionType === 'free' && (
             <Box>
               <Divider sx={{ my: 1 }} />
-              <Button
-                size="small"
-                color="error"
-                variant="text"
-                disabled={leaving}
-                onClick={handleLeave}
-              >
-                {leaving ? <CircularProgress size={16} /> : 'Покинуть команду'}
-              </Button>
+              {lastMemberLeaveChoice ? (
+                <Box className="flex flex-col gap-2">
+                  <Typography variant="body2" color="text.secondary">
+                    Вы последний участник. Удалить команду или оставить её без участников?
+                  </Typography>
+                  <Box className="flex flex-wrap gap-1 items-center">
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={leaving || deleting}
+                      onClick={() => void handleLeave()}
+                    >
+                      {leaving ? <CircularProgress size={16} /> : 'Оставить пустой'}
+                    </Button>
+                    {canDeleteMyTeam &&
+                      (deleteConfirm ? (
+                        <>
+                          <Button
+                            size="small"
+                            color="error"
+                            variant="contained"
+                            disabled={deleting || leaving}
+                            onClick={handleDeleteTeam}
+                          >
+                            {deleting ? <CircularProgress size={16} /> : 'Да, удалить'}
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="text"
+                            disabled={deleting || leaving}
+                            onClick={() => setDeleteConfirm(false)}
+                          >
+                            Нет
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                          disabled={leaving}
+                          onClick={() => setDeleteConfirm(true)}
+                        >
+                          Удалить команду
+                        </Button>
+                      ))}
+                    <Button
+                      size="small"
+                      variant="text"
+                      disabled={leaving || deleting}
+                      onClick={() => {
+                        setLastMemberLeaveChoice(false)
+                        setDeleteConfirm(false)
+                      }}
+                    >
+                      Отмена
+                    </Button>
+                  </Box>
+                </Box>
+              ) : (
+                <Box className="flex flex-wrap gap-1 items-center">
+                  {canDeleteMyTeam &&
+                    (deleteConfirm ? (
+                      <>
+                        <Button
+                          size="small"
+                          color="error"
+                          variant="contained"
+                          disabled={deleting || leaving}
+                          onClick={handleDeleteTeam}
+                        >
+                          {deleting ? <CircularProgress size={16} /> : 'Да, удалить'}
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          disabled={deleting || leaving}
+                          onClick={() => setDeleteConfirm(false)}
+                        >
+                          Нет
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="small"
+                        color="error"
+                        variant="outlined"
+                        disabled={leaving}
+                        onClick={() => setDeleteConfirm(true)}
+                      >
+                        Удалить команду
+                      </Button>
+                    ))}
+                  <Button
+                    size="small"
+                    color="error"
+                    variant="text"
+                    disabled={leaving || deleting}
+                    onClick={onLeaveClick}
+                  >
+                    {leaving ? <CircularProgress size={16} /> : 'Покинуть команду'}
+                  </Button>
+                </Box>
+              )}
             </Box>
           )}
         </Box>
@@ -838,6 +994,12 @@ export function TeamBlock({
 
           {!rosterLocked && distributionType === 'free' && (
             <>
+              {isAtTeamCreationLimit && (
+                <Alert severity="warning">
+                  Достигнуто максимальное количество команд для этого задания ({teamCountLimit}).
+                  Новую команду создать нельзя.
+                </Alert>
+              )}
               {/* Create team */}
               {showCreate ? (
                 <Box className="flex gap-2 items-center">
@@ -848,7 +1010,12 @@ export function TeamBlock({
                     onChange={(e) => setNewTeamName(e.target.value)}
                     disabled={creating}
                   />
-                  <Button variant="contained" size="small" disabled={creating} onClick={handleCreate}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={creating || isAtTeamCreationLimit}
+                    onClick={handleCreate}
+                  >
                     {creating ? <CircularProgress size={16} /> : 'Создать'}
                   </Button>
                   <Button size="small" onClick={() => setShowCreate(false)}>
@@ -856,7 +1023,12 @@ export function TeamBlock({
                   </Button>
                 </Box>
               ) : (
-                <Button variant="outlined" size="small" onClick={() => setShowCreate(true)}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={isAtTeamCreationLimit}
+                  onClick={() => setShowCreate(true)}
+                >
                   Создать команду
                 </Button>
               )}

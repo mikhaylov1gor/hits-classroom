@@ -3,6 +3,7 @@ package usecase
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"math"
 	"math/rand"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"hits-classroom/internal/domain"
 	"hits-classroom/internal/repository"
+	"gorm.io/gorm"
 )
 
 var animalNames = []string{
@@ -472,6 +474,91 @@ func (uc *LeaveTeam) LeaveTeam(courseID, assignmentID, userID string) error {
 		return err
 	}
 	tryTeamAudit(uc.auditRepo, assignmentID, t.ID, userID, domain.TeamAuditRosterChanged, map[string]string{"action": "leave"})
+	return nil
+}
+
+type DeleteTeam struct {
+	memberRepo     repository.CourseMemberRepository
+	assignmentRepo repository.AssignmentRepository
+	teamRepo       repository.TeamRepository
+	teamMemberRepo repository.TeamMemberRepository
+	auditRepo      repository.TeamAuditRepository
+}
+
+func NewDeleteTeam(
+	memberRepo repository.CourseMemberRepository,
+	assignmentRepo repository.AssignmentRepository,
+	teamRepo repository.TeamRepository,
+	teamMemberRepo repository.TeamMemberRepository,
+	auditRepo repository.TeamAuditRepository,
+) *DeleteTeam {
+	return &DeleteTeam{
+		memberRepo: memberRepo, assignmentRepo: assignmentRepo, teamRepo: teamRepo, teamMemberRepo: teamMemberRepo, auditRepo: auditRepo,
+	}
+}
+
+func (uc *DeleteTeam) Delete(courseID, assignmentID, teamID, userID string) error {
+	role, err := uc.memberRepo.GetUserRole(courseID, userID)
+	if err != nil || role == "" {
+		return ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(assignmentID)
+	if err != nil || a == nil || a.CourseID != courseID {
+		return ErrCourseNotFound
+	}
+	if assignmentRosterLocked(a, time.Now().UTC()) {
+		return &ValidationError{Message: "team roster is locked"}
+	}
+	t, err := uc.teamRepo.GetByID(teamID)
+	if err != nil {
+		return err
+	}
+	if t == nil || t.AssignmentID != assignmentID {
+		return ErrCourseNotFound
+	}
+
+	isStaff := role == domain.RoleTeacher || role == domain.RoleOwner
+	if isStaff {
+		if err := uc.teamRepo.DeleteSingleTeam(assignmentID, teamID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrCourseNotFound
+			}
+			return err
+		}
+		tryTeamAudit(uc.auditRepo, assignmentID, teamID, userID, domain.TeamAuditRosterChanged, map[string]string{"action": "delete_team", "by": "staff"})
+		return nil
+	}
+
+	if role != domain.RoleStudent {
+		return ErrForbidden
+	}
+	if a.TeamDistributionType != domain.TeamDistributionFree {
+		return &ValidationError{Message: "team deletion is allowed only for free distribution"}
+	}
+	if t.CreatorID != userID {
+		return &ValidationError{Message: "only team creator can delete the team"}
+	}
+	members, err := uc.teamMemberRepo.ListByTeam(teamID)
+	if err != nil {
+		return err
+	}
+	creatorInTeam := false
+	for _, m := range members {
+		if m.UserID == t.CreatorID {
+			creatorInTeam = true
+			break
+		}
+	}
+	if len(members) > 0 && !creatorInTeam {
+		return &ValidationError{Message: "creator must be a team member unless the team is empty"}
+	}
+	if err := uc.teamRepo.DeleteSingleTeam(assignmentID, teamID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCourseNotFound
+		}
+		return err
+	}
+	tryTeamAudit(uc.auditRepo, assignmentID, teamID, userID, domain.TeamAuditRosterChanged, map[string]string{"action": "delete_team"})
 	return nil
 }
 

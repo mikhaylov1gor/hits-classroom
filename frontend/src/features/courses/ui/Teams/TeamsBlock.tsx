@@ -14,6 +14,8 @@ type Props = {
   currentUserId: string | undefined
   isTeacher: boolean
   courseMembers: Member[]
+  /** После фиксации состава / выхода / удаления — подтянуть задание с сервера */
+  onAssignmentUpdated?: () => void | Promise<void>
 }
 
 export function TeamsBlock({
@@ -23,6 +25,7 @@ export function TeamsBlock({
   currentUserId,
   isTeacher,
   courseMembers,
+  onAssignmentUpdated,
 }: Props) {
   const { data: teams, isLoading } = useTeamsQuery(courseId, assignmentId)
 
@@ -51,6 +54,9 @@ export function TeamsBlock({
               currentUserId={currentUserId}
               isTeacher={isTeacher}
               isLocked={isLocked}
+              maxTeams={assignment.team_count}
+              courseMembers={courseMembers}
+              onAssignmentUpdated={onAssignmentUpdated}
             />
           )}
 
@@ -62,6 +68,8 @@ export function TeamsBlock({
               currentUserId={currentUserId}
               isTeacher={isTeacher}
               isLocked={isLocked}
+              courseMembers={courseMembers}
+              onAssignmentUpdated={onAssignmentUpdated}
             />
           )}
 
@@ -73,6 +81,7 @@ export function TeamsBlock({
               currentUserId={currentUserId}
               isTeacher={isTeacher}
               isLocked={isLocked}
+              courseMembers={courseMembers}
             />
           )}
 
@@ -94,6 +103,7 @@ export function TeamsBlock({
               currentUserId={currentUserId}
               isTeacher={false}
               isLocked={isLocked}
+              onAssignmentUpdated={onAssignmentUpdated}
             />
           )}
         </>

@@ -1360,7 +1360,58 @@ export async function leaveTeam(courseId: string, assignmentId: string): Promise
     throw new Error(err.error ?? 'BAD_REQUEST')
   }
   if (response.status === 403) throw new Error('FORBIDDEN')
+  /** Уже не в команде / ресурс исчез — как успешный выход, список обновится с сервера */
+  if (response.status === 404) return
   if (!response.ok) throw new Error('LEAVE_TEAM_FAILED')
+}
+
+/**
+ * Перед выходом запрашивает задание; вызывает leave только если состав ещё не зафиксирован.
+ */
+export async function leaveTeamWithRosterCheck(
+  courseId: string,
+  assignmentId: string,
+): Promise<void> {
+  const assignment = await getAssignment(courseId, assignmentId)
+  if (assignment.roster_locked_at) {
+    throw new Error('Состав команд зафиксирован')
+  }
+  await leaveTeam(courseId, assignmentId)
+}
+
+/** Удаление команды создателем (свободное формирование, до фиксации составов). */
+export async function deleteTeam(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+): Promise<void> {
+  const response = await fetch(`${teamsBase(courseId, assignmentId)}/${teamId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  })
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  /** Команда уже удалена — как успех, список синхронизируется при refetch */
+  if (response.status === 404) return
+  if (!response.ok) throw new Error('DELETE_TEAM_FAILED')
+}
+
+/**
+ * Перед DELETE запрашивает задание; удаляет команду только если состав ещё не зафиксирован на сервере.
+ */
+export async function deleteTeamWithRosterCheck(
+  courseId: string,
+  assignmentId: string,
+  teamId: string,
+): Promise<void> {
+  const assignment = await getAssignment(courseId, assignmentId)
+  if (assignment.roster_locked_at) {
+    throw new Error('Состав команд зафиксирован')
+  }
+  await deleteTeam(courseId, assignmentId, teamId)
 }
 
 export async function voteForSubmission(
