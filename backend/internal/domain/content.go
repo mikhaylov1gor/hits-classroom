@@ -100,7 +100,9 @@ type Assignment struct {
 	PeerSplitMaxPercent     float64
 	RosterLockedAt          *time.Time
 	DeadlineAutoFinalizedAt *time.Time
-	CreatedAt               time.Time
+	// TeamFormationDeadline: для свободного вступления — крайний срок набора в команды (до дедлайна сдачи).
+	TeamFormationDeadline *time.Time
+	CreatedAt             time.Time
 }
 
 type Submission struct {

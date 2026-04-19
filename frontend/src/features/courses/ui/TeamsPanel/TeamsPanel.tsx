@@ -54,6 +54,7 @@ import {
   generateRandomTeams,
   getTeamAudit,
   gradeSubmission,
+  gradeTeamMemberSubmission,
   gradeTeamPeerSplit,
   deleteTeamWithRosterCheck,
   listCourseMembers,
@@ -69,18 +70,23 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   member_left: 'Участник покинул команду',
   member_removed: 'Участник удалён из команды',
   roster_locked: 'Состав закреплён',
+  roster_changed: 'Изменение состава',
+  roster_change: 'Изменение состава',
   submission_proposed: 'Предложено решение',
   submission_created: 'Создано решение',
   submission_attached: 'Решение прикреплено',
+  submission_liked: 'Лайк решения',
   vote_cast: 'Голос отдан',
   vote_finalized: 'Голосование завершено',
   voting_started: 'Голосование открыто',
   voting_open: 'Голосование открыто',
+  peer_split_submitted: 'Отправлено распределение оценок',
   deadline_auto_finalized: 'Автофиксация по дедлайну',
   deadline_finalized: 'Фиксация по дедлайну',
   auto_finalized: 'Автоматическая фиксация',
   graded: 'Выставлена оценка',
   grade_updated: 'Оценка обновлена',
+  grade_applied: 'Выставлена оценка',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -169,6 +175,16 @@ function AuditDialog({
     return userId.slice(0, 8) + '…'
   }
 
+  function gradeAppliedDetail(ev: TeamAuditEvent): string {
+    if (ev.event_type !== 'grade_applied') return ''
+    const p = ev.payload as Record<string, unknown>
+    const mode = typeof p.mode === 'string' ? p.mode : null
+    if (mode === 'team_uniform') return 'одна оценка на команду'
+    if (mode === 'peer_split') return 'оценка по peer split'
+    if (typeof p.submission_id === 'string') return 'по сдаче'
+    return ''
+  }
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>История команды «{teamName}»</DialogTitle>
@@ -181,14 +197,19 @@ function AuditDialog({
           </Typography>
         ) : (
           <List dense>
-            {events.map((ev) => (
-              <ListItem key={ev.id} disableGutters>
-                <ListItemText
-                  primary={EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}
-                  secondary={`${resolveActorName(ev.actor_user_id)} · ${new Date(ev.created_at).toLocaleString('ru')}`}
-                />
-              </ListItem>
-            ))}
+            {events.map((ev) => {
+              const gradeExtra = gradeAppliedDetail(ev)
+              return (
+                <ListItem key={ev.id} disableGutters>
+                  <ListItemText
+                    primary={EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}
+                    secondary={`${resolveActorName(ev.actor_user_id)} · ${new Date(ev.created_at).toLocaleString('ru')}${
+                      gradeExtra ? ` · ${gradeExtra}` : ''
+                    }`}
+                  />
+                </ListItem>
+              )
+            })}
           </List>
         )}
       </DialogContent>
@@ -405,6 +426,7 @@ function TeamRow({
   assignment,
   submissions,
   isDeadlinePassed,
+  rosterLocked,
   onRefresh,
   courseMembers,
   allowDeleteTeam,
@@ -416,6 +438,8 @@ function TeamRow({
   assignment: Assignment
   submissions: Submission[]
   isDeadlinePassed: boolean
+  /** Закрепление составов по заданию — до этого оценки недоступны */
+  rosterLocked: boolean
   onRefresh: () => void
   courseMembers: Member[]
   /** Пока состав не закреплён — можно удалить команду */
@@ -436,6 +460,8 @@ function TeamRow({
   const [memberGradeErrors, setMemberGradeErrors] = useState<Record<string, string>>({})
   const [deleteTeamConfirm, setDeleteTeamConfirm] = useState(false)
   const [deleteTeamLoading, setDeleteTeamLoading] = useState(false)
+  /** Поля ввода оценки участника — только после нажатия «Выставить оценку» */
+  const [memberGradeFormOpen, setMemberGradeFormOpen] = useState<Record<string, boolean>>({})
 
   const isVoteRule =
     assignment.team_submission_rule === 'vote_equal' ||
@@ -443,7 +469,10 @@ function TeamRow({
   const isPeerSplit = assignment.team_grading_mode === 'team_peer_split'
   const isUniform = assignment.team_grading_mode === 'team_uniform'
   const isIndividual = assignment.team_grading_mode === 'individual'
-  const isLastSubmissionRule = assignment.team_submission_rule === 'last_submission'
+
+  const isTeamForming = team.status === 'forming'
+  /** Оценки только после закрепления составов и завершения формирования команды */
+  const canGradeAfterFormation = rosterLocked && !isTeamForming
 
   const memberIds = new Set(team.members.map((m) => m.user_id))
   const teamSubmissions = submissions.filter((s) => memberIds.has(s.user_id))
@@ -452,11 +481,15 @@ function TeamRow({
     (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime(),
   )[0]
   const gradeTargetSubmission = attachedSubmission ?? latestTeamSubmission
-  const canGradeAllByButton =
-    (isUniform || (isIndividual && isLastSubmissionRule)) &&
-    isDeadlinePassed &&
-    !!gradeTargetSubmission
+  /** Одна кнопка на команду — только для team_uniform (протяжка оценки). В individual всегда оценка по каждому участнику. */
+  const showUniformGradeButton =
+    isUniform && isDeadlinePassed && !!gradeTargetSubmission
   const hasTeamGrade = teamSubmissions.some((s) => s.grade != null)
+
+  const gradedMembersCount = team.members.reduce((acc, m) => {
+    const s = teamSubmissions.find((x) => x.user_id === m.user_id)
+    return acc + (s?.grade != null ? 1 : 0)
+  }, 0)
 
   const participantNames = team.members.map((m) => m.last_name).join(', ')
 
@@ -488,7 +521,7 @@ function TeamRow({
     }
   }
 
-  const handleSaveMemberGrade = async (memberId: string, submissionId: string) => {
+  const handleSaveMemberGrade = async (memberId: string, existingSubmission: Submission | undefined) => {
     const maxGrade = assignment.max_grade ?? 100
     const valStr = memberGrades[memberId] ?? ''
     const val = parseFloat(valStr)
@@ -498,12 +531,36 @@ function TeamRow({
     }
     setMemberGradeLoading((prev) => ({ ...prev, [memberId]: true }))
     setMemberGradeErrors((prev) => ({ ...prev, [memberId]: '' }))
+    const comment = (memberGradeComments[memberId] ?? '').trim() || undefined
     try {
-      await gradeSubmission(courseId, assignmentId, submissionId, {
-        grade: val,
-        grade_comment: (memberGradeComments[memberId] ?? '').trim() || undefined,
-      })
+      if (existingSubmission) {
+        await gradeSubmission(courseId, assignmentId, existingSubmission.id, {
+          grade: val,
+          grade_comment: comment,
+        })
+      } else {
+        await gradeTeamMemberSubmission(courseId, assignmentId, memberId, {
+          grade: val,
+          grade_comment: comment,
+        })
+      }
       onRefresh()
+      setMemberGradeFormOpen((prev) => ({ ...prev, [memberId]: false }))
+      setMemberGrades((prev) => {
+        const next = { ...prev }
+        delete next[memberId]
+        return next
+      })
+      setMemberGradeComments((prev) => {
+        const next = { ...prev }
+        delete next[memberId]
+        return next
+      })
+      setMemberGradeErrors((prev) => {
+        const next = { ...prev }
+        delete next[memberId]
+        return next
+      })
     } catch (e) {
       setMemberGradeErrors((prev) => ({
         ...prev,
@@ -512,6 +569,25 @@ function TeamRow({
     } finally {
       setMemberGradeLoading((prev) => ({ ...prev, [memberId]: false }))
     }
+  }
+
+  const closeMemberGradeForm = (userId: string) => {
+    setMemberGradeFormOpen((prev) => ({ ...prev, [userId]: false }))
+    setMemberGrades((prev) => {
+      const next = { ...prev }
+      delete next[userId]
+      return next
+    })
+    setMemberGradeComments((prev) => {
+      const next = { ...prev }
+      delete next[userId]
+      return next
+    })
+    setMemberGradeErrors((prev) => {
+      const next = { ...prev }
+      delete next[userId]
+      return next
+    })
   }
 
   return (
@@ -551,7 +627,24 @@ function TeamRow({
           <FinalSolutionCell submission={attachedSubmission} />
         </TableCell>
         <TableCell>
-          {team.status === 'not_submitted' ? (
+          {isIndividual ? (
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3 }}>
+                Индивидуальная оценка
+              </Typography>
+              {team.status === 'not_submitted' ? (
+                <Typography variant="body2" color="error.main" sx={{ mt: 0.25 }}>
+                  0/{assignment.max_grade ?? 100}
+                </Typography>
+              ) : (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                  {gradedMembersCount > 0
+                    ? `${gradedMembersCount}/${team.members.length} с оценкой`
+                    : 'Оценки по участникам'}
+                </Typography>
+              )}
+            </Box>
+          ) : team.status === 'not_submitted' ? (
             <Typography variant="body2" color="error.main">
               0/{assignment.max_grade ?? 100}
             </Typography>
@@ -562,11 +655,19 @@ function TeamRow({
         <TableCell>
           <Box className="flex gap-1">
             {isVoteRule && (
-              <Tooltip title="Финализировать голосование">
+              <Tooltip
+                title={
+                  !canGradeAfterFormation
+                    ? isTeamForming
+                      ? 'Доступно после завершения формирования команды'
+                      : 'Доступно после закрепления составов команд'
+                    : 'Финализировать голосование'
+                }
+              >
                 <span>
                   <IconButton
                     size="small"
-                    disabled={finalizing}
+                    disabled={finalizing || !canGradeAfterFormation}
                     onClick={handleFinalizeVote}
                     color="primary"
                   >
@@ -576,40 +677,49 @@ function TeamRow({
               </Tooltip>
             )}
             {isPeerSplit && (
-              <Tooltip title={hasTeamGrade ? 'Изменить оценку (peer split)' : 'Выставить оценку (peer split)'}>
+              <Tooltip
+                title={
+                  !canGradeAfterFormation
+                    ? isTeamForming
+                      ? 'Оценка после завершения формирования команды'
+                      : 'Оценка после закрепления составов команд'
+                    : hasTeamGrade
+                      ? 'Изменить оценку (peer split)'
+                      : 'Выставить оценку (peer split)'
+                }
+              >
                 <Button
                   size="small"
                   variant="outlined"
                   color="secondary"
                   startIcon={<GavelIcon fontSize="small" />}
+                  disabled={!canGradeAfterFormation}
                   onClick={() => setGradeOpen(true)}
                 >
                   {hasTeamGrade ? 'Изменить оценку' : 'Оценить'}
                 </Button>
               </Tooltip>
             )}
-            {canGradeAllByButton && (
+            {showUniformGradeButton && (
               <Tooltip
                 title={
-                  !isDeadlinePassed
-                    ? 'Оценивание доступно только после наступления дедлайна'
-                    : !gradeTargetSubmission
-                      ? 'Нет финальных сдач'
-                      : isUniform
-                        ? 'Выставить оценку команде'
-                        : 'Выставить оценку всем участникам'
+                  !canGradeAfterFormation
+                    ? isTeamForming
+                      ? 'Оценивание после завершения формирования команды'
+                      : 'Оценивание после закрепления составов команд'
+                    : 'Выставить одну оценку на всю команду'
                 }
               >
                 <span>
                   <Button
                     size="small"
                     variant="outlined"
-                    disabled={!isDeadlinePassed || !gradeTargetSubmission}
+                    disabled={!canGradeAfterFormation}
                     onClick={() => setGradeUniformOpen(true)}
                     color="primary"
                     startIcon={<GavelIcon fontSize="small" />}
                   >
-                    {hasTeamGrade ? 'Изменить оценку' : 'Оценить всех'}
+                    {hasTeamGrade ? 'Изменить оценку' : 'Оценить команду'}
                   </Button>
                 </span>
               </Tooltip>
@@ -672,15 +782,24 @@ function TeamRow({
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
                 Участники
               </Typography>
-              {isIndividual && !isDeadlinePassed && (
+              {isIndividual && !rosterLocked && (
+                <Alert severity="info" sx={{ mb: 1 }}>
+                  Оценивание будет доступно после закрепления составов команд
+                </Alert>
+              )}
+              {isIndividual && rosterLocked && isTeamForming && (
+                <Alert severity="info" sx={{ mb: 1 }}>
+                  Оценивание будет доступно после завершения формирования команды
+                </Alert>
+              )}
+              {isIndividual && canGradeAfterFormation && !isDeadlinePassed && (
                 <Alert severity="info" sx={{ mb: 1 }}>
                   Оценивание будет доступно после наступления дедлайна
                 </Alert>
               )}
               {team.members.map((m) => {
-                const memberSub = teamSubmissions.find(
-                  (s) => s.user_id === m.user_id && s.is_attached,
-                )
+                /* Одна запись на пользователя; не только с прикреплённым решением */
+                const memberSub = teamSubmissions.find((s) => s.user_id === m.user_id)
                 const maxGrade = assignment.max_grade ?? 100
                 const currentGrade =
                   memberGrades[m.user_id] ??
@@ -704,53 +823,82 @@ function TeamRow({
                         )}
                       </Box>
                     </Box>
-                    {isIndividual && isDeadlinePassed && !isLastSubmissionRule && (
-                      memberSub ? (
-                        <Box className="flex gap-2 items-start mt-1 flex-wrap">
-                          <TextField
-                            size="small"
-                            label={`Оценка (0–${maxGrade})`}
-                            type="number"
-                            value={currentGrade}
-                            onChange={(e) =>
-                              setMemberGrades((prev) => ({ ...prev, [m.user_id]: e.target.value }))
-                            }
-                            inputProps={{ min: 0, max: maxGrade, step: 1 }}
-                            sx={{ width: 130 }}
-                            error={!!memberGradeErrors[m.user_id]}
-                            helperText={memberGradeErrors[m.user_id]}
-                          />
-                          <TextField
-                            size="small"
-                            label="Комментарий"
-                            value={currentComment}
-                            onChange={(e) =>
-                              setMemberGradeComments((prev) => ({
-                                ...prev,
-                                [m.user_id]: e.target.value,
-                              }))
-                            }
-                            sx={{ flex: 1, minWidth: 120 }}
-                          />
+                    {isIndividual && isDeadlinePassed && canGradeAfterFormation && (
+                      <Box className="flex flex-col gap-1 mt-1">
+                        {!memberGradeFormOpen[m.user_id] ? (
                           <Button
                             size="small"
-                            variant="contained"
-                            disabled={memberGradeLoading[m.user_id]}
-                            onClick={() => handleSaveMemberGrade(m.user_id, memberSub.id)}
-                            sx={{ mt: 0.25 }}
+                            variant="outlined"
+                            onClick={() =>
+                              setMemberGradeFormOpen((prev) => ({ ...prev, [m.user_id]: true }))
+                            }
                           >
-                            {memberGradeLoading[m.user_id] ? (
-                              <CircularProgress size={16} />
-                            ) : (
-                              'Сохранить'
-                            )}
+                            {memberSub?.grade != null ? 'Изменить оценку' : 'Выставить оценку'}
                           </Button>
-                        </Box>
-                      ) : (
-                        <Typography variant="caption" color="error.main">
-                          Оценка: 0/{maxGrade}
-                        </Typography>
-                      )
+                        ) : (
+                          <>
+                            {memberSub && !memberSub.is_attached && (
+                              <Typography variant="caption" color="text.secondary">
+                                Решение не прикреплено как финальное — оценка относится к этому участнику
+                              </Typography>
+                            )}
+                            {!memberSub && (
+                              <Typography variant="caption" color="text.secondary">
+                                Нет сдачи от участника — при сохранении будет создана запись для оценки
+                              </Typography>
+                            )}
+                            <Box className="flex gap-2 items-start flex-wrap">
+                              <TextField
+                                size="small"
+                                label={`Оценка (0–${maxGrade})`}
+                                type="number"
+                                value={currentGrade}
+                                onChange={(e) =>
+                                  setMemberGrades((prev) => ({ ...prev, [m.user_id]: e.target.value }))
+                                }
+                                inputProps={{ min: 0, max: maxGrade, step: 1 }}
+                                sx={{ width: 130 }}
+                                error={!!memberGradeErrors[m.user_id]}
+                                helperText={memberGradeErrors[m.user_id]}
+                              />
+                              <TextField
+                                size="small"
+                                label="Комментарий"
+                                value={currentComment}
+                                onChange={(e) =>
+                                  setMemberGradeComments((prev) => ({
+                                    ...prev,
+                                    [m.user_id]: e.target.value,
+                                  }))
+                                }
+                                sx={{ flex: 1, minWidth: 120 }}
+                              />
+                              <Button
+                                size="small"
+                                variant="contained"
+                                disabled={memberGradeLoading[m.user_id]}
+                                onClick={() => handleSaveMemberGrade(m.user_id, memberSub)}
+                                sx={{ mt: 0.25 }}
+                              >
+                                {memberGradeLoading[m.user_id] ? (
+                                  <CircularProgress size={16} />
+                                ) : (
+                                  'Сохранить'
+                                )}
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="text"
+                                disabled={memberGradeLoading[m.user_id]}
+                                onClick={() => closeMemberGradeForm(m.user_id)}
+                                sx={{ mt: 0.25 }}
+                              >
+                                Отмена
+                              </Button>
+                            </Box>
+                          </>
+                        )}
+                      </Box>
                     )}
                   </Box>
                 )
@@ -782,7 +930,7 @@ function TeamRow({
         />
       )}
 
-      {canGradeAllByButton && gradeTargetSubmission && (
+      {showUniformGradeButton && gradeTargetSubmission && (
         <TeamUniformGradeDialog
           courseId={courseId}
           assignmentId={assignmentId}
@@ -1056,7 +1204,16 @@ export function TeamsPanel({
                 <TableCell>Участники</TableCell>
                 <TableCell>Статус</TableCell>
                 <TableCell>Финальное решение</TableCell>
-                <TableCell>Оценка</TableCell>
+                <TableCell sx={{ minWidth: 120 }}>
+                  <Box component="span" sx={{ display: 'block' }}>
+                    Оценка
+                  </Box>
+                  {gradingMode === 'individual' && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                      индивидуально
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell>Действия</TableCell>
               </TableRow>
             </TableHead>
@@ -1070,6 +1227,7 @@ export function TeamsPanel({
                   assignment={assignment}
                   submissions={submissions}
                   isDeadlinePassed={isDeadlinePassed}
+                  rosterLocked={effectiveRosterLocked}
                   onRefresh={handleRefresh}
                   courseMembers={courseMembers}
                   allowDeleteTeam={!effectiveRosterLocked}

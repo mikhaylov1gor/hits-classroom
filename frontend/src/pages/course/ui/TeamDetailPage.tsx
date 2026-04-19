@@ -72,6 +72,7 @@ const VOTING_EVENT_TYPES = new Set([
   'voting_started',
   'voting_open',
   'submission_liked',
+  'grade_applied',
 ])
 
 const PEER_SPLIT_EVENT_TYPES = new Set([
@@ -105,6 +106,9 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   deadline_auto_finalized: 'Автоматическая фиксация по дедлайну',
   deadline_finalized: 'Фиксация дедлайна',
   auto_finalized: 'Автоматическая фиксация',
+  grade_applied: 'Выставлена оценка',
+  graded: 'Выставлена оценка',
+  grade_updated: 'Оценка обновлена',
 }
 
 const SUBMISSION_RULE_LABELS: Record<string, string> = {
@@ -194,10 +198,13 @@ function EventRow({
   event,
   members,
   teamMembers,
+  submissions,
 }: {
   event: TeamAuditEvent
   members: Member[]
   teamMembers: TeamWithMembers['members']
+  /** Для подписи «чья сдача» у grade_applied */
+  submissions?: Submission[]
 }) {
   const actorName = getPersonName(event.actor_user_id, members, teamMembers)
   const label = EVENT_TYPE_LABELS[event.event_type] ?? event.event_type
@@ -205,7 +212,22 @@ function EventRow({
   // Try to get subject from payload (e.g., who joined/left)
   let detail = ''
   const payload = event.payload as Record<string, unknown>
-  if (event.event_type === 'roster_change' || event.event_type === 'roster_changed') {
+  if (event.event_type === 'grade_applied') {
+    const mode = typeof payload.mode === 'string' ? payload.mode : null
+    const sid = typeof payload.submission_id === 'string' ? payload.submission_id : null
+    if (mode === 'team_uniform') {
+      detail = 'Одна оценка на всю команду'
+    } else if (mode === 'peer_split') {
+      detail = 'Оценка по peer split'
+    } else if (sid && submissions?.length) {
+      const sub = submissions.find((s) => s.id === sid)
+      detail = sub
+        ? `Сдача: ${getPersonName(sub.user_id, members, teamMembers)}`
+        : `Сдача ${sid.slice(0, 8)}…`
+    } else if (sid) {
+      detail = `Сдача ${sid.slice(0, 8)}…`
+    }
+  } else if (event.event_type === 'roster_change' || event.event_type === 'roster_changed') {
     const action = typeof payload.action === 'string' ? payload.action : null
     const targetId = typeof payload.user_id === 'string' ? payload.user_id : null
     const targetName = targetId ? getPersonName(targetId, members, teamMembers) : null
@@ -345,6 +367,9 @@ function VotingHistory({
     ['submission_proposed', 'submission_created', 'submission_attached'].includes(e.event_type),
   )
   const voteEvents = events.filter((e) => e.event_type === 'vote_cast')
+  const gradeEvents = events
+    .filter((e) => e.event_type === 'grade_applied')
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
   // Find vote weight from payload
   function getVoteWeight(ev: TeamAuditEvent): number | null {
@@ -473,6 +498,37 @@ function VotingHistory({
                     </TableRow>
                   )
                 })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </>
+      )}
+
+      {gradeEvents.length > 0 && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
+            Оценки
+          </Typography>
+          <TableContainer sx={{ mb: 2 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Время</TableCell>
+                  <TableCell>Событие</TableCell>
+                  <TableCell>Кто выставил</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {gradeEvents.map((ev) => (
+                  <EventRow
+                    key={ev.id}
+                    event={ev}
+                    members={members}
+                    teamMembers={teamMembers}
+                    submissions={submissions}
+                  />
+                ))}
               </TableBody>
             </Table>
           </TableContainer>
@@ -656,6 +712,7 @@ function TeamSubmissionsSection({
   voteLoading,
   likeLoading,
   canVote,
+  canLike,
 }: {
   courseId?: string
   assignmentId?: string
@@ -667,7 +724,9 @@ function TeamSubmissionsSection({
   onLike: (submissionId: string, currentLiked: boolean) => void
   voteLoading: string | null
   likeLoading: string | null
+  /** Голосование разрешено только после фиксации состава команд */
   canVote: boolean
+  canLike: boolean
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
@@ -808,30 +867,34 @@ function TeamSubmissionsSection({
                   >
                     {isExpanded ? 'Скрыть решение' : 'Посмотреть решение'}
                   </Button>
-                  {canVote && (
+                  {(canVote || canLike) && (
                     <>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<HowToVoteIcon fontSize="small" />}
-                        onClick={() => onVote(submission.id)}
-                        disabled={isVoting}
-                        sx={{ fontSize: '0.75rem', py: 0.25 }}
-                      >
-                        {isVoting ? 'Голосование…' : 'Голосовать'}
-                      </Button>
-                      <IconButton
-                        size="small"
-                        onClick={() => onLike(submission.id, false)}
-                        disabled={isLiking}
-                        aria-label="Лайк"
-                      >
-                        {isLiking ? (
-                          <CircularProgress size={16} />
-                        ) : (
-                          <FavoriteBorderIcon fontSize="small" sx={{ color: 'error.main' }} />
-                        )}
-                      </IconButton>
+                      {canVote && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<HowToVoteIcon fontSize="small" />}
+                          onClick={() => onVote(submission.id)}
+                          disabled={isVoting}
+                          sx={{ fontSize: '0.75rem', py: 0.25 }}
+                        >
+                          {isVoting ? 'Голосование…' : 'Голосовать'}
+                        </Button>
+                      )}
+                      {canLike && (
+                        <IconButton
+                          size="small"
+                          onClick={() => onLike(submission.id, false)}
+                          disabled={isLiking}
+                          aria-label="Лайк"
+                        >
+                          {isLiking ? (
+                            <CircularProgress size={16} />
+                          ) : (
+                            <FavoriteBorderIcon fontSize="small" sx={{ color: 'error.main' }} />
+                          )}
+                        </IconButton>
+                      )}
                     </>
                   )}
                 </Box>
@@ -964,7 +1027,20 @@ export function TeamDetailPage() {
       ? finalSubmission
       : submissions.find((s) => s.grade != null) ?? null
 
+  const gradingMode = assignment?.team_grading_mode ?? 'individual'
+  const isIndividualGrading = gradingMode === 'individual'
+  const gradedMembersCount =
+    team && isIndividualGrading
+      ? team.members.reduce((acc, m) => {
+          const s = submissions.find((x) => x.user_id === m.user_id)
+          return acc + (s?.grade != null ? 1 : 0)
+        }, 0)
+      : 0
+
   const teamMembers = team?.members ?? []
+
+  const viewerIsStudent = courseMembers.find((m) => m.user_id === user?.id)?.role === 'student'
+  const rosterLocked = Boolean(assignment?.roster_locked_at)
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -1021,7 +1097,63 @@ export function TeamDetailPage() {
                 />
               ))}
             </Box>
-            {(finalSubmission || gradedSubmission) && (
+            {assignment && isIndividualGrading && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  Индивидуальная оценка
+                </Typography>
+                <Box
+                  sx={{
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {team.members.map((m, idx) => {
+                    const memberSub = submissions.find((s) => s.user_id === m.user_id)
+                    const maxG = assignment.max_grade ?? 100
+                    return (
+                      <Box
+                        key={m.user_id}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 2,
+                          flexWrap: 'wrap',
+                          px: 1.5,
+                          py: 1,
+                          bgcolor: idx % 2 === 0 ? 'grey.50' : 'background.paper',
+                          borderBottom:
+                            idx < team.members.length - 1 ? '1px solid' : 'none',
+                          borderColor: 'divider',
+                        }}
+                      >
+                        <Typography variant="body2">
+                          {m.first_name} {m.last_name}
+                        </Typography>
+                        {memberSub?.grade != null ? (
+                          <Typography variant="body2" fontWeight={600} color="success.main">
+                            {memberSub.grade}/{maxG}
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            Не выставлена
+                          </Typography>
+                        )}
+                      </Box>
+                    )
+                  })}
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  {gradedMembersCount > 0
+                    ? `${gradedMembersCount}/${team.members.length} с оценкой`
+                    : 'Оценки по участникам ещё не выставлены'}
+                </Typography>
+              </Box>
+            )}
+            {assignment && !isIndividualGrading && (finalSubmission || gradedSubmission) && (
               <Box className="flex items-center gap-2 mt-2">
                 <Typography variant="caption" color="text.secondary">Оценка:</Typography>
                 {gradedSubmission?.grade != null ? (
@@ -1041,6 +1173,17 @@ export function TeamDetailPage() {
             </Alert>
           )}
 
+          {assignment &&
+            (assignment.team_submission_rule === 'vote_equal' ||
+              assignment.team_submission_rule === 'vote_weighted') &&
+            !rosterLocked &&
+            viewerIsStudent && (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                Этап формирования команд: голосование за финальное решение откроется после того, как
+                преподаватель зафиксирует составы.
+              </Alert>
+            )}
+
           {/* Team submissions for vote */}
           <TeamSubmissionsSection
             courseId={courseId}
@@ -1053,9 +1196,8 @@ export function TeamDetailPage() {
             onLike={handleLike}
             voteLoading={voteLoading}
             likeLoading={likeLoading}
-            canVote={
-              courseMembers.find((m) => m.user_id === user?.id)?.role === 'student'
-            }
+            canVote={viewerIsStudent && rosterLocked}
+            canLike={viewerIsStudent}
           />
 
           {/* Composition history */}

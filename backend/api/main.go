@@ -127,6 +127,7 @@ func main() {
 	submitPeerGradeSplitUC := usecase.NewSubmitPeerGradeSplit(memberRepo, assignmentRepo, teamRepo, teamMemberRepo, teamPeerGradeRepo, teamAuditRepo)
 	gradeTeamPeerSplitUC := usecase.NewGradeTeamPeerSplit(memberRepo, assignmentRepo, teamRepo, submissionRepo, teamMemberRepo, teamPeerGradeRepo, teamAuditRepo)
 	autoFinalizeUC := usecase.NewAutoFinalizeDeadline(assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, finalizeTeamVoteUC, teamAuditRepo)
+	autoLockFormationUC := usecase.NewAutoLockTeamFormation(assignmentRepo, teamAuditRepo)
 	finalizeTeamSubmissionsNowUC := usecase.NewFinalizeTeamSubmissionsNow(memberRepo, assignmentRepo, autoFinalizeUC)
 
 	coursesHandler := httphandler.NewCoursesHandler(
@@ -164,6 +165,7 @@ func main() {
 	mux.Handle("POST /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions", authWrap(httphandler.NewCreateSubmissionHandler(createSubmissionUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/my", authWrap(httphandler.NewGetMySubmissionHandler(getMySubmissionUC)))
 	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/grade", authWrap(httphandler.NewGradeSubmissionHandler(gradeSubmissionUC)))
+	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/team-members/{userId}/grade", authWrap(httphandler.NewGradeTeamMemberSubmissionHandler(gradeSubmissionUC)))
 	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/detach", authWrap(httphandler.NewDetachAssignmentHandler(detachAssignmentUC)))
 	mux.Handle("PUT /api/v1/courses/{courseId}/assignments/{assignmentId}/submissions/{submissionId}/return", authWrap(httphandler.NewReturnAssignmentHandler(returnAssignmentUC)))
 	mux.Handle("GET /api/v1/courses/{courseId}/members/{userId}/grades", authWrap(httphandler.NewGetStudentGradesHandler(getStudentGradesUC)))
@@ -198,7 +200,9 @@ func main() {
 		t := time.NewTicker(1 * time.Minute)
 		defer t.Stop()
 		for range t.C {
-			_ = autoFinalizeUC.Run(time.Now().UTC())
+			now := time.Now().UTC()
+			_ = autoLockFormationUC.Run(now)
+			_ = autoFinalizeUC.Run(now)
 		}
 	}()
 

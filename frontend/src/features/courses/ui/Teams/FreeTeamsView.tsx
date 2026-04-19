@@ -24,6 +24,8 @@ type Props = {
   maxTeams?: number | null
   courseMembers?: Member[]
   onAssignmentUpdated?: () => void | Promise<void>
+  teamFormationDeadline?: string | null
+  allowEarlyFinalization?: boolean | null
 }
 
 export function FreeTeamsView({
@@ -36,6 +38,8 @@ export function FreeTeamsView({
   maxTeams,
   courseMembers = [],
   onAssignmentUpdated,
+  teamFormationDeadline,
+  allowEarlyFinalization,
 }: Props) {
   const queryClient = useQueryClient()
   const refreshTeamsAndAssignment = useCallback(async () => {
@@ -103,6 +107,20 @@ export function FreeTeamsView({
   const teamsForList = !isTeacher && myTeam
     ? teams.filter((team) => team.id !== myTeam.id)
     : teams
+
+  const formatFormationDeadline = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
+    } catch {
+      return iso
+    }
+  }
+
+  const formationPassed =
+    teamFormationDeadline != null &&
+    teamFormationDeadline !== '' &&
+    !isNaN(new Date(teamFormationDeadline).getTime()) &&
+    new Date(teamFormationDeadline) < new Date()
 
   const handleCreate = async () => {
     if (teamLimit != null && teams.length >= teamLimit) {
@@ -184,6 +202,25 @@ export function FreeTeamsView({
       {error && (
         <Alert severity="error" onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {!isLocked && teamFormationDeadline != null && teamFormationDeadline !== '' && (
+        <Alert
+          severity={
+            allowEarlyFinalization === true && formationPassed ? 'warning' : 'info'
+          }
+        >
+          <Typography variant="body2" component="span">
+            <strong>Дедлайн формирования команд:</strong> {formatFormationDeadline(teamFormationDeadline)}
+          </Typography>
+          {allowEarlyFinalization === true && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              {formationPassed
+                ? 'Срок истёк — команды должны быть сформированы автоматически. Обновите страницу, если данные ещё не обновились.'
+                : 'По истечении срока команды формируются автоматически, затем начнётся выполнение задания.'}
+            </Typography>
+          )}
         </Alert>
       )}
 

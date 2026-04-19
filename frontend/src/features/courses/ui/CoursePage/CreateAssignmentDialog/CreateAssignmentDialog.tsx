@@ -165,7 +165,9 @@ export function CreateAssignmentDialog({
         setError('Для группового задания нужно не менее 2 студентов в классе')
         return
       }
-      const groupError = validateGroupSettings(groupSettings)
+      const groupError = validateGroupSettings(groupSettings, {
+        assignmentDeadline: trimmedDeadline || undefined,
+      })
       if (groupError) {
         setError(groupError)
         return
@@ -351,6 +353,7 @@ export function CreateAssignmentDialog({
               value={groupSettings}
               onChange={setGroupSettings}
               disabled={loading}
+              assignmentDeadline={deadline}
             />
           )}
 

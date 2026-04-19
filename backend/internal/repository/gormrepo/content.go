@@ -124,6 +124,22 @@ func (r *AssignmentRepository) ListDueForAutoFinalize(before time.Time) ([]*doma
 	return out, nil
 }
 
+func (r *AssignmentRepository) ListDueForFormationAutoLock(before time.Time) ([]*domain.Assignment, error) {
+	var rows []assignmentModel
+	err := r.db.Where(
+		"assignment_kind = ? AND team_distribution_type = ? AND roster_locked_at IS NULL AND allow_early_finalization = ? AND team_formation_deadline IS NOT NULL AND team_formation_deadline <= ?",
+		"group", "free", true, before,
+	).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Assignment, 0, len(rows))
+	for i := range rows {
+		out = append(out, toAssignmentDomain(&rows[i]))
+	}
+	return out, nil
+}
+
 var _ repository.AssignmentRepository = (*AssignmentRepository)(nil)
 
 type SubmissionRepository struct{ db *gorm.DB }
@@ -275,7 +291,8 @@ func toAssignmentModel(a *domain.Assignment) *assignmentModel {
 		AllowEarlyFinalization: a.AllowEarlyFinalization, TeamGradingMode: string(a.TeamGradingMode),
 		PeerSplitMinPercent: a.PeerSplitMinPercent, PeerSplitMaxPercent: a.PeerSplitMaxPercent,
 		RosterLockedAt: a.RosterLockedAt, DeadlineAutoFinalizedAt: a.DeadlineAutoFinalizedAt,
-		CreatedAt: a.CreatedAt,
+		TeamFormationDeadline: a.TeamFormationDeadline,
+		CreatedAt:             a.CreatedAt,
 	}
 }
 func toAssignmentDomain(m *assignmentModel) *domain.Assignment {
@@ -289,7 +306,8 @@ func toAssignmentDomain(m *assignmentModel) *domain.Assignment {
 		TeamGradingMode:     domain.TeamGradingMode(m.TeamGradingMode),
 		PeerSplitMinPercent: m.PeerSplitMinPercent, PeerSplitMaxPercent: m.PeerSplitMaxPercent,
 		RosterLockedAt: m.RosterLockedAt, DeadlineAutoFinalizedAt: m.DeadlineAutoFinalizedAt,
-		CreatedAt: m.CreatedAt,
+		TeamFormationDeadline: m.TeamFormationDeadline,
+		CreatedAt:             m.CreatedAt,
 	}
 }
 func toSubmissionModel(s *domain.Submission) *submissionModel {

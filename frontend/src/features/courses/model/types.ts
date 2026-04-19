@@ -348,6 +348,8 @@ export type Assignment = {
   peer_split_max_percent?: number | null
   roster_locked_at?: string | null
   deadline_auto_finalized_at?: string | null
+  /** Дедлайн набора в команды (только свободное вступление) */
+  team_formation_deadline?: string | null
 }
 
 export type TeamStatus =

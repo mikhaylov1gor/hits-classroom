@@ -24,6 +24,7 @@ export type GroupSettingsValue = {
   desiredTeamSize: string
   teamCount: string
   teamDistributionType: TeamDistributionType
+  teamFormationDeadline: string
   teamSubmissionRule: TeamSubmissionRule
   voteTieBreak: VoteTieBreak
   allowEarlyFinalization: boolean
@@ -36,6 +37,7 @@ export const DEFAULT_GROUP_SETTINGS: GroupSettingsValue = {
   desiredTeamSize: '2',
   teamCount: '',
   teamDistributionType: 'free',
+  teamFormationDeadline: '',
   teamSubmissionRule: 'last_submission',
   voteTieBreak: 'random',
   allowEarlyFinalization: false,
@@ -57,6 +59,9 @@ export function groupSettingsFromAssignment(a: Assignment | null | undefined): G
     desiredTeamSize: a.desired_team_size != null ? String(a.desired_team_size) : '2',
     teamCount: a.team_count != null ? String(a.team_count) : '',
     teamDistributionType: a.team_distribution_type ?? 'free',
+    teamFormationDeadline: a.team_formation_deadline
+      ? new Date(a.team_formation_deadline).toISOString().slice(0, 16)
+      : '',
     teamSubmissionRule: a.team_submission_rule ?? 'last_submission',
     voteTieBreak: a.vote_tie_break ?? 'random',
     allowEarlyFinalization: a.allow_early_finalization ?? false,
@@ -66,7 +71,10 @@ export function groupSettingsFromAssignment(a: Assignment | null | undefined): G
   }
 }
 
-export function validateGroupSettings(v: GroupSettingsValue): string | null {
+export function validateGroupSettings(
+  v: GroupSettingsValue,
+  opts?: { assignmentDeadline?: string },
+): string | null {
   const size = parseInt(v.desiredTeamSize, 10)
   if (isNaN(size) || size < 2) {
     return 'Размер команды должен быть не менее 2 участников'
@@ -76,6 +84,19 @@ export function validateGroupSettings(v: GroupSettingsValue): string | null {
     const parsedTeamCount = parseInt(trimmedTeamCount, 10)
     if (isNaN(parsedTeamCount) || parsedTeamCount < 1) {
       return 'Количество команд должно быть не меньше 1'
+    }
+  }
+  if (v.teamDistributionType === 'free' && v.teamFormationDeadline.trim()) {
+    const fd = new Date(v.teamFormationDeadline)
+    if (isNaN(fd.getTime())) {
+      return 'Некорректная дата дедлайна формирования команд'
+    }
+    const adStr = opts?.assignmentDeadline?.trim()
+    if (adStr) {
+      const ad = new Date(adStr)
+      if (!isNaN(ad.getTime()) && fd.getTime() > ad.getTime()) {
+        return 'Дедлайн формирования команд не может быть позже дедлайна сдачи задания'
+      }
     }
   }
   if (v.teamGradingMode === 'team_peer_split') {
@@ -121,6 +142,12 @@ export function buildGroupFields(v: GroupSettingsValue): Partial<AssignmentPaylo
       ? parseFloat(v.peerSplitMaxPercent)
       : null
   }
+  if (v.teamDistributionType === 'free') {
+    fields.team_formation_deadline =
+      v.teamFormationDeadline.trim() !== ''
+        ? new Date(v.teamFormationDeadline).toISOString()
+        : null
+  }
   return fields
 }
 
@@ -154,9 +181,16 @@ type GroupSettingsFieldsProps = {
   value: GroupSettingsValue
   onChange: (next: GroupSettingsValue) => void
   disabled?: boolean
+  /** Дедлайн сдачи задания (datetime-local) — для проверки, что дедлайн формирования команд не позже */
+  assignmentDeadline?: string
 }
 
-export function GroupSettingsFields({ value, onChange, disabled }: GroupSettingsFieldsProps) {
+export function GroupSettingsFields({
+  value,
+  onChange,
+  disabled,
+  assignmentDeadline = '',
+}: GroupSettingsFieldsProps) {
   const hasVoteTieBreak =
     value.teamSubmissionRule === 'vote_equal' || value.teamSubmissionRule === 'vote_weighted'
   const hasPeerSplit = value.teamGradingMode === 'team_peer_split'
@@ -209,6 +243,24 @@ export function GroupSettingsFields({ value, onChange, disabled }: GroupSettings
           ))}
         </Select>
       </FormControl>
+
+      {value.teamDistributionType === 'free' && (
+        <TextField
+          label="Дедлайн формирования команд"
+          fullWidth
+          size="small"
+          type="datetime-local"
+          value={value.teamFormationDeadline}
+          onChange={(e) => set({ teamFormationDeadline: e.target.value })}
+          disabled={disabled}
+          InputLabelProps={{ shrink: true }}
+          inputProps={{
+            'aria-label': 'Дедлайн формирования команд',
+            max: assignmentDeadline.trim() ? assignmentDeadline : undefined,
+          }}
+          helperText="До этой даты студенты могут создавать команды и вступать в них. Не позже дедлайна сдачи задания."
+        />
+      )}
 
       <FormControl fullWidth size="small" disabled={disabled}>
         <InputLabel id="team-submission-rule-label">Правило определения финального решения</InputLabel>
@@ -300,6 +352,11 @@ export function GroupSettingsFields({ value, onChange, disabled }: GroupSettings
         }
         label="Разрешить досрочную финализацию команд"
       />
+      {value.teamDistributionType === 'free' && value.allowEarlyFinalization && (
+        <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: -1 }}>
+          По истечении срока команды формируются автоматически, затем начнётся выполнение задания.
+        </Typography>
+      )}
     </Box>
   )
 }

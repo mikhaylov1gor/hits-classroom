@@ -184,6 +184,28 @@ func (r *AssignmentRepository) ListDueForAutoFinalize(before time.Time) ([]*doma
 	return out, nil
 }
 
+func (r *AssignmentRepository) ListDueForFormationAutoLock(before time.Time) ([]*domain.Assignment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []*domain.Assignment
+	for _, a := range r.byID {
+		if a.AssignmentKind != domain.AssignmentKindGroup {
+			continue
+		}
+		if a.TeamDistributionType != domain.TeamDistributionFree {
+			continue
+		}
+		if a.RosterLockedAt != nil || !a.AllowEarlyFinalization {
+			continue
+		}
+		if a.TeamFormationDeadline == nil || a.TeamFormationDeadline.After(before) {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
 func (r *AssignmentRepository) Delete(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

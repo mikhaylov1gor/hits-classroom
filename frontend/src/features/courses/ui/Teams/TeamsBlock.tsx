@@ -57,6 +57,8 @@ export function TeamsBlock({
               maxTeams={assignment.team_count}
               courseMembers={courseMembers}
               onAssignmentUpdated={onAssignmentUpdated}
+              teamFormationDeadline={assignment.team_formation_deadline}
+              allowEarlyFinalization={assignment.allow_early_finalization}
             />
           )}
 

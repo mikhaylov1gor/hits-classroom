@@ -124,6 +124,10 @@ func computeTeamStatus(a *domain.Assignment, memberSet map[string]bool, allSubs 
 		return "not_submitted"
 	}
 	if a.TeamSubmissionRule == domain.TeamRuleVoteEqual || a.TeamSubmissionRule == domain.TeamRuleVoteWeighted {
+		// Голосование разрешено только после фиксации состава; до этого — этап формирования команд.
+		if !assignmentRosterLocked(a, now) {
+			return "forming"
+		}
 		if voteCount > 0 {
 			return "voting"
 		}

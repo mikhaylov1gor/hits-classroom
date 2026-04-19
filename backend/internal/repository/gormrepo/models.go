@@ -67,12 +67,13 @@ type assignmentModel struct {
 	MaxTeamSize             int     `gorm:"not null;default:0"`
 	TeamSubmissionRule      string  `gorm:"type:text;not null;default:'first_submission'"`
 	VoteTieBreak            string  `gorm:"type:text;not null;default:'highest_author_average'"`
-	AllowEarlyFinalization  bool    `gorm:"not null;default:true"`
+	AllowEarlyFinalization  bool    `gorm:"not null;default:false"`
 	TeamGradingMode         string  `gorm:"type:text;not null;default:'individual'"`
 	PeerSplitMinPercent     float64 `gorm:"not null;default:0"`
 	PeerSplitMaxPercent     float64 `gorm:"not null;default:0"`
 	RosterLockedAt          *time.Time
 	DeadlineAutoFinalizedAt *time.Time
+	TeamFormationDeadline   *time.Time
 	CreatedAt               time.Time `gorm:"not null"`
 }
 

@@ -31,11 +31,16 @@ func main() {
 	auto := usecase.NewAutoFinalizeDeadline(
 		assignmentRepo, teamRepo, teamMemberRepo, submissionRepo, finalizeVote, teamAuditRepo,
 	)
+	autoFormation := usecase.NewAutoLockTeamFormation(assignmentRepo, teamAuditRepo)
 	log.Println("deadline-worker started, tick every 1m")
 	t := time.NewTicker(1 * time.Minute)
 	defer t.Stop()
 	for range t.C {
-		if err := auto.Run(time.Now().UTC()); err != nil {
+		now := time.Now().UTC()
+		if err := autoFormation.Run(now); err != nil {
+			log.Println("auto lock formation:", err)
+		}
+		if err := auto.Run(now); err != nil {
 			log.Println("auto finalize:", err)
 		}
 	}

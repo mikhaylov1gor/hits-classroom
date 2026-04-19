@@ -124,6 +124,7 @@ type CreateAssignmentInput struct {
 	TeamGradingMode        domain.TeamGradingMode
 	PeerSplitMinPercent    float64
 	PeerSplitMaxPercent    float64
+	TeamFormationDeadline    *time.Time
 }
 
 type CreateAssignment struct {
@@ -206,9 +207,13 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 	if voteTie == "" {
 		voteTie = domain.VoteTieBreakHighestAuthorAverage
 	}
-	allowEarly := true
+	// По умолчанию false — как у чекбокса на фронте; true только если явно передано в запросе.
+	allowEarly := false
 	if in.AllowEarlyFinalization != nil {
 		allowEarly = *in.AllowEarlyFinalization
+	}
+	if err := validateTeamFormationDeadline(kind, distributionType, in.TeamFormationDeadline, in.Deadline); err != nil {
+		return nil, err
 	}
 	a := &domain.Assignment{
 		ID:                     uuid.New().String(),
@@ -230,6 +235,7 @@ func (uc *CreateAssignment) CreateAssignment(in CreateAssignmentInput) (*domain.
 		TeamGradingMode:        gradingMode,
 		PeerSplitMinPercent:    in.PeerSplitMinPercent,
 		PeerSplitMaxPercent:    in.PeerSplitMaxPercent,
+		TeamFormationDeadline:  in.TeamFormationDeadline,
 		CreatedAt:              time.Now().UTC(),
 	}
 	if err := uc.assignmentRepo.Create(a); err != nil {
@@ -258,6 +264,9 @@ type UpdateAssignmentInput struct {
 	TeamGradingMode        domain.TeamGradingMode
 	PeerSplitMinPercent    float64
 	PeerSplitMaxPercent    float64
+	TeamFormationDeadline  *time.Time
+	// TeamFormationDeadlineSet — если true, значение TeamFormationDeadline (включая nil) применяется; если false — оставляем как в БД.
+	TeamFormationDeadlineSet bool
 }
 
 type UpdateAssignment struct {
@@ -363,10 +372,33 @@ func (uc *UpdateAssignment) UpdateAssignment(in UpdateAssignmentInput) (*domain.
 			}
 		}
 	}
+	if a.AssignmentKind == domain.AssignmentKindGroup && a.TeamDistributionType == domain.TeamDistributionFree {
+		if in.TeamFormationDeadlineSet {
+			if err := validateTeamFormationDeadline(a.AssignmentKind, a.TeamDistributionType, in.TeamFormationDeadline, a.Deadline); err != nil {
+				return nil, err
+			}
+			a.TeamFormationDeadline = in.TeamFormationDeadline
+		}
+	} else {
+		a.TeamFormationDeadline = nil
+	}
 	if err := uc.assignmentRepo.Update(a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+func validateTeamFormationDeadline(kind domain.AssignmentKind, dist domain.TeamDistributionType, formation, work *time.Time) error {
+	if formation == nil {
+		return nil
+	}
+	if kind != domain.AssignmentKindGroup || dist != domain.TeamDistributionFree {
+		return &ValidationError{Message: "team formation deadline applies only to group assignments with free enrollment"}
+	}
+	if work != nil && formation.After(*work) {
+		return &ValidationError{Message: "team formation deadline must be on or before assignment deadline"}
+	}
+	return nil
 }
 
 func resolveGroupTeamSizing(studentsCount, desiredTeamSize, teamCount int) (int, int, int, error) {
@@ -745,11 +777,11 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 	if err := uc.submissionRepo.Update(s); err != nil {
 		return nil, err
 	}
+	// Протяжка одной оценки на всех — только team_uniform. В individual каждая сдача/участник оценивается отдельно.
 	applyGradeToWholeTeam :=
 		a.IsGroup() &&
 			uc.teamMemberRepo != nil &&
-			(a.TeamGradingMode == domain.TeamGradingTeamUniform ||
-				(a.TeamGradingMode == domain.TeamGradingIndividual && a.TeamSubmissionRule == domain.TeamRuleLastSubmission))
+			a.TeamGradingMode == domain.TeamGradingTeamUniform
 	if applyGradeToWholeTeam {
 		team, terr := uc.teamMemberRepo.GetTeamByUser(in.AssignmentID, s.UserID)
 		if terr == nil && team != nil {
@@ -792,17 +824,87 @@ func (uc *GradeSubmission) GradeSubmission(in GradeSubmissionInput) (*domain.Sub
 						return nil, err
 					}
 				}
-				mode := "team_uniform"
-				if a.TeamGradingMode == domain.TeamGradingIndividual {
-					mode = "individual_last_submission"
-				}
-				tryTeamAudit(uc.auditRepo, in.AssignmentID, team.ID, in.UserID, domain.TeamAuditGradeApplied, map[string]string{"mode": mode})
+				tryTeamAudit(uc.auditRepo, in.AssignmentID, team.ID, in.UserID, domain.TeamAuditGradeApplied, map[string]string{"mode": "team_uniform"})
 			}
 		}
 	} else {
 		tryTeamAudit(uc.auditRepo, in.AssignmentID, "", in.UserID, domain.TeamAuditGradeApplied, map[string]string{"submission_id": s.ID})
 	}
 	return s, nil
+}
+
+// GradeTeamMemberSubmissionInput — оценка участника команды; при отсутствии строки сдачи создаётся заглушка (как при протяжке оценки).
+type GradeTeamMemberSubmissionInput struct {
+	CourseID       string
+	AssignmentID   string
+	MemberUserID   string
+	TeacherUserID  string
+	Grade          int
+	GradeComment   string
+}
+
+// GradeTeamMemberSubmission выставляет оценку любому члену команды, даже если он не создавал черновик сдачи.
+func (uc *GradeSubmission) GradeTeamMemberSubmission(in GradeTeamMemberSubmissionInput) (*domain.Submission, error) {
+	role, err := uc.memberRepo.GetUserRole(in.CourseID, in.TeacherUserID)
+	if err != nil || role == "" {
+		return nil, ErrForbidden
+	}
+	if role != domain.RoleOwner && role != domain.RoleTeacher {
+		return nil, ErrForbidden
+	}
+	a, err := uc.assignmentRepo.GetByID(in.AssignmentID)
+	if err != nil || a == nil || a.CourseID != in.CourseID {
+		return nil, ErrCourseNotFound
+	}
+	if !a.IsGroup() {
+		return nil, &ValidationError{Message: "only group assignments support team member grading"}
+	}
+	if a.TeamGradingMode == domain.TeamGradingPeerSplit {
+		return nil, &ValidationError{Message: "use POST .../teams/{teamId}/grade-peer-split for this assignment"}
+	}
+	if !assignmentRosterLocked(a, time.Now().UTC()) {
+		return nil, &ValidationError{Message: "grading is not allowed before team roster is locked"}
+	}
+	if uc.teamMemberRepo == nil {
+		return nil, ErrForbidden
+	}
+	t, err := uc.teamMemberRepo.GetTeamByUser(in.AssignmentID, in.MemberUserID)
+	if err != nil || t == nil {
+		return nil, &ValidationError{Message: "user is not in a team for this assignment"}
+	}
+	o, err := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.MemberUserID)
+	if err != nil {
+		return nil, err
+	}
+	if o == nil {
+		o = &domain.Submission{
+			ID:           uuid.New().String(),
+			AssignmentID: in.AssignmentID,
+			UserID:       in.MemberUserID,
+			Body:         "",
+			FileIDs:      nil,
+			SubmittedAt:  time.Now().UTC(),
+			IsAttached:   false,
+		}
+		if cerr := uc.submissionRepo.Create(o); cerr != nil {
+			existing, gerr := uc.submissionRepo.GetByAssignmentAndUser(in.AssignmentID, in.MemberUserID)
+			if gerr != nil {
+				return nil, gerr
+			}
+			if existing == nil {
+				return nil, cerr
+			}
+			o = existing
+		}
+	}
+	return uc.GradeSubmission(GradeSubmissionInput{
+		CourseID:       in.CourseID,
+		AssignmentID:   in.AssignmentID,
+		SubmissionID:   o.ID,
+		UserID:         in.TeacherUserID,
+		Grade:          in.Grade,
+		GradeComment:   in.GradeComment,
+	})
 }
 
 type DetachAssignmentInput struct {

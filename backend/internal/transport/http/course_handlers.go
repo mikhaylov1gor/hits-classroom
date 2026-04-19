@@ -904,7 +904,30 @@ func assignmentResponse(a *domain.Assignment) map[string]interface{} {
 	} else {
 		out["deadline"] = nil
 	}
+	if a.TeamFormationDeadline != nil {
+		out["team_formation_deadline"] = a.TeamFormationDeadline.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		out["team_formation_deadline"] = nil
+	}
 	return out
+}
+
+func parseOptionalTimeString(s *string) (*time.Time, error) {
+	if s == nil {
+		return nil, nil
+	}
+	t := strings.TrimSpace(*s)
+	if t == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, t)
+	if err != nil {
+		parsed, err = time.Parse("2006-01-02T15:04:05Z07:00", t)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func submissionResponse(s *domain.Submission) map[string]interface{} {
@@ -1200,6 +1223,12 @@ func (h *UpdateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	var rawBody map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&rawBody); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
 	var req struct {
 		Title                  string   `json:"title"`
 		Body                   string   `json:"body"`
@@ -1218,7 +1247,13 @@ func (h *UpdateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		PeerSplitMinPercent    float64  `json:"peer_split_min_percent"`
 		PeerSplitMaxPercent    float64  `json:"peer_split_max_percent"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	b, err := json.Marshal(rawBody)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	if err := json.Unmarshal(b, &req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 		return
@@ -1228,6 +1263,28 @@ func (h *UpdateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		t, err := time.Parse(time.RFC3339, *req.Deadline)
 		if err == nil {
 			deadline = &t
+		}
+	}
+	formationSpecified := false
+	var formationDeadline *time.Time
+	if raw, ok := rawBody["team_formation_deadline"]; ok {
+		formationSpecified = true
+		if string(raw) == "null" {
+			formationDeadline = nil
+		} else {
+			var s string
+			if err := json.Unmarshal(raw, &s); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid team_formation_deadline"})
+				return
+			}
+			fd, ferr := parseOptionalTimeString(&s)
+			if ferr != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid team_formation_deadline"})
+				return
+			}
+			formationDeadline = fd
 		}
 	}
 	a, err := h.updateAssignment.UpdateAssignment(usecase.UpdateAssignmentInput{
@@ -1248,8 +1305,10 @@ func (h *UpdateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		VoteTieBreak:           domain.VoteTieBreak(req.VoteTieBreak),
 		AllowEarlyFinalization: req.AllowEarlyFinalization,
 		TeamGradingMode:        domain.TeamGradingMode(req.TeamGradingMode),
-		PeerSplitMinPercent:    req.PeerSplitMinPercent,
-		PeerSplitMaxPercent:    req.PeerSplitMaxPercent,
+		PeerSplitMinPercent:          req.PeerSplitMinPercent,
+		PeerSplitMaxPercent:          req.PeerSplitMaxPercent,
+		TeamFormationDeadline:        formationDeadline,
+		TeamFormationDeadlineSet:     formationSpecified,
 	})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
@@ -1326,6 +1385,7 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		PeerSplitMinCamel         *float64 `json:"peerSplitMinPercent"`
 		PeerSplitMaxPercent       *float64 `json:"peer_split_max_percent"`
 		PeerSplitMaxCamel         *float64 `json:"peerSplitMaxPercent"`
+		TeamFormationDeadline     *string  `json:"team_formation_deadline"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1389,6 +1449,12 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			deadline = &t
 		}
 	}
+	formationDeadline, ferr := parseOptionalTimeString(req.TeamFormationDeadline)
+	if ferr != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid team_formation_deadline"})
+		return
+	}
 	a, err := h.createAssignment.CreateAssignment(usecase.CreateAssignmentInput{
 		CourseID:               courseID,
 		UserID:                 userID,
@@ -1408,6 +1474,7 @@ func (h *CreateAssignmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		TeamGradingMode:        domain.TeamGradingMode(teamGradingMode),
 		PeerSplitMinPercent:    peerMin,
 		PeerSplitMaxPercent:    peerMax,
+		TeamFormationDeadline:  formationDeadline,
 	})
 	if err != nil {
 		if errors.Is(err, usecase.ErrForbidden) {
@@ -1624,6 +1691,79 @@ func (h *GradeSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s, err := h.gradeSubmission.GradeSubmission(usecase.GradeSubmissionInput{CourseID: courseID, AssignmentID: assignmentID, SubmissionID: submissionID, UserID: userID, Grade: req.Grade, GradeComment: req.GradeComment})
+	if err != nil {
+		if errors.Is(err, usecase.ErrCourseNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		if errors.Is(err, usecase.ErrForbidden) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden"})
+			return
+		}
+		var vErr *usecase.ValidationError
+		if errors.As(err, &vErr) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": vErr.Message})
+			return
+		}
+		if errors.Is(err, usecase.ErrValidation) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "validation failed"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(submissionResponse(s))
+}
+
+type GradeTeamMemberSubmissionHandler struct {
+	gradeSubmission *usecase.GradeSubmission
+}
+
+func NewGradeTeamMemberSubmissionHandler(gradeSubmission *usecase.GradeSubmission) *GradeTeamMemberSubmissionHandler {
+	return &GradeTeamMemberSubmissionHandler{gradeSubmission: gradeSubmission}
+}
+
+func (h *GradeTeamMemberSubmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	userID := UserIDFromContext(r.Context())
+	if userID == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	courseID := r.PathValue("courseId")
+	assignmentID := r.PathValue("assignmentId")
+	memberUserID := r.PathValue("userId")
+	if courseID == "" || assignmentID == "" || memberUserID == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Grade        int    `json:"grade"`
+		GradeComment string `json:"grade_comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	s, err := h.gradeSubmission.GradeTeamMemberSubmission(usecase.GradeTeamMemberSubmissionInput{
+		CourseID:       courseID,
+		AssignmentID: assignmentID,
+		MemberUserID:   memberUserID,
+		TeacherUserID:  userID,
+		Grade:          req.Grade,
+		GradeComment:   req.GradeComment,
+	})
 	if err != nil {
 		if errors.Is(err, usecase.ErrCourseNotFound) {
 			w.WriteHeader(http.StatusNotFound)

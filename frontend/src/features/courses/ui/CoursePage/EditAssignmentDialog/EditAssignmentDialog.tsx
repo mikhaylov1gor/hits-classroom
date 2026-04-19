@@ -227,7 +227,9 @@ export function EditAssignmentDialog({
     }
 
     if (assignmentKind === 'group') {
-      const groupError = validateGroupSettings(groupSettings)
+      const groupError = validateGroupSettings(groupSettings, {
+        assignmentDeadline: trimmedDeadline || undefined,
+      })
       if (groupError) {
         setError(groupError)
         return
@@ -349,6 +351,7 @@ export function EditAssignmentDialog({
                     value={groupSettings}
                     onChange={setGroupSettings}
                     disabled={loading}
+                    assignmentDeadline={deadline}
                   />
                 )}
 

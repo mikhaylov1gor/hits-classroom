@@ -587,6 +587,7 @@ export type AssignmentPayload = {
   team_grading_mode?: TeamGradingMode | null
   peer_split_min_percent?: number | null
   peer_split_max_percent?: number | null
+  team_formation_deadline?: string | null
 }
 
 export async function createAssignment(
@@ -619,6 +620,9 @@ export async function createAssignment(
     if (payload.team_grading_mode != null) body.team_grading_mode = payload.team_grading_mode
     if (payload.peer_split_min_percent != null) body.peer_split_min_percent = payload.peer_split_min_percent
     if (payload.peer_split_max_percent != null) body.peer_split_max_percent = payload.peer_split_max_percent
+    if ('team_formation_deadline' in payload) {
+      body.team_formation_deadline = payload.team_formation_deadline
+    }
   }
 
   const response = await fetch(`${API_BASE}/courses/${courseId}/assignments`, {
@@ -671,6 +675,9 @@ export async function updateAssignment(
     if (payload.team_grading_mode != null) body.team_grading_mode = payload.team_grading_mode
     if (payload.peer_split_min_percent != null) body.peer_split_min_percent = payload.peer_split_min_percent
     if (payload.peer_split_max_percent != null) body.peer_split_max_percent = payload.peer_split_max_percent
+    if ('team_formation_deadline' in payload) {
+      body.team_formation_deadline = payload.team_formation_deadline
+    }
   }
 
   const response = await fetch(
@@ -771,6 +778,42 @@ export async function gradeSubmission(
 
   const response = await fetch(
     `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/grade`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(body),
+    },
+  )
+
+  if (response.status === 400) {
+    const err = (await response.json().catch(() => ({}))) as { error?: string }
+    throw new Error(err.error ?? 'BAD_REQUEST')
+  }
+  if (response.status === 401) throw new Error('UNAUTHORIZED')
+  if (response.status === 403) throw new Error('FORBIDDEN')
+  if (response.status === 404) throw new Error('NOT_FOUND')
+  if (!response.ok) throw new Error('GRADE_SUBMISSION_FAILED')
+
+  return (await response.json()) as Submission
+}
+
+/** Оценка участника команды; если у него ещё нет строки сдачи, сервер создаёт заглушку */
+export async function gradeTeamMemberSubmission(
+  courseId: string,
+  assignmentId: string,
+  memberUserId: string,
+  payload: { grade: number; grade_comment?: string },
+): Promise<Submission> {
+  const body: { grade: number; grade_comment?: string } = { grade: payload.grade }
+  if (payload.grade_comment != null && payload.grade_comment.trim() !== '') {
+    body.grade_comment = payload.grade_comment.trim()
+  }
+
+  const response = await fetch(
+    `${API_BASE}/courses/${courseId}/assignments/${assignmentId}/team-members/${memberUserId}/grade`,
     {
       method: 'PUT',
       headers: {

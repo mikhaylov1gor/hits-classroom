@@ -565,6 +565,8 @@ type TeamBlockProps = {
   assignmentId: string
   assignment: Assignment
   myUserId: string
+  /** Есть ли у текущего пользователя прикреплённая (финальная) сдача */
+  hasAttachedSubmission?: boolean
   onRefresh: () => void
   /** После операций с командами — обновить задание с сервера (roster_locked и т.д.) */
   onAssignmentUpdated?: () => void | Promise<void>
@@ -577,6 +579,7 @@ export function TeamBlock({
   assignmentId,
   assignment,
   myUserId,
+  hasAttachedSubmission = false,
   onRefresh,
   onAssignmentUpdated,
   onProposeClick,
@@ -601,12 +604,20 @@ export function TeamBlock({
   const rule = assignment.team_submission_rule
   const distributionType = assignment.team_distribution_type
   const rosterLocked = !!assignment.roster_locked_at
+  const teamFormationDeadline = assignment.team_formation_deadline
+  const formationDeadlinePassed =
+    teamFormationDeadline != null &&
+    teamFormationDeadline !== '' &&
+    !isNaN(new Date(teamFormationDeadline).getTime()) &&
+    new Date(teamFormationDeadline) < new Date()
   const isVoteRule = rule === 'vote_equal' || rule === 'vote_weighted'
   const isPeerSplit = assignment.team_grading_mode === 'team_peer_split'
   const isTopStudent = rule === 'top_student_only'
   const showScore = isTopStudent || rule === 'vote_weighted'
   const isDeadlinePassed = assignment.deadline ? new Date(assignment.deadline) < new Date() : false
   const isAutoFinalized = !!assignment.deadline_auto_finalized_at
+  /** Приём финальных решений закрыт (дедлайн или автофиксация) — подсказки про сдачу не показываем */
+  const submissionAcceptanceClosed = isDeadlinePassed || isAutoFinalized
 
   const teamCountLimit =
     assignment.team_count != null && assignment.team_count > 0 ? assignment.team_count : null
@@ -643,7 +654,10 @@ export function TeamBlock({
 
   const isSingleMemberTeam = (myTeam?.members.length ?? 0) <= 1
   const showLastSubmissionHint =
-    rule === 'last_submission' && myTeam?.status !== 'forming' && myTeam?.status !== 'graded'
+    rule === 'last_submission' &&
+    myTeam?.status !== 'forming' &&
+    myTeam?.status !== 'graded' &&
+    !submissionAcceptanceClosed
   const canShowPeerSplitPanel =
     !isSingleMemberTeam && (myTeam?.status === 'submitted' || myTeam?.status === 'graded')
 
@@ -803,6 +817,30 @@ export function TeamBlock({
         </Typography>
       </Box>
 
+      {distributionType === 'free' && !rosterLocked && teamFormationDeadline != null && teamFormationDeadline !== '' && (
+        <Alert
+          severity={
+            assignment.allow_early_finalization === true && formationDeadlinePassed ? 'warning' : 'info'
+          }
+          sx={{ py: 0.5 }}
+        >
+          <Typography variant="body2" component="div">
+            Дедлайн формирования команд:{' '}
+            {new Date(teamFormationDeadline).toLocaleString('ru-RU', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            })}
+          </Typography>
+          {assignment.allow_early_finalization === true && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              {formationDeadlinePassed
+                ? 'Срок истёк — команды должны быть сформированы автоматически. Обновите страницу, если данные ещё не обновились.'
+                : 'По истечении срока команды формируются автоматически, затем начнётся выполнение задания.'}
+            </Typography>
+          )}
+        </Alert>
+      )}
+
       {error && <Alert severity="error">{error}</Alert>}
 
       {myTeam ? (
@@ -817,8 +855,8 @@ export function TeamBlock({
 
           <MembersList members={myTeam.members} myUserId={myUserId} showScore={showScore} />
 
-          {/* Auto-finalized banner */}
-          {isAutoFinalized && (
+          {/* Auto-finalized: не показываем, если студент не успел сдать финальное решение */}
+          {isAutoFinalized && hasAttachedSubmission && (
             <Alert severity="success" icon={<CheckCircleOutlineIcon />} sx={{ mt: 1 }}>
               Финальное решение определено автоматически по правилу команды.
             </Alert>
@@ -829,7 +867,14 @@ export function TeamBlock({
             <TopStudentHint members={myTeam.members} myUserId={myUserId} />
           )}
 
-          {isVoteRule && (
+          {isVoteRule && !rosterLocked && (
+            <Alert severity="info" sx={{ mt: 1 }} icon={<GroupsOutlinedIcon />}>
+              Этап формирования команд: дождитесь, пока преподаватель зафиксирует составы. После этого
+              вы сможете предложить варианты работ и проголосовать за финальное решение команды.
+            </Alert>
+          )}
+
+          {isVoteRule && rosterLocked && (
             <VotingPanel
               courseId={courseId}
               assignmentId={assignmentId}

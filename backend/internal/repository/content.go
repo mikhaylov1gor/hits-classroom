@@ -26,6 +26,7 @@ type AssignmentRepository interface {
 	ListByCourse(courseID string) ([]*domain.Assignment, error)
 	Update(a *domain.Assignment) error
 	ListDueForAutoFinalize(before time.Time) ([]*domain.Assignment, error)
+	ListDueForFormationAutoLock(before time.Time) ([]*domain.Assignment, error)
 	Delete(id string) error
 }
 

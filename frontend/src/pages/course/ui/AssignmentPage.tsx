@@ -52,6 +52,7 @@ import {
   submitAssignment,
   gradeSubmission,
   returnSubmission,
+  listTeams,
   listAssignmentComments,
   createAssignmentComment,
   listCourseMembers,
@@ -73,6 +74,7 @@ import {
   type Comment,
   type Member,
   type Submission,
+  type TeamWithMembers,
   buildCommentTree,
   getGeneralComments,
   getPersonalCommentsTreeForStudent,
@@ -415,6 +417,8 @@ export function AssignmentPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const submitSectionRef = useRef<HTMLDivElement>(null)
   const [canSubmit, setCanSubmit] = useState<boolean | null>(null)
+  const [groupTeams, setGroupTeams] = useState<TeamWithMembers[]>([])
+  const [groupTeamsLoading, setGroupTeamsLoading] = useState(false)
 
   useEffect(() => {
     if (!courseId || !assignmentId) {
@@ -533,6 +537,20 @@ export function AssignmentPage() {
     ? getSubmissionForStudent(selectedStudentId)
     : null
 
+  const selectedStudentTeam =
+    assignment?.assignment_kind === 'group' && selectedStudentId
+      ? groupTeams.find((t) => t.members.some((m) => m.user_id === selectedStudentId))
+      : undefined
+
+  const groupIndividualGradeBlocked =
+    isTeacher &&
+    assignment?.assignment_kind === 'group' &&
+    assignment.team_grading_mode === 'individual' &&
+    (groupTeamsLoading ||
+      !assignment.roster_locked_at ||
+      !selectedStudentTeam ||
+      selectedStudentTeam.status === 'forming')
+
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab')
     setActiveTab((prev) => {
@@ -550,6 +568,20 @@ export function AssignmentPage() {
       })
     }
   }, [activeTab, isTeacher, filteredStudents])
+
+  useEffect(() => {
+    if (!courseId || !assignmentId || !isTeacher || assignment?.assignment_kind !== 'group') {
+      setGroupTeams([])
+      setGroupTeamsLoading(false)
+      return
+    }
+    setGroupTeamsLoading(true)
+    listTeams(courseId, assignmentId)
+      .then(setGroupTeams)
+      .catch(() => setGroupTeams([]))
+      .finally(() => setGroupTeamsLoading(false))
+  }, [courseId, assignmentId, isTeacher, assignment?.assignment_kind])
+
   const assignmentFileIds = (assignment as { file_ids?: string[] })?.file_ids ?? []
   const displayAuthor =
     (assignment?.user_id
@@ -1354,6 +1386,9 @@ export function AssignmentPage() {
                 assignmentId={assignmentId}
                 assignment={assignment}
                 myUserId={authUser.id}
+                hasAttachedSubmission={submissions.some(
+                  (s) => s.user_id === authUser.id && s.is_attached === true,
+                )}
                 onRefresh={() => {
                   if (courseId && assignmentId) {
                     getMySubmission(courseId, assignmentId).then((s) => {
@@ -1999,6 +2034,16 @@ export function AssignmentPage() {
                       <Typography variant="body2" color="text.secondary">
                         Работа не сдана. Оценить можно только после сдачи.
                       </Typography>
+                    ) : groupIndividualGradeBlocked ? (
+                      <Alert severity="info" sx={{ mt: 0 }}>
+                        {groupTeamsLoading
+                          ? 'Загрузка данных о командах…'
+                          : !assignment?.roster_locked_at
+                            ? 'Закрепите составы команд, чтобы выставлять оценки.'
+                            : !selectedStudentTeam
+                              ? 'Студент не состоит в команде — оценка недоступна.'
+                              : 'Команда ещё формируется. Оценку можно выставить после завершения формирования.'}
+                      </Alert>
                     ) : assignment?.assignment_kind === 'group' && assignment?.team_grading_mode !== 'individual' ? (
                       <Typography variant="body2" color="text.secondary">
                         Оценивание выставляется на команду — используйте раздел «Команды» выше
