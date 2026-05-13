@@ -92,6 +92,12 @@ import { TeamBlock } from '../../../features/courses/ui/TeamBlock/TeamBlock'
 import { TeamsPanel } from '../../../features/courses/ui/TeamsPanel/TeamsPanel'
 import { TeamsBlock } from '../../../features/courses/ui/Teams/TeamsBlock'
 import { EditAssignmentDialog } from '../../../features/courses/ui/CoursePage/EditAssignmentDialog/EditAssignmentDialog'
+import { GradingTemplateWorkspace } from '../../../features/grading-template-form/ui/GradingTemplateWorkspace'
+import { RubricGradingPanel } from '../../../features/runtime-evaluation/ui/RubricGradingPanel'
+import {
+  getAssignmentGradingPreference,
+  isFlexibleGradingEnabledForAssignment,
+} from '../../../entities/grading/model/assignmentGradingPreferences'
 
 const DRAFT_STORAGE_KEY = 'assignment-draft'
 
@@ -402,7 +408,7 @@ export function AssignmentPage() {
   const [submittingComment, setSubmittingComment] = useState(false)
   const [dialogOpenUserId, setDialogOpenUserId] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
-  const [activeTab, setActiveTab] = useState<'instructions' | 'student-work'>('instructions')
+  const [activeTab, setActiveTab] = useState<'instructions' | 'student-work' | 'grading'>('instructions')
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
   const [studentWorkFilter, setStudentWorkFilter] = useState<'all' | 'submitted' | 'assigned' | 'graded'>('all')
   const [studentSortBy, setStudentSortBy] = useState<string>('name')
@@ -551,14 +557,30 @@ export function AssignmentPage() {
       !selectedStudentTeam ||
       selectedStudentTeam.status === 'forming')
 
+  const flexibleTabEnabled = assignment
+    ? isFlexibleGradingEnabledForAssignment(assignment.id)
+    : true
+
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab')
+    if (tabFromUrl === 'grading' && isTeacher && !flexibleTabEnabled) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.set('tab', 'instructions')
+          return next
+        },
+        { replace: true },
+      )
+    }
     setActiveTab((prev) => {
       if (tabFromUrl === 'student-work' && isTeacher) return 'student-work'
+      if (tabFromUrl === 'grading' && isTeacher && flexibleTabEnabled) return 'grading'
+      if (tabFromUrl === 'grading' && isTeacher && !flexibleTabEnabled) return 'instructions'
       if (tabFromUrl === 'instructions') return 'instructions'
       return prev
     })
-  }, [searchParams, isTeacher])
+  }, [searchParams, isTeacher, flexibleTabEnabled, setSearchParams])
 
   useEffect(() => {
     if (activeTab === 'student-work' && isTeacher && filteredStudents.length > 0) {
@@ -899,7 +921,19 @@ export function AssignmentPage() {
   }
 
   return (
-    <Container maxWidth="lg" disableGutters>
+    <Container
+      maxWidth={activeTab === 'grading' && isTeacher ? false : 'lg'}
+      disableGutters
+      sx={{
+        width: '100%',
+        ...(activeTab === 'grading' && isTeacher
+          ? {
+              maxWidth: 'min(1680px, 100%) !important',
+              px: { xs: 1, sm: 2, md: 2.5 },
+            }
+          : {}),
+      }}
+    >
     <Box className="flex flex-col min-w-0 py-4">
       <Box className="flex items-center gap-2 mb-4">
         <IconButton onClick={handleBack} aria-label="Назад к курсу" size="small">
@@ -914,7 +948,7 @@ export function AssignmentPage() {
         <Tabs
           value={activeTab}
           onChange={(_, v) => {
-            const tab = v as 'instructions' | 'student-work'
+            const tab = v as 'instructions' | 'student-work' | 'grading'
             setActiveTab(tab)
             setSearchParams((prev) => {
               const next = new URLSearchParams(prev)
@@ -926,6 +960,7 @@ export function AssignmentPage() {
         >
           <Tab label="Инструкции" value="instructions" />
           <Tab label="Работы учащихся" value="student-work" />
+          {flexibleTabEnabled && <Tab label="Гибкое оценивание" value="grading" />}
         </Tabs>
       )}
 
@@ -1780,6 +1815,33 @@ export function AssignmentPage() {
       </Box>
       )}
 
+      {activeTab === 'grading' && isTeacher && (
+        <Box sx={{ width: '100%', minWidth: 0, pb: 4 }}>
+          <GradingTemplateWorkspace
+            embedded
+            assignment={assignment}
+            preferredTemplateId={getAssignmentGradingPreference(assignment.id)?.templateId ?? undefined}
+            onApplyGrade={(grade) => {
+              if (!selectedSubmission) {
+                setActiveTab('student-work')
+                return
+              }
+              setGradeValues((prev) => ({
+                ...prev,
+                [selectedSubmission.id]: String(Math.round(grade)),
+              }))
+              setEditingGradeFor(selectedSubmission.id)
+              setActiveTab('student-work')
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev)
+                next.set('tab', 'student-work')
+                return next
+              })
+            }}
+          />
+        </Box>
+      )}
+
       {activeTab === 'student-work' && isTeacher && (
         <Box className="flex flex-col gap-4">
           {/* TeamsPanel: shown only for group assignments */}
@@ -2049,6 +2111,36 @@ export function AssignmentPage() {
                         Оценивание выставляется на команду — используйте раздел «Команды» выше
                       </Typography>
                     ) : (
+                    <>
+                    {flexibleTabEnabled && selectedSubmission.is_returned !== true && (
+                      <Box sx={{ mb: 2 }}>
+                        <RubricGradingPanel
+                          assignment={assignment}
+                          submission={selectedSubmission}
+                          assignmentPreferredTemplateId={
+                            getAssignmentGradingPreference(assignment.id)?.templateId ?? undefined
+                          }
+                          onApplyGrade={(grade, comment) => {
+                            setGradeValues((prev) => ({
+                              ...prev,
+                              [selectedSubmission.id]: String(Math.round(grade)),
+                            }))
+                            setGradeComments((prev) => ({
+                              ...prev,
+                              [selectedSubmission.id]:
+                                prev[selectedSubmission.id]?.trim()
+                                  ? `${prev[selectedSubmission.id]}\n\n${comment}`
+                                  : comment,
+                            }))
+                            setGradeStatuses((prev) => ({
+                              ...prev,
+                              [selectedSubmission.id]: null,
+                            }))
+                            setEditingGradeFor(selectedSubmission.id)
+                          }}
+                        />
+                      </Box>
+                    )}
                     <Box className="flex flex-wrap items-start gap-2">
                       {selectedSubmission.is_returned === true ? (
                         <Typography variant="body2" color="text.secondary">
@@ -2198,6 +2290,7 @@ export function AssignmentPage() {
                         </>
                       )}
                     </Box>
+                    </>
                     )}
                   </>
                 ) : (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -8,11 +8,14 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
   Select,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material'
@@ -28,6 +31,14 @@ import {
   buildGroupFields,
 } from '../GroupSettingsFields/GroupSettingsFields'
 import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
+import {
+  getAssignmentGradingPreference,
+  setAssignmentGradingPreference,
+} from '../../../../../entities/grading/model/assignmentGradingPreferences'
+import {
+  GradingTemplateWorkspace,
+  type GradingTemplateWorkspaceActiveSync,
+} from '../../../../../features/grading-template-form/ui/GradingTemplateWorkspace'
 
 type EditAssignmentDialogProps = {
   open: boolean
@@ -94,7 +105,16 @@ export function EditAssignmentDialog({
 
   const [confirmOpen, setConfirmOpen] = useState(false)
 
+  const [flexibleGradingEnabled, setFlexibleGradingEnabled] = useState(true)
+  const [gradingTemplateId, setGradingTemplateId] = useState('')
+  /** Только из localStorage при открытии — не обновлять при onActiveTemplateChange, иначе сбросит черновик в редакторе. */
+  const [workspacePreferredTemplateId, setWorkspacePreferredTemplateId] = useState<string | undefined>()
+
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleGradingWorkspaceSync = useCallback((state: GradingTemplateWorkspaceActiveSync) => {
+    setGradingTemplateId(state.selectedTemplateId)
+  }, [])
 
   // Загружаем полные данные задания при каждом открытии
   useEffect(() => {
@@ -123,6 +143,11 @@ export function EditAssignmentDialog({
             : 'individual'
         setAssignmentKind(inferredKind)
         setGroupSettings(groupSettingsFromAssignment(a))
+        const pref = getAssignmentGradingPreference(assignmentId)
+        setFlexibleGradingEnabled(pref == null ? true : pref.enabled)
+        const tid = pref?.templateId ?? ''
+        setGradingTemplateId(tid)
+        setWorkspacePreferredTemplateId(tid || undefined)
       })
       .catch(() => setLoadError('Не удалось загрузить задание'))
       .finally(() => setLoadingData(false))
@@ -161,6 +186,11 @@ export function EditAssignmentDialog({
         file_ids: fileIds,
         assignment_kind: assignmentKind,
         ...(assignmentKind === 'group' ? buildGroupFields(groupSettings) : {}),
+      })
+      setAssignmentGradingPreference(assignmentId, {
+        enabled: flexibleGradingEnabled,
+        templateId:
+          flexibleGradingEnabled && gradingTemplateId ? gradingTemplateId : null,
       })
       onClose()
       onSaved()
@@ -262,13 +292,16 @@ export function EditAssignmentDialog({
       <Dialog
         open={open}
         onClose={handleClose}
-        maxWidth="sm"
+        maxWidth={flexibleGradingEnabled ? 'xl' : 'sm'}
         fullWidth
         aria-labelledby="edit-assignment-dialog-title"
       >
         <DialogTitle id="edit-assignment-dialog-title">Редактировать задание</DialogTitle>
         <Box component="form" onSubmit={handleSubmit} noValidate>
-          <DialogContent className="flex flex-col gap-4">
+          <DialogContent
+            className="flex flex-col gap-4"
+            sx={flexibleGradingEnabled ? { maxHeight: 'calc(100dvh - 100px)', overflowY: 'auto' } : undefined}
+          >
             {loadingData ? (
               <Box className="flex justify-center py-8">
                 <CircularProgress size={32} />
@@ -354,6 +387,49 @@ export function EditAssignmentDialog({
                     assignmentDeadline={deadline}
                   />
                 )}
+
+                <Divider />
+                <Box>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={flexibleGradingEnabled}
+                        onChange={(_, checked) => {
+                          setFlexibleGradingEnabled(checked)
+                          if (!checked) setGradingTemplateId('')
+                        }}
+                        disabled={loading}
+                        inputProps={{ 'aria-label': 'Гибкое оценивание' }}
+                      />
+                    }
+                    label="Гибкое оценивание"
+                  />
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: -0.5, mb: 1 }}>
+                    Локально в браузере. Ниже — редактор шаблона; выбранный шаблон подставится в задание при сохранении.
+                  </Typography>
+                  {flexibleGradingEnabled && original && (
+                    <Box
+                      sx={{
+                        minHeight: 260,
+                        maxHeight: { xs: '52vh', sm: '58vh' },
+                        overflow: 'auto',
+                        border: 1,
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        bgcolor: 'background.paper',
+                        p: { xs: 0.5, sm: 1 },
+                      }}
+                    >
+                      <GradingTemplateWorkspace
+                        assignment={original}
+                        embedded
+                        inModal
+                        preferredTemplateId={workspacePreferredTemplateId}
+                        onActiveTemplateChange={handleGradingWorkspaceSync}
+                      />
+                    </Box>
+                  )}
+                </Box>
 
                 <Box>
                   <input

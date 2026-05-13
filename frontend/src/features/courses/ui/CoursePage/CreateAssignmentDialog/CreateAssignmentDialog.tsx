@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -9,10 +9,12 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
   Select,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material'
@@ -29,7 +31,7 @@ import {
 } from '../../../api/coursesApi'
 import { isValidUrl } from '../../../utils/urlValidation'
 import { getLinkHref } from '../../../utils/urlValidation'
-import type { AssignmentKind, Member } from '../../../model/types'
+import type { Assignment, AssignmentKind, Member } from '../../../model/types'
 import {
   GroupSettingsFields,
   DEFAULT_GROUP_SETTINGS,
@@ -39,6 +41,11 @@ import {
 import type { GroupSettingsValue } from '../GroupSettingsFields/GroupSettingsFields'
 import { ManualTeamsSetup } from '../../Teams/ManualTeamsSetup'
 import type { ManualTeamDraft } from '../../Teams/ManualTeamsSetup'
+import { setAssignmentGradingPreference } from '../../../../../entities/grading/model/assignmentGradingPreferences'
+import {
+  GradingTemplateWorkspace,
+  type GradingTemplateWorkspaceActiveSync,
+} from '../../../../../features/grading-template-form/ui/GradingTemplateWorkspace'
 
 type CreateAssignmentDialogProps = {
   open: boolean
@@ -71,6 +78,9 @@ export function CreateAssignmentDialog({
   const [groupSettings, setGroupSettings] = useState<GroupSettingsValue>(DEFAULT_GROUP_SETTINGS)
   const [manualTeams, setManualTeams] = useState<ManualTeamDraft[]>([])
 
+  const [flexibleGradingEnabled, setFlexibleGradingEnabled] = useState(false)
+  const [gradingTemplateId, setGradingTemplateId] = useState<string>('')
+
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isManual = assignmentKind === 'group' && groupSettings.teamDistributionType === 'manual'
@@ -86,6 +96,32 @@ export function CreateAssignmentDialog({
   const manualTeamsExceedExpected =
     isManual && hasValidExpectedTeamCount && manualTeams.length > parsedExpectedTeams
 
+  const gradingPreviewAssignment = useMemo((): Assignment => {
+    const mg = parseInt(maxGrade, 10)
+    let deadlineIso: string | null = null
+    if (deadline.trim()) {
+      const d = new Date(deadline)
+      if (!isNaN(d.getTime())) deadlineIso = d.toISOString()
+    }
+    const base: Assignment = {
+      id: 'create-assignment-draft',
+      course_id: courseId,
+      title: title.trim() || 'Черновик задания',
+      body: content.trim() || undefined,
+      max_grade: !isNaN(mg) && mg >= 1 ? mg : 100,
+      deadline: deadlineIso,
+      assignment_kind: assignmentKind,
+    }
+    if (assignmentKind === 'group') {
+      return { ...base, ...buildGroupFields(groupSettings) } as Assignment
+    }
+    return base
+  }, [courseId, title, content, maxGrade, deadline, assignmentKind, groupSettings])
+
+  const handleGradingWorkspaceSync = useCallback((state: GradingTemplateWorkspaceActiveSync) => {
+    setGradingTemplateId(state.selectedTemplateId)
+  }, [])
+
   const resetForm = () => {
     setTitle('')
     setContent('')
@@ -100,6 +136,8 @@ export function CreateAssignmentDialog({
     setAssignmentKind('individual')
     setGroupSettings(DEFAULT_GROUP_SETTINGS)
     setManualTeams([])
+    setFlexibleGradingEnabled(false)
+    setGradingTemplateId('')
   }
 
   const handleClose = () => {
@@ -239,6 +277,14 @@ export function CreateAssignmentDialog({
         }
       }
 
+      setAssignmentGradingPreference(created.id, {
+        enabled: flexibleGradingEnabled,
+        templateId:
+          flexibleGradingEnabled && gradingTemplateId
+            ? gradingTemplateId
+            : null,
+      })
+
       resetForm()
       onClose()
       onCreated()
@@ -276,13 +322,22 @@ export function CreateAssignmentDialog({
     <Dialog
       open={open}
       onClose={handleClose}
-      maxWidth={isManual && students.length > 0 ? 'md' : 'sm'}
+      maxWidth={
+        flexibleGradingEnabled
+          ? 'xl'
+          : isManual && students.length > 0
+            ? 'md'
+            : 'sm'
+      }
       fullWidth
       aria-labelledby="create-assignment-dialog-title"
     >
       <DialogTitle id="create-assignment-dialog-title">Новое задание</DialogTitle>
       <Box component="form" onSubmit={handleSubmit} noValidate>
-        <DialogContent className="flex flex-col gap-4">
+        <DialogContent
+          className="flex flex-col gap-4"
+          sx={flexibleGradingEnabled ? { maxHeight: 'calc(100dvh - 100px)', overflowY: 'auto' } : undefined}
+        >
           <TextField
             label="Название"
             required
@@ -356,6 +411,48 @@ export function CreateAssignmentDialog({
               assignmentDeadline={deadline}
             />
           )}
+
+          <Divider />
+          <Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={flexibleGradingEnabled}
+                  onChange={(_, checked) => {
+                    setFlexibleGradingEnabled(checked)
+                    if (!checked) setGradingTemplateId('')
+                  }}
+                  disabled={loading}
+                  inputProps={{ 'aria-label': 'Гибкое оценивание' }}
+                />
+              }
+              label="Гибкое оценивание (шаблоны в браузере)"
+            />
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: -0.5, mb: 1 }}>
+              Вкладка на странице задания и рубрика при проверке. Ниже — полный редактор шаблонов (localStorage).
+            </Typography>
+            {flexibleGradingEnabled && (
+              <Box
+                sx={{
+                  minHeight: 260,
+                  maxHeight: { xs: '52vh', sm: '58vh' },
+                  overflow: 'auto',
+                  border: 1,
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  bgcolor: 'background.paper',
+                  p: { xs: 0.5, sm: 1 },
+                }}
+              >
+                <GradingTemplateWorkspace
+                  assignment={gradingPreviewAssignment}
+                  embedded
+                  inModal
+                  onActiveTemplateChange={handleGradingWorkspaceSync}
+                />
+              </Box>
+            )}
+          </Box>
 
           {isManual && students.length > 0 && (
             <>
